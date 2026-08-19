@@ -1,0 +1,21 @@
+{
+  "title": "Platform",
+  "pages": [
+    "index",
+    "02-01-identity-and-access",
+    "02-02-audit-trail",
+    "02-03-settings-and-lists",
+    "02-04-file-storage",
+    "02-05-design-system",
+    "02-06-list-engine",
+    "02-07-outbound-messaging",
+    "02-08-inbound-pipeline",
+    "02-09-event-store-and-projections",
+    "02-10-client-link-tokens",
+    "02-11-approval-engine",
+    "02-12-adapter-framework",
+    "02-13-job-runtime"
+  ],
+  "icon": "Layers",
+  "description": "Shared components. Built once, depended on by two or more modules."
+}

@@ -1,0 +1,298 @@
+---
+title: "B17 · Associate Onboarding"
+description: "The extra employment details needed once a shift worker actually starts, beyond their candidate record: associate profile, statutory forms including PF/UAN transfer and gratuity…"
+---
+
+**Package** `@apollo/onboarding` · **Schema** `place` · **Plan** D21 / M11 (Release 2)
+**Effort** ~26.5pd · **Risk** Medium (COMP) · **Build in** Phase 7
+
+> **No client module specification.** D21 is named in Part A with its contents listed. Everything
+> below is Hiresense analysis; **every item carries Low confidence.**
+
+---
+
+## 1. Purpose
+
+The extra employment details needed once a shift worker actually starts, beyond their candidate
+record: associate profile, statutory forms including **PF/UAN transfer and gratuity nomination**,
+document checklist, and an app-guided flow so the associate completes it themselves.
+
+**This blocks payroll.** `03-19` cannot run a pay cycle for anyone with incomplete onboarding, and
+that gate is built here.
+
+---
+
+## 2. Scope
+
+**In** — associate profile (employment details, bank, statutory identifiers) · statutory forms with
+per-form completion state · document checklist varying by role and state · app-guided onboarding flow ·
+**the onboarding gate that blocks payroll**
+
+**Out** — filing statutory returns — *"filing is outside this contract entirely"* · onboarding for
+permanent placements — *"those join the client directly, not Apollo"* · the candidate record →
+`03-05` · payroll → `03-19` · salary changes → `03-18`
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M11-I1` Associate details (D21, L, 6pd) | §5.1, §9.1 |
+| `M11-I2` Statutory forms (D21, L, 6.5pd) | §5.2, §9.2 |
+| `M11-I3` Document checklist (D21, M, 4pd) | §5.3, §9.3 |
+| `M11-I4` App: onboarding (D21, L, 7pd) | §9.4 |
+| `M11-I5` Onboarding gate (D21, Service, M, 3pd) | §7.2 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `03-05` candidates, `03-11` placements (**the placement triggers onboarding**),
+`02-04` files, `02-07` messaging (chasing), `03-07` app
+**Consumed by:** `03-19` payroll — *"M13 payroll needs a complete associate profile and statutory
+forms before anyone can be paid."*
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE place.associate_profile (
+  id                uuid PRIMARY KEY,
+  candidate_id      uuid NOT NULL UNIQUE,
+  placement_id      uuid,
+  employee_code     text UNIQUE,                     -- Apollo's own payroll identifier
+  status            associate_profile_status_enum NOT NULL,
+  date_of_joining   date NOT NULL,
+  -- statutory identifiers — ALL C3, column-encrypted (01-10 §5)
+  pan_number        text,
+  aadhaar_number    text,
+  uan_number        text,
+  esic_number       text,
+  pf_number         text,
+  -- banking — C3
+  bank_account_number text,
+  bank_ifsc         text,
+  bank_name         text,
+  bank_account_name text,
+  -- employment
+  designation       text,
+  department        text,
+  work_location_id  uuid,
+  emergency_contact jsonb,
+  completed_at      timestamptz,
+  verified_at       timestamptz, verified_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE place.statutory_form (
+  id             uuid PRIMARY KEY,
+  associate_id   uuid NOT NULL REFERENCES place.associate_profile(id),
+  form_key       text NOT NULL,                      -- 'pf_form_11'|'uan_transfer'|'gratuity_nomination'|
+                                                     -- 'esic_declaration'|'form_16_declaration'
+  form_version   text NOT NULL,
+  status         statutory_form_status_enum NOT NULL,
+  data           jsonb NOT NULL DEFAULT '{}',
+  document_id    uuid,                               -- the completed, signed form
+  submitted_at   timestamptz,
+  verified_at    timestamptz, verified_by uuid,
+  returned_at    timestamptz, return_reason text,    -- 'tells the candidate exactly what to fix'
+  UNIQUE (associate_id, form_key)
+);
+
+CREATE TABLE place.onboarding_checklist_item (
+  id             uuid PRIMARY KEY,
+  associate_id   uuid NOT NULL REFERENCES place.associate_profile(id),
+  item_key       text NOT NULL,
+  label          text NOT NULL,
+  is_mandatory   boolean NOT NULL,
+  blocks_payroll boolean NOT NULL DEFAULT false,
+  status         checklist_item_status_enum NOT NULL,  -- 'pending'|'received'|'verified'|'rejected'
+  document_id    uuid,
+  chased_count   integer NOT NULL DEFAULT 0,
+  last_chased_at timestamptz,
+  UNIQUE (associate_id, item_key)
+);
+```
+
+Checklist templates are configured in P03 (`place.onboarding_checklist.<role>.<state>`) —
+*"the checklist differs by role and by state where statutory requirements differ"* (`M11-I3`).
+
+---
+
+## 6. State machines
+
+**AssociateProfile:** `not_started → in_progress → complete → verified`
+
+`complete` requires every mandatory statutory field. `verified` requires Ops confirmation.
+
+**StatutoryForm:** `pending → submitted → verified` \| `returned(reason)`
+
+*"Each form has its own completion state, not one overall flag"* (`M11-I2`) — a returned PF form must
+not reset gratuity nomination.
+
+**ChecklistItem:** `pending → received → verified` \| `rejected`
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const OnboardingService = {
+  startOnboarding(placementId, actor): Promise<AssociateProfile>
+  getProfile(candidateId): Promise<AssociateProfile | null>
+  updateProfile(id, patch, actor): Promise<AssociateProfile>
+  submitForm(associateId, formKey, data, actor): Promise<StatutoryForm>
+  verifyForm(formId, actor): Promise<StatutoryForm>
+  returnForm(formId, reason, actor): Promise<StatutoryForm>       // reason MANDATORY
+  getChecklist(associateId): Promise<ChecklistItem[]>
+  chaseItem(itemId, actor): Promise<void>                          // via 02-07
+  /** M11-I5 — called by 03-19 before locking a pay cycle. */
+  isPayrollBlocked(candidateId): Promise<{ blocked: boolean; reasons: string[] }>
+  listBlockedForPayroll(cycleId): Promise<BlockedAssociate[]>
+}
+```
+
+### 7.2 The onboarding gate (`M11-I5`)
+
+*"Stops payroll running for someone whose paperwork is not finished."*
+
+```
+blocked if:
+  no associate profile
+  profile status ≠ 'complete' or 'verified'
+  any mandatory statutory form not 'verified'
+  any checklist item with blocks_payroll = true not 'verified'
+```
+
+Three rules from `M11-I5`:
+
+1. **Payroll cannot run for an associate whose mandatory forms are incomplete.**
+2. **An override requires approval and is audited** — through `02-11` (P11), which exists by this
+   phase.
+3. **Blocked associates are visible before the pay run, not during it** — `listBlockedForPayroll` is
+   what `03-19`'s pay run screen shows *before* locking, so finance resolves them rather than
+   discovering them mid-run.
+
+### 7.3 HTTP
+
+| Method | Path | Permission |
+|---|---|---|
+| GET/POST | `/api/v1/associates` · GET/PATCH `/:id` | `place.associate.write` |
+| GET/POST | `/:id/forms` · POST `/forms/:id/verify` · `/return` | `place.associate.verify` |
+| GET | `/:id/checklist` · POST `/checklist/:id/chase` | `place.associate.write` |
+| GET | `/api/v1/associates/payroll-blocked?cycleId=` | `bill.payroll.read` |
+| GET/PATCH | `/api/v1/app/onboarding` (candidate-auth) | — |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `place.associate.onboarding_started` · `.profile_completed` · `.verified` ·
+`place.statutory_form.submitted` / `.verified` / `.returned` · `place.onboarding.blocked_payroll`
+
+**Subscribes:** **`place.placement.created`** (contractual only) → start onboarding ·
+`platform.document.available` → attach to the checklist item
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `onboarding.chase` | Daily 10:00 IST | Chases missing documents and forms through `02-07` |
+| `onboarding.blocked-report` | Weekly + before each pay cycle | Who would be blocked, to finance |
+
+---
+
+## 9. Frontend — `/associates`
+
+### 9.1 Associate details (`M11-I1`)
+
+Employment details, bank details, statutory identifiers. **Bank details are stored encrypted and
+access is restricted** (`M11-I1` → `03-06`/`01-10 §5`) — the screen masks them by default and reveals
+on an audited action.
+
+Shows **what is still missing** as a persistent panel, because that is the question the person filling
+it in actually has.
+
+### 9.2 Statutory forms (`M11-I2`)
+
+Per form: state, submitted, verified or returned. Returning requires a reason and *"tells the
+candidate exactly what to fix"*. Completed forms are stored as documents and retained (`02-04`).
+
+A visible note that **filing is not in scope** — we collect and store; someone else files.
+
+### 9.3 Document checklist (`M11-I3`)
+
+What this associate must provide and what has arrived, varying by role and state. Chase action per
+item. **A missing document blocks payroll but not the placement itself** — the screen distinguishes
+the two clearly.
+
+### 9.4 App: onboarding (`M11-I4`) — `apps/mobile`
+
+*"Walks the associate through onboarding one task at a time. Takes photos of documents and fills in
+the forms. Saves progress so it can be finished later."*
+
+| Requirement | |
+|---|---|
+| Completable **entirely in the app**, without an Ops user | `M11-I4` |
+| Progress saved across sessions | A nurse fills this in over several evenings |
+| **Guided flows live in the app, not WhatsApp** | Part A convention |
+| A rejected item reappears in the flow **with the reason shown** | `M11-I4` |
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | An associate profile **builds on the candidate record rather than duplicating it** | `M11-I1` |
+| 2 | Bank details and statutory identifiers are encrypted with restricted access | `M11-I1`, `01-10 §5` |
+| 3 | A profile cannot be marked complete with mandatory statutory fields missing | `M11-I1` |
+| 4 | Each statutory form has **its own completion state**, not one overall flag | `M11-I2` |
+| 5 | A returned form tells the candidate exactly what to fix | `M11-I2` |
+| 6 | Completed forms are stored as documents and retained | `M11-I2`, `M0-I6` |
+| 7 | Filing forms with the authorities is **explicitly not in scope** | `M11-I2` |
+| 8 | The checklist differs by role and by state | `M11-I3` |
+| 9 | **A missing document blocks payroll but not the placement itself** | `M11-I3` |
+| 10 | An associate can complete onboarding entirely in the app | `M11-I4` |
+| 11 | Progress saves across sessions | `M11-I4` |
+| 12 | **Payroll cannot run for an associate whose mandatory forms are incomplete** | `M11-I5` |
+| 13 | An override requires approval and is audited | `M11-I5`, `02-11` |
+| 14 | **Blocked associates are visible before the pay run, not during it** | `M11-I5` |
+
+---
+
+## 11. Open questions
+
+All Low confidence — no client module specification exists.
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| **Which statutory forms exactly, and their current versions?** | Form content and validation | **`AS-49`** — PF Form 11, UAN transfer, gratuity nomination, ESIC declaration, Form 16 declaration. Forms are configuration with versioned templates, so adding or updating one is not a release. **Apollo HR must confirm the set before build.** |
+| **Does onboarding start at offer acceptance or at joining?** | Timing, and whether it can be pre-completed | **`AS-50`** — at **placement creation** (joining confirmed). Starting earlier collects bank details from people who may not join. If Apollo wants a head start, it becomes an offer-acceptance trigger — a one-line change. |
+| **Permanent placements** | Do they need any onboarding? | **Out of scope** — *"those join the client directly, not Apollo"* (plan). Only contractual placements trigger this. |
+| **Digital signature on statutory forms** | Some forms may require a wet signature or an e-sign | **`AS-51`** — captured as an uploaded signed document via `02-04`. If e-sign is required, reuse `03-10`'s port. Confirm with Apollo HR. |
+| **Re-onboarding a returning associate** | A nurse who left and came back | **`AS-52`** — the profile persists; a returning associate's forms are re-verified rather than re-collected, unless statutory rules require otherwise. |
+| `OI-HS-02` | DPDP erasure vs statutory retention of bank and PF data | Statutory records must survive erasure requests | **`AS-08`** — statutory and payroll records retained 8 years; erasure anonymises the candidate record but not the statutory obligation |
+
+---
+
+## 12. Notes for the implementer
+
+**The gate is the deliverable.** Four screens collect data; `M11-I5` is what makes it matter. Build
+`isPayrollBlocked` and `listBlockedForPayroll` early and wire them into `03-19`'s pay run screen —
+because the failure mode this prevents (discovering forty incomplete profiles halfway through a pay
+run) is exactly what happens without it.
+
+**Per-form state, not one flag.** It is tempting to store `onboarding_complete boolean`. The plan
+explicitly forbids it, and the reason is practical: returning one form must not invalidate five
+others the associate already completed.
+
+**Bank details deserve real care.** Column encryption, masked display, audited reveal, never logged,
+never exported. It is the highest-sensitivity data in the platform and it is collected through a
+mobile app over consumer networks.
+

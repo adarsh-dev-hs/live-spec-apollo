@@ -1,0 +1,39 @@
+---
+title: "Standards"
+description: "House rules. Every component spec assumes these."
+---
+
+This section contains 10 documents.
+
+<Cards>
+  <Card title="01-01 · Repository Layout" href="/docs/01-standards/01-01-repository-layout">
+  One repository. Backend, frontends and infrastructure together, because the API contract is shared and a split would mean versioning it across repos for no benefit at this team…
+  </Card>
+  <Card title="01-02 · Backend Conventions" href="/docs/01-standards/01-02-backend-conventions">
+  Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino
+  </Card>
+  <Card title="01-03 · Frontend Conventions" href="/docs/01-standards/01-03-frontend-conventions">
+  React 19 · Vite · TypeScript · TanStack Query · React Router · React Hook Form + Zod · Tailwind
+  </Card>
+  <Card title="01-04 · API Contract" href="/docs/01-standards/01-04-api-contract">
+  Every endpoint in the platform follows this. No module invents its own shape.
+  </Card>
+  <Card title="01-05 · Database Conventions" href="/docs/01-standards/01-05-database-conventions">
+  PostgreSQL 16 · Drizzle ORM · SQL migrations
+  </Card>
+  <Card title="01-06 · Events and Background Jobs" href="/docs/01-standards/01-06-events-and-jobs">
+  Transactional outbox · BullMQ on Redis · append-only event store
+  </Card>
+  <Card title="01-07 · Authentication, Authorisation and Data Scope" href="/docs/01-standards/01-07-auth-and-rbac">
+  The plan is explicit that these must not be conflated: "Candidate logins are completely separate from this — they use phone and code in M4" (M0-I1).
+  </Card>
+  <Card title="01-08 · Testing and Quality" href="/docs/01-standards/01-08-testing-and-quality">
+  353 person-days of QA sit against this build, back-loaded into months 4–6. The point of this document is to make sure that effort finds real defects rather than re-testing the…
+  </Card>
+  <Card title="01-09 · Infrastructure and Deployment" href="/docs/01-standards/01-09-infrastructure-and-deployment">
+  Covers plan items M1-I5 (deploy to Apollo's AWS account, 10pd) and M1-I16 (environments and monitoring, 10pd). Build this in month one, not when M1 is scheduled — everything is…
+  </Card>
+  <Card title="01-10 · Security and Data Protection" href="/docs/01-standards/01-10-security-and-data-protection">
+  Covers plan item M4-I26 / F13 — data protection: consent, residency, retention (XL, 5pd build, High risk, COMP). This is a platform concern, not a module feature, which is why it…
+  </Card>
+</Cards>

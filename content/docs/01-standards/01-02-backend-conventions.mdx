@@ -1,0 +1,352 @@
+---
+title: "01-02 · Backend Conventions"
+description: "Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino"
+---
+
+Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino
+
+---
+
+## 1. The four layers
+
+| Layer | Job | May import | Must never |
+|---|---|---|---|
+| **Route** | Path → middleware → controller | controllers, middleware, contracts | contain logic |
+| **Controller** | HTTP in, HTTP out | own service, own contracts | touch a repository, call another module's service |
+| **Service** | Business logic, transaction boundary, events | own repos, own services, other modules' **exported** services, platform packages | see `req`/`res`, touch another module's repository |
+| **Repository** | SQL. The only layer that touches the database. | db client, own schema | contain business rules, call a service |
+
+**The single most important rule:** a service never receives `req` or `res`. That is what makes the
+same service callable from HTTP, from a queue consumer, and from a test without adaptation.
+
+---
+
+## 2. Route
+
+```ts
+// src/routes.ts
+import { Router } from 'express'
+import { requirePermission, requireAuth } from '@apollo/iam'
+import { validate } from '@apollo/shared-http'
+import * as c from './controllers/requisition.controller'
+import * as s from './contracts/requisition.contract'
+
+export const router = Router()
+
+router.use(requireAuth())
+
+router.get('/',
+  requirePermission('demand.requisition.read'),
+  validate({ query: s.listRequisitionsQuery }),
+  c.list)
+
+router.post('/:id/hold',
+  requirePermission('demand.requisition.hold'),
+  validate({ params: s.idParam, body: s.holdRequisitionBody }),
+  c.hold)
+```
+
+Paths and middleware. Nothing else. If a route file has an `if`, it is wrong.
+
+---
+
+## 3. Controller
+
+```ts
+// src/controllers/requisition.controller.ts
+import type { RequestHandler } from 'express'
+import { RequisitionService } from '../services/requisition.service'
+import { ok, created } from '@apollo/shared-http'
+
+export const hold: RequestHandler = async (req, res) => {
+  const result = await RequisitionService.hold({
+    requisitionId: req.params.id,
+    reasonCode:    req.body.reasonCode,
+    note:          req.body.note,
+    actor:         req.actor,          // { userId, roles, siteIds, clientId? }
+  })
+  ok(res, result)
+}
+```
+
+Controllers do exactly four things: read validated input, build an actor, call one service method,
+shape the response. No `try/catch` — errors propagate to the central mapper (§8).
+
+---
+
+## 4. Service
+
+```ts
+// src/services/requisition.service.ts
+export const RequisitionService = {
+  async hold(input: HoldInput): Promise<Requisition> {
+    return withTransaction(async (tx) => {
+      const req = await requisitionRepo.findByIdForUpdate(tx, input.requisitionId)
+      if (!req) throw new NotFoundError('requisition', input.requisitionId)
+
+      assertTransition(req.status, 'on_hold')                    // state machine, not an if-chain
+
+      const reason = await config.assertListEntry('demand.hold_reason', input.reasonCode)
+
+      const updated = await requisitionRepo.update(tx, req.id, {
+        status: 'on_hold',
+        ageClockPausedAt: now(),                                  // hold stops the age clock
+      })
+
+      await statusTransitionRepo.append(tx, {
+        requisitionId: req.id, from: req.status, to: 'on_hold',
+        reasonCode: reason.code, actorId: input.actor.userId,
+      })
+
+      await audit.record(tx, {
+        entity: 'requisition', entityId: req.id, action: 'hold',
+        actor: input.actor, before: { status: req.status }, after: { status: 'on_hold' },
+      })
+
+      await events.emit(tx, 'demand.requisition.held', {
+        requisitionId: req.id, reasonCode: reason.code, at: now(),
+      })
+
+      return updated
+    })
+  },
+}
+```
+
+Note the shape — it is the same in every service:
+
+1. Open a transaction
+2. Load with `FOR UPDATE` if you are about to change state
+3. Assert the transition against the state machine
+4. Validate against configuration (never a hardcoded list)
+5. Mutate
+6. Append to the immutable trail
+7. Audit
+8. Emit the event **inside the transaction** (outbox)
+9. Return
+
+**Steps 6–8 are not optional.** A state change without a transition row is unreportable, without an
+audit row is indefensible, and without an event is invisible to M9.
+
+---
+
+## 5. Repository
+
+```ts
+// src/repositories/requisition.repository.ts
+export const requisitionRepo = {
+  findByIdForUpdate: (tx: Tx, id: string) =>
+    tx.select().from(requisition).where(eq(requisition.id, id)).for('update').then(one),
+
+  list: (tx: Tx, filter: ListFilter, scope: Scope) =>
+    applyScope(                                    // row-level scoping — see 01-07
+      tx.select().from(requisition).where(buildWhere(filter)),
+      scope,
+    ),
+}
+```
+
+Repositories return plain rows. **No business rules and no mapping to other modules' shapes.**
+If a repository has a `switch`, the logic belongs in the service.
+
+Every list repository takes a `Scope` and applies it. Scoping is not the controller's job, because a
+new caller must not be able to forget it.
+
+---
+
+## 6. Transactions
+
+```ts
+await withTransaction(async (tx) => { ... })
+```
+
+| Rule | |
+|---|---|
+| One service method = one transaction | Nested calls join the parent, never open a second |
+| The transaction is opened in the service, never in a controller or repository | |
+| Events go to the outbox **inside** the transaction | An event for a rolled-back change is a lie |
+| No external HTTP call inside a transaction | Enqueue a job instead — an adapter timeout must not hold a row lock |
+| No `await` on something slow inside a transaction | Same reason |
+
+Cross-module writes in one transaction are **not allowed**. If placing a candidate must also close a
+requisition, `placements` commits the placement and emits `place.placement.created`; `requisitions`
+subscribes and closes in its own transaction. Eventually consistent, and the seam is visible.
+
+---
+
+## 7. Validation
+
+Zod at every boundary. One schema per shape, in `contracts/`, and the type is inferred from it —
+never hand-written alongside it.
+
+```ts
+export const holdRequisitionBody = z.object({
+  reasonCode: z.string().min(1),
+  note:       z.string().max(2000).optional(),
+})
+export type HoldRequisitionBody = z.infer<typeof holdRequisitionBody>
+```
+
+Validate: HTTP request (params, query, body), job payloads, webhook payloads, external adapter
+responses, and environment variables at boot.
+
+**Adapter responses especially.** An external supplier changing a field silently is one of the more
+likely failure modes on this project, and a zod parse turns it into a clear error at the boundary
+instead of `undefined` three layers in.
+
+---
+
+## 8. Errors
+
+One error hierarchy, one mapper, no `try/catch` in controllers.
+
+```ts
+export class AppError extends Error {
+  constructor(
+    readonly code: string,        // machine-readable: 'requisition.invalid_transition'
+    readonly status: number,
+    message: string,
+    readonly details?: unknown,
+  ) { super(message) }
+}
+
+export class NotFoundError      extends AppError {}  // 404
+export class ValidationError    extends AppError {}  // 422
+export class ConflictError      extends AppError {}  // 409
+export class ForbiddenError     extends AppError {}  // 403
+export class ExternalError      extends AppError {}  // 502 — always includes adapterCallId
+export class InvalidTransition  extends ConflictError {}
+```
+
+The mapper is the last middleware. It logs with the request id, maps to the wire format in `01-04`,
+and **never leaks a stack trace or a SQL string** to a client.
+
+Rules:
+- Throw domain errors from services. Do not return `null` to mean "forbidden".
+- Never catch an error only to re-throw a vaguer one.
+- Catch only where you can genuinely handle it — an adapter fallback, a retry decision.
+
+---
+
+## 9. State machines
+
+Declared as data, never as scattered `if`s.
+
+```ts
+// src/internal/requisition.states.ts
+export const requisitionTransitions = {
+  incomplete:      ['awaiting_client', 'complete', 'closed'],
+  awaiting_client: ['complete', 'incomplete', 'closed'],
+  complete:        ['open', 'closed'],
+  open:            ['in_fulfilment', 'on_hold', 'closed'],
+  in_fulfilment:   ['partially_filled', 'filled', 'on_hold', 'closed'],
+  on_hold:         ['in_fulfilment', 'closed'],
+  partially_filled:['filled', 'in_fulfilment', 'on_hold', 'closed'],
+  filled:          ['closed'],
+  closed:          [],
+} as const satisfies TransitionMap<RequisitionStatus>
+```
+
+`assertTransition(from, to)` throws `InvalidTransition`. The table is exported so tests can assert
+every path in the spec's state table exists, and that nothing else does.
+
+**Only the owning module transitions its own entities.** No module writes another's status column.
+
+---
+
+## 10. Configuration over constants
+
+Anything a business user might ever want to change is a setting, not a constant:
+
+```ts
+const days = await config.get('demand.follow_up_window_days', { clientId: req.clientId })
+```
+
+`config.get` resolves per-client override → platform default → throws if neither exists. Nine known
+settings are listed in `02-03`. A hardcoded reason list, waiting period or threshold anywhere in a
+module is a review rejection.
+
+---
+
+## 11. Time, money, IDs
+
+| | Rule |
+|---|---|
+| Time | **Always UTC** in the database (`timestamptz`). Convert at the edge. `Asia/Kolkata` for display and for "which day is this shift". |
+| Business dates | `date` columns for things that are a day, not an instant (joining date, contract effective date) |
+| Money | `numeric(14,2)` + a `currency` column. **Never floats.** Arithmetic in SQL or `decimal.js`, never in JS numbers. |
+| Percentages | `numeric(6,3)`. The placement fee is 5–6% of salary; rounding matters on a real invoice. |
+| IDs | UUID v7 (time-sortable) generated in the application, not the database — so a service knows the id before insert and can build the event payload |
+| Human refs | Separate readable column where users need one: `REQ-2026-00142`, `INV-2026-00087`. Sequence-backed, never the primary key. |
+
+---
+
+## 12. Logging
+
+Pino, JSON, one line per event. Never `console.log`.
+
+```ts
+logger.info({ requisitionId, from, to, actorId }, 'requisition status changed')
+```
+
+| Level | Use |
+|---|---|
+| `error` | Something broke and a human should look |
+| `warn` | Degraded: adapter fallback taken, retry exhausted, deemed window applied |
+| `info` | State changes, job start/finish, external calls |
+| `debug` | Local only |
+
+**Never log:** passwords, OTPs, tokens, full documents, Aadhaar/PAN numbers, bank details, or the raw
+body of an inbound message containing personal data. Redaction list is configured in the logger, not
+left to each call site.
+
+Every log line carries `requestId` (HTTP) or `jobId` (worker), propagated through async context.
+
+---
+
+## 13. Idempotency
+
+Assume everything runs twice, because it will.
+
+| Surface | Mechanism |
+|---|---|
+| Webhooks | Provider message id → Redis `SETNX` with 7-day TTL, then a unique DB constraint as the backstop |
+| Jobs | `jobId` = deterministic hash of the meaningful inputs. BullMQ drops duplicates. |
+| Mutating API | `Idempotency-Key` header supported on POST for invoices, offers and messages |
+| Migration | Re-running a completed batch produces **no duplicate records** — a stated acceptance criterion |
+| Invoicing | Unique constraint on `(billing_trigger_id)`. One trigger can only ever produce one invoice. |
+
+---
+
+## 14. Performance
+
+| Rule | |
+|---|---|
+| No `SELECT *` across a join in a list endpoint | Select the columns the screen needs |
+| No N+1 | Batch-load with `inArray`, or a `DataLoader` for composed responses |
+| Every list endpoint is paginated | No unbounded queries, ever. Default 25, max 200. |
+| Every filter column has an index | And the migration that adds the filter adds the index |
+| Reports read projections, never the operational tables | `02-09` |
+| Exports over ~5k rows are a job producing an S3 link, not a synchronous response | `02-06` |
+
+Latency and load targets for ingestion, the unmatched queue and the fulfilment board are
+**unspecified (`OI-M3-14`)**. Working assumption `AS-14`: p95 &lt; 500ms for list screens, &lt; 2s for the
+fulfilment board, and inbound visible in the queue within 60s of receipt. Revise when Apollo answers.
+
+---
+
+## 15. What gets rejected in review
+
+- A controller that touches a repository
+- A service that takes `req`
+- A cross-module import of anything but a package root
+- A hardcoded reason, threshold or waiting period
+- A state change with no transition row, audit entry or event
+- An external HTTP call inside a transaction
+- An unpaginated list endpoint
+- A float used for money
+- A `catch` that swallows
+- A new list screen not using `<DataTable/>` (`02-06`)
+- A new external call not behind a port (`02-12`)
+- Personal data in a log line
+

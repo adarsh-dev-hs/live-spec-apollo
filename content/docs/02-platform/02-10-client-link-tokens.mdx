@@ -1,0 +1,397 @@
+---
+title: "P10 · Client Link Tokens"
+description: "One tokenised link mechanism, instantiated by configurable type, reached without login or account provisioning, delivered through the channel the client already uses."
+---
+
+**Package** `@apollo/links` · **Schema** `platform` · **Plan** A13 (M7-I8, M7-I17, M7-I18, M7-I13)
+**Effort** ~18pd · **Risk** High (SHARED) · **Build in** Phase 6 — **first item in the phase**
+
+---
+
+## 1. Purpose
+
+One tokenised link mechanism, instantiated by configurable type, reached **without login or account
+provisioning**, delivered through the channel the client already uses.
+
+The plan closed the ownership question and stated the commercial shape:
+
+> **CLOSED — A13 scope and ownership.** The link mechanism is **built once and instantiated by type**;
+> instances serve M7 (shortlist), M8 (day 30, 60 and 90 check-in) and M9 (timesheet approval).
+> **Only the day-90 retention instance is a billing trigger** — day 30 and day 60 capture signal and
+> **must not create a second trigger path**. Price the mechanism once and each type as an instance.
+
+This is the only way to reach a client in Release 1. There is no client login until M10. **If this
+component is late, the client side of M7 and both invoice paths in M9 stop.**
+
+---
+
+## 2. Scope
+
+**In**
+- Token generation, storage, validation, expiry, single-answer enforcement
+- Link type configuration — four types on one mechanism
+- Recipient management and **answer attribution**
+- Answer routing — each type's answer goes to the right module
+- **Deemed-agreement handling** after the contract window, for the two types that permit it
+- Link log — every link issued, opened, answered
+- Public API for the links frontend
+
+**Out**
+- The link *pages* themselves → `03-10` (shortlist), `03-11` (check-in), `03-12` (timesheet). This
+  component provides the token, the payload and the answer sink; the pages are domain UI.
+- Link *delivery* → `02-07`. This issues the token; messaging sends it.
+- Client portal login → `03-16`. Different thing entirely.
+- The billing decision → `03-13`. This routes an answer; billing decides what it means.
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M7-I17` Client link mechanism (A13, Service, XL, 5pd) | §5, §6, §7 |
+| `M7-I8` Link types (A13, Config, L, 3pd) | §5.2, §9.1 |
+| `M7-I18` Link answer routing (A13, Service, L, 3pd) | §7.3 |
+| `M7-I9` Link recipients (A13, Screen, L, 3pd) | §5.3, §9.2 |
+| `M7-I13` Link log (A13, Screen, L, 3pd) | §9.3 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/messaging` (P07), `@apollo/config` (P03), `03-01` clients (contacts),
+`03-02` contracts (the deemed windows)
+**Consumed by:** `03-10` selection, `03-11` placements, `03-12` attendance, `03-13` billing
+
+---
+
+## 5. Data model
+
+### 5.1 Link
+
+```sql
+CREATE TABLE platform.client_link (
+  id              uuid PRIMARY KEY,
+  reference       text NOT NULL UNIQUE,             -- 'LNK-2026-008412'
+  link_type       text NOT NULL,                    -- FK to link_type_config.key
+  token_hash      text NOT NULL UNIQUE,             -- SHA-256. Plaintext exists only in the message.
+  target_type     text NOT NULL,                    -- 'shortlist'|'placement'|'timesheet'
+  target_id       uuid NOT NULL,
+  client_id       uuid NOT NULL,
+  location_id     uuid,
+  recipient_id    uuid NOT NULL REFERENCES platform.link_recipient(id),
+  payload         jsonb NOT NULL,                   -- what the page renders, frozen at issue
+  status          link_status_enum NOT NULL,
+  issued_at       timestamptz NOT NULL DEFAULT now(),
+  sent_at         timestamptz,
+  first_opened_at timestamptz,
+  answered_at     timestamptz,
+  expires_at      timestamptz NOT NULL,
+  deemed_at       timestamptz,
+  message_id      uuid,                             -- engage.message
+  created_by      uuid NOT NULL
+);
+CREATE INDEX idx_client_link__target ON platform.client_link (target_type, target_id);
+CREATE INDEX idx_client_link__open   ON platform.client_link (status, expires_at)
+  WHERE status IN ('issued','sent','opened');
+
+CREATE TABLE platform.link_response (
+  id            uuid PRIMARY KEY,
+  link_id       uuid NOT NULL REFERENCES platform.client_link(id),
+  answer        jsonb NOT NULL,
+  answered_at   timestamptz NOT NULL DEFAULT now(),
+  answered_by_recipient_id uuid NOT NULL,           -- ATTRIBUTION — the whole point
+  ip_address    inet,
+  user_agent    text,
+  is_deemed     boolean NOT NULL DEFAULT false,
+  deemed_reason text
+);
+REVOKE UPDATE, DELETE ON platform.link_response FROM apollo_app;
+
+CREATE TABLE platform.link_open (
+  id          uuid PRIMARY KEY,
+  link_id     uuid NOT NULL,
+  opened_at   timestamptz NOT NULL DEFAULT now(),
+  ip_address  inet,
+  user_agent  text
+);
+```
+
+**`payload` is frozen at issue.** The shortlist the client sees is the shortlist we sent them, even
+if a recruiter changes the ranked set afterwards. Rendering live data would mean the client answered
+a different question from the one recorded.
+
+**`link_response` is append-only by grant.** It is the evidence behind an invoice.
+
+### 5.2 Link type configuration (`M7-I8`)
+
+```sql
+CREATE TABLE platform.link_type_config (
+  key                text PRIMARY KEY,           -- 'shortlist_response'|'trial_checkin_30'|
+                                                 -- 'trial_checkin_60'|'trial_checkin_90'|
+                                                 -- 'timesheet_approval'
+  name               text NOT NULL,
+  target_type        text NOT NULL,
+  owner_module       text NOT NULL,
+  expiry_days        integer NOT NULL,
+  is_billing_trigger boolean NOT NULL DEFAULT false,   -- TRUE for exactly TWO types
+  allows_deeming     boolean NOT NULL DEFAULT false,
+  deemed_window_setting_key text,                      -- resolves via 03-02 per client
+  reminder_schedule  jsonb,                            -- [{afterDays:3},{afterDays:7}]
+  answer_schema      jsonb NOT NULL                    -- zod-compatible
+);
+```
+
+The Release 1 seed:
+
+| Key | Billing trigger | Deeming | Owner |
+|---|---|---|---|
+| `shortlist_response` | **No** | No | `03-10` |
+| `trial_checkin_30` | **No** | No | `03-11` |
+| `trial_checkin_60` | **No** | No | `03-11` |
+| `trial_checkin_90` | **Yes** | **Yes** | `03-11` → `03-13` |
+| `timesheet_approval` | **Yes** | **Yes** | `03-12` → `03-13` |
+
+`is_billing_trigger` is enforced in the routing service, not just documented:
+**a link type without it can never create a `BillingTrigger`, by construction.** This is how the
+"day 30 and day 60 must not create a second trigger path" constraint is made structural rather than
+a thing someone remembers.
+
+### 5.3 Recipients (`M7-I9`)
+
+```sql
+CREATE TABLE platform.link_recipient (
+  id                uuid PRIMARY KEY,
+  client_id         uuid NOT NULL,
+  location_id       uuid,
+  client_contact_id uuid,                        -- clients.client_contact
+  full_name         text NOT NULL,
+  role_title        text,
+  email             text,
+  phone_e164        text,
+  preferred_channel message_channel_enum NOT NULL DEFAULT 'whatsapp',
+  is_active         boolean NOT NULL DEFAULT true,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+```
+
+**This table exists because of `OI-A-12`.** The retention confirmation must be timestamped against an
+*identified* recipient for the invoice to be defensible, and the plan does not say how recipients are
+held. See §11 — the working assumption is that they are `ClientContact` records surfaced here.
+
+---
+
+## 6. State machine
+
+**ClientLink**
+
+| From | To | Trigger | Rules |
+|---|---|---|---|
+| — | `issued` | Owning module requests a link | Token generated, payload frozen |
+| `issued` | `sent` | Messaging confirms dispatch | |
+| `sent` | `opened` | First GET with a valid token | `first_opened_at` set once; every open logged |
+| `opened` | `answered` | Valid answer posted | **Terminal.** Response written, routed, event emitted. |
+| `sent` | `answered` | Answer without a recorded open (rare — some clients strip previews) | Permitted |
+| `sent` \| `opened` | `expired` | `expires_at` passed with no answer | |
+| `expired` | `deemed_agreed` | Contract window passed **and** `allows_deeming` | **Only for `trial_checkin_90` and `timesheet_approval`** |
+| any | `revoked` | Owning module cancels (shortlist withdrawn, timesheet corrected) | Audited |
+
+*"ClientLink: issued → sent → opened → answered. Or expired → treated as agreed (only for the day-90
+and timesheet types, and only after the waiting period in the contract)"* (`00-03 §4`).
+
+**Deeming is a separate, later step from expiry.** A link expires after its own expiry period; it is
+deemed agreed only after the *contract's* deemed window, which is a different and usually longer
+period configured per client (`03-02`). Conflating the two would fire invoices early.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const links = {
+  /** Issue a link. Does NOT send it — the caller decides delivery. */
+  issue(input: {
+    linkType: string
+    targetType: string
+    targetId: string
+    clientId: string
+    locationId?: string
+    recipientId: string
+    payload: unknown                       // frozen; what the page renders
+    actor: Actor
+  }): Promise<{ link: ClientLink; url: string }>   // url returned ONCE, never stored
+
+  /** Issue and deliver in one step, via P07. */
+  issueAndSend(input, template: { key, channel }): Promise<ClientLink>
+
+  getByToken(token: string): Promise<ResolvedLink | null>   // constant-time, for the public API
+  get(linkId): Promise<ClientLink>
+  listFor(targetType, targetId): Promise<ClientLink[]>
+
+  revoke(linkId, actor, reason): Promise<void>
+  resend(linkId, actor): Promise<void>                      // same token, new message
+
+  /** Called by the scheduler. Applies the CONTRACT window, not the link expiry. */
+  applyDeeming(linkId, reason): Promise<LinkResponse>
+}
+```
+
+`url` is returned exactly once, at issue. The plaintext token is never stored and never retrievable —
+so a compromised database does not yield working links, and `resend` reuses the same token because
+it is embedded in the message that goes out.
+
+### 7.2 Public API — `/api/v1/public/links` (no authentication)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/:token` | Returns the frozen payload + type + status. **Logs an open.** Rate limited 20/min per token. |
+| POST | `/:token/respond` | Validates against the type's `answer_schema`. Single answer enforced. |
+
+Security: constant-time token comparison, no enumeration surface, no listing endpoint, distinct
+plain-language pages for expired / already-answered / revoked / invalid — **not a generic error**,
+because the person reading it is a hospital administrator who needs to know what to do next.
+
+### 7.3 Answer routing (`M7-I18`)
+
+```ts
+links.registerHandler({
+  linkType: 'trial_checkin_90',
+  handler: async (link, response) => {
+    await PlacementService.recordRetentionAnswer({
+      placementId: link.targetId,
+      answer: response.answer,
+      recipientId: response.answeredByRecipientId,
+      answeredAt: response.answeredAt,
+      isDeemed: response.isDeemed,
+    })
+  },
+})
+```
+
+*"Send each link answer to the right place: the shortlist, the trial record, the billing trigger or
+the timesheet"* (`M7-I18`).
+
+Routing is by registration, so a new link type is configuration plus a handler — not a change to this
+component.
+
+### 7.4 Ops HTTP — `/api/v1/links`
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/` | `platform.link.read` — the link log |
+| GET | `/:id` | Detail: opens, response, message, target |
+| POST | `/:id/resend` · `/:id/revoke` | `platform.link.manage` |
+| GET/POST/PATCH | `/recipients` | `platform.link_recipient.manage` |
+| GET/PATCH | `/types` | `platform.setting.write` |
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | Consumed by |
+|---|---|
+| `platform.link.issued` | analytics |
+| `platform.link.sent` | analytics |
+| `platform.link.opened` | `03-10`/`03-11` (a client engaged) |
+| **`platform.link.answered`** | **the registered handler**, analytics, audit |
+| `platform.link.expired` | Owning module (chase, escalate) |
+| **`platform.link.deemed_agreed`** | Owning module → `03-13` billing |
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `links.expire` | Hourly | Marks unanswered links past `expires_at` |
+| `links.remind` | Daily 09:00 IST | Sends reminders per the type's schedule, stops on answer |
+| **`links.deem`** | Daily 06:00 IST | Applies deeming where the **contract** window has passed. **Revenue-critical — heartbeat alarm on last successful run.** |
+
+`links.deem` failing silently means invoices stop being raised and nobody notices until month end.
+It gets its own alarm, not just a failure alarm (`01-09 §10`).
+
+---
+
+## 9. Frontend
+
+### 9.1 Link types — `/settings/links` (`M7-I8`)
+
+Read-mostly list of the four types: name, target, expiry, reminder schedule, **whether it is a
+billing trigger** (prominently, and not editable in the UI), deemed window setting. Editing expiry
+and reminders is permitted; editing `is_billing_trigger` is not — it is a deployment-time constant
+precisely because the plan constrains it.
+
+### 9.2 Recipients — `/clients/:id/link-recipients` (`M7-I9`)
+
+Who at the client receives each link type, per location. Name, role, email, phone, preferred channel.
+Linked to `ClientContact` where one exists.
+
+The screen carries a plain statement of why it matters: *"Their answer is recorded against them,
+which is what makes the invoice defensible"* (`M7-I9`).
+
+### 9.3 Link log — `/links` (`M7-I13`)
+
+`<DataTable/>`: reference, type, client, recipient, target, issued, sent, opened, answered, status.
+Filter by type, client, status, date. Row opens the full trail including the answer and the message
+that carried it.
+
+*"Finance uses this to justify an invoice"* (`M7-I13`) — so it is reachable from the billing evidence
+screen (`03-13`) and vice versa.
+
+### 9.4 The public pages
+
+Built in `apps/links` and owned by the domain modules (`03-10`, `03-11`, `03-12`). This component
+provides the token resolution and the answer endpoint. Constraints from `01-03 §9`: **&lt; 150 KB
+gzipped, one question per page, large touch targets, works at 320px, no auth provider, no nav shell.**
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | One link mechanism, four configured types, used by three modules — built once | `M7-I17`, plan CLOSED note |
+| 2 | A link is reached without login or account provisioning | A13 |
+| 3 | **Only the day-90 and timesheet types can create a billing trigger** — enforced by construction, not convention | Plan CLOSED note |
+| 4 | Day 30 and day 60 capture signal and **do not create a second trigger path** | Plan CLOSED note |
+| 5 | Every answer is timestamped against an **identified recipient** | `M7-I9`, `OI-A-12` |
+| 6 | A link is answerable once; reopening shows the answer read-only | §6 |
+| 7 | The payload is frozen at issue — the client answers the question we sent | §5.1 |
+| 8 | An unanswered link expires; deeming applies only after the **contract** window, and only for permitted types | §6 |
+| 9 | A deemed agreement is distinguishable from a real answer, everywhere it appears | §5.1 |
+| 10 | Tokens are unguessable, stored hashed, and the plaintext is never retrievable | §7.1 |
+| 11 | Expired, answered, revoked and invalid each show a distinct plain-language page | §7.2 |
+| 12 | Every issue, open and answer is audited | `02-02` |
+| 13 | The links bundle is under 150 KB gzipped | `01-03 §9` |
+| 14 | `links.deem` missing a scheduled run raises an alarm | §8 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-12`** | **A13 recipient identity model** — are recipients held per client, per location, per requisition or per placement, and how are they maintained without account provisioning? | **High impact.** The day-90 acknowledgement must be timestamped against an identified recipient to support a billing query. **Without a recipient model the billing trigger is not defensible.** | **`AS-05`** — `link_recipient` rows are created from `ClientContact` (`03-01`) and held **per client + location**, with an optional per-target override when a specific person must receive a specific link. This satisfies every named use, and moving to a narrower grain later is additive. **Escalate — this is one of the few open items that changes whether the core revenue mechanism works.** |
+| `OI-A-13` | Guarantee period — does it run past day 90? | If longer, credit and debit notes move from M15 into the earlier billing work | Does not change this component. It changes `03-13` and `03-21`. |
+| `OI-HS-11` | Is client-side interview feedback a **fifth** link type? | D6 scopes feedback capture but the only client surface is A13 | The mechanism supports N types by configuration, so adding a fifth is a config row plus a page. **No architectural risk either way** — but it is unbudgeted scope, so confirm before M7 build. |
+
+---
+
+## 12. Notes for the implementer
+
+**Build this first in phase 6.** M8, M9 and M12 all wait on it, and the plan says so directly:
+*"Build the link mechanism early — M8 and M9 both wait on it."*
+
+**The `is_billing_trigger` flag is the most important boolean in the platform.** Two link types set
+it. Enforce it in `registerHandler` — a handler for a non-trigger type must not be able to call
+`BillingService.createTrigger`, and there should be a test that asserts this by trying.
+
+**Freeze the payload.** The single most likely subtle bug here is rendering live data on the link
+page. A recruiter revises a shortlist an hour after sending it; the client opens the link and accepts
+"candidate 2" — which is now a different person. The frozen payload is the whole defence.
+
+**Treat the links app as a revenue surface.** A link that does not load is a billing outage. It gets
+its own synthetic uptime check (`01-09 §10`), its own bundle budget, and its own error pages.
+

@@ -1,0 +1,18 @@
+{
+  "title": "Standards",
+  "pages": [
+    "index",
+    "01-01-repository-layout",
+    "01-02-backend-conventions",
+    "01-03-frontend-conventions",
+    "01-04-api-contract",
+    "01-05-database-conventions",
+    "01-06-events-and-jobs",
+    "01-07-auth-and-rbac",
+    "01-08-testing-and-quality",
+    "01-09-infrastructure-and-deployment",
+    "01-10-security-and-data-protection"
+  ],
+  "icon": "Ruler",
+  "description": "House rules. Every component spec assumes these."
+}

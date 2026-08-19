@@ -1,0 +1,13 @@
+{
+  "title": "Documentation",
+  "root": true,
+  "pages": [
+    "index",
+    "00-foundation",
+    "01-standards",
+    "02-platform",
+    "03-modules",
+    "04-integrations",
+    "05-delivery"
+  ]
+}

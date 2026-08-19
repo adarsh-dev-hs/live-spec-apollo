@@ -1,0 +1,239 @@
+---
+title: "05-02 · Implementation Playbook"
+description: "How to take one spec from document to merged, working code."
+---
+
+How to take one spec from document to merged, working code.
+
+---
+
+## 1. The unit of work is one spec
+
+Each file in `02-platform/` and `03-modules/` is a self-contained implementation unit. One spec = one
+work package = one branch = usually several PRs.
+
+**Do not start a spec until every component it lists in *Dependencies* is done.** `05-01` gives the
+order.
+
+---
+
+## 2. Before you write code
+
+| Step | |
+|---|---|
+| 1 | Read the spec end to end. All eleven sections. |
+| 2 | Read its **Open questions** section. If a blocking one is still open, check `05-03` for the working assumption and confirm it is still the assumption. |
+| 3 | Read the specs of every module you will call, specifically their **API surface** section |
+| 4 | Confirm the standards you have not internalised yet: `01-02` backend, `01-04` API, `01-05` database, `01-06` events, `01-07` auth |
+| 5 | Check `00-04 §5` — the list of things you may assume already exist. **If the spec asks you to build one of them, that is a spec bug. Flag it.** |
+
+---
+
+## 3. Handing a spec to Claude
+
+The specs are written to be implementable by an AI agent with minimal additional context. A prompt
+that works:
+
+```
+Implement docs/03-modules/03-04-requisitions.md.
+
+Read these first:
+  docs/01-standards/01-02-backend-conventions.md
+  docs/01-standards/01-05-database-conventions.md
+  docs/01-standards/01-06-events-and-jobs.md
+  docs/00-foundation/00-04-component-map.md   (section 5)
+
+Follow the build order in section 12 of the spec: object and state machine
+and age clock first, then status transitions, then screens.
+
+Do not implement anything from the "Out of scope" list.
+Stop after the data model and state machine so I can review before you continue.
+```
+
+Three things make this work:
+
+- **Name the standards explicitly.** The module spec assumes them; an agent reading only the module
+  spec will invent its own conventions.
+- **Point at the within-module order** (`05-01 §4` or the spec's own §12). Large modules built in the
+  wrong internal order produce rework.
+- **Ask for a checkpoint.** Data model and state machine first, reviewed, then everything else. The
+  data model is where a wrong decision is most expensive.
+
+For a large module (B03, B04, B08, B09), split across several sessions along the internal build
+order rather than asking for all 84 person-days in one pass.
+
+---
+
+## 4. Order of implementation within a spec
+
+Always the same shape. It front-loads the decisions that are expensive to change.
+
+```
+1. Migrations              §5 Data model — tables, indexes, constraints, grants
+2. Schema + contracts      Drizzle definitions, zod schemas, inferred types
+3. State machine           §6 as a transition table + assertTransition
+4. Repositories            §5 — with the Scope parameter, always
+5. Services                §7 — transaction, transition, audit, event
+6. Events                  §8 — registered, schema'd, emitted in the transaction
+7. Jobs                    §8 — typed payloads, idempotent, deterministic ids
+8. Controllers + routes    §7 — permissions and validation
+9. Frontend                §9 — feature folder, api/, pages/
+10. Tests                  §10 — one per acceptance criterion, named after it
+```
+
+**Steps 1–3 are the review checkpoint.** Everything after them is mechanical if they are right and
+expensive if they are wrong.
+
+---
+
+## 5. Writing the tests
+
+Section 10 of every spec is a numbered list of acceptance criteria. **Each one becomes a test named
+after it:**
+
+```ts
+describe('B04 requisitions — acceptance criteria', () => {
+  it('AC4: hold stops the age counter; release resumes from where it stopped, not from zero', async () => {
+    ...
+  })
+})
+```
+
+This makes the PR checklist mechanical: a reviewer greps for `AC12` and finds the test.
+
+Also required, from `01-08 §8`:
+- Every transition in the spec's state table, **and** that illegal ones are rejected
+- Every documented event emitted, with the right payload, inside the transaction
+- Every mutating endpoint called as the wrong role → 403
+- Every external call against a fake that can fail
+
+---
+
+## 6. The PR
+
+**One PR implements one coherent slice of one spec.** A PR touching two module folders is a review
+flag — it usually means a boundary was crossed that should have been a domain event.
+
+### PR description template
+
+```markdown
+## Implements
+docs/03-modules/03-04-requisitions.md — sections 5, 6, 7 (data model, states, service)
+
+## Acceptance criteria covered
+- [x] AC1 — normalises demand from any channel into one schema (test: `requisition.service.test.ts`)
+- [x] AC4 — hold stops the age counter; release resumes (test: `age-clock.test.ts`)
+- [ ] AC14 — board performance (deferred to the frontend PR)
+
+## Events emitted
+`demand.requisition.created`, `.published`, `.held`, `.released`, `.closed`
+
+## Open items relied on
+`OI-M3-11` — close-reason taxonomy. Working assumption AS-07 (provisional list seeded in P03).
+
+## Deviations from the spec
+None. / Spec said X; implemented Y because Z. Spec updated in this PR.
+```
+
+### Required checks
+
+`01-08 §6` — lint, typecheck, **boundaries**, unit, integration, migration-forward, **event
+completeness**, build, bundle size, `axe`, `gitleaks`, and the revenue-chain E2E flows.
+
+---
+
+## 7. When the spec is wrong
+
+It will happen. The specs were written before the code.
+
+| Situation | Do this |
+|---|---|
+| The spec is **wrong** | Fix the code **and the spec**, in the same PR. The doc is the source of truth, so a stale doc is a defect. |
+| The spec is **ambiguous** | Decide, implement, and write the decision into the spec as a note |
+| The spec asks for something already built (`00-04 §5`) | Flag it. Do not rebuild. |
+| The spec conflicts with a standard | The standard wins. Fix the spec. |
+| The spec conflicts with the **delivery plan** | The plan wins on *scope*. Raise it — the traceability in §3 of each spec is meant to be exact. |
+| A working assumption turns out to be wrong | Update `05-03`, update the spec, assess the blast radius across other specs referencing that `AS-` |
+
+**Never let code and spec drift silently.** The whole value of this documentation is that someone can
+read a file and know what the system does.
+
+---
+
+## 8. Definition of done
+
+From `01-08 §8`. A component is done when all of these are true:
+
+- [ ] Every acceptance criterion has a test named after it
+- [ ] Every state transition tested; illegal ones rejected
+- [ ] Every documented event emitted with the right payload, in the transaction
+- [ ] Every mutating action writes an audit entry with actor and before/after
+- [ ] Every list endpoint paginated, **scoped** and indexed
+- [ ] Every screen has loading, empty, error, no-permission and partial-failure states
+- [ ] RBAC tested with the wrong role; data scope tested per scope kind
+- [ ] Every external call behind a port, with a fake and a failure test
+- [ ] Migrations run forward on empty and on a restored copy
+- [ ] Open items re-checked; assumptions still valid
+- [ ] Runbook entry for each new failure mode
+- [ ] **Spec updated if the implementation diverged**
+
+---
+
+## 9. Common mistakes, and what they look like
+
+Collected from the constraints scattered across the specs. These are the ones that pass review and
+cost money later.
+
+| Mistake | Where it bites |
+|---|---|
+| Forgetting to emit an event | The reporting period before the fix is **permanently unreportable** (`02-09`) |
+| A state change without a `status_transition` row | Stage-level conversion loss cannot be recomputed (`M3-I28`) |
+| Defaulting `asAt` to `now()` | An invoice priced at today's rate instead of the rate in force then (`03-02`) |
+| Not freezing resolved terms onto the invoice | A back-dated contract version changes an old invoice (`03-13`) |
+| A repository method without a `Scope` parameter | Row-level scoping silently bypassed (`01-07`) |
+| Building an export as a separate query path | The most common way scoping gets bypassed (`02-06 §8`) |
+| Auto-retrying payroll or invoicing | People paid twice; clients billed twice (`01-06 §6`) |
+| A float for money | Rounding on a real invoice (`01-02 §11`) |
+| Checking opt-out at enqueue instead of send | A candidate who opted out mid-cadence still gets the message (`02-07 §6`) |
+| Rendering live data on a client link page | The client answers a different question from the one recorded (`02-10 §12`) |
+| A scheduler without an explicit timezone | A "daily morning" job firing at 11:30 IST (`02-13 §11`) |
+| Hardcoding a reason list or waiting period | A release needed to add an option (`01-02 §10`) |
+| Building a bespoke table instead of `<DataTable/>` | The same work, twenty times (`02-06`) |
+| A cross-module import of anything but a package root | Fails CI, and rightly (`01-01 §3`) |
+| Personal data in a log line | A DPDP problem (`01-02 §12`) |
+
+---
+
+## 10. Working with open items
+
+45 of them, 7 blocking a committed estimate. `05-03` is the register.
+
+| Rule | |
+|---|---|
+| **Never invent an answer silently.** | If a spec has no working assumption for something you need, add one, write it down, and flag it. |
+| Assumptions carry an `AS-` number and live in `05-03` | So the blast radius of a wrong assumption is greppable |
+| Where an assumption is visible to users, **say so on the screen** | e.g. the deemed-window defaults (`AS-06`) are flagged as provisional in `02-03 §9` |
+| Build so that either answer is a configuration change | The pattern throughout: `candidate_base` as a table not a column (`AS-25`), `hard_filters` per condition (`AS-27`), scope from day one (`AS-02`) |
+| Re-check assumptions at each phase gate | An answered open item may invalidate code already written |
+
+---
+
+## 11. Escalate these, weekly
+
+The seven estimate blockers, in the order they hurt:
+
+| ID | Question | Escalate to |
+|---|---|---|
+| **`OI-A-02`** | How much CPAL data is there, and in what condition? **Nothing about A10 can be sized until profiling runs.** | Apollo (access) + Hiresense (profiling) |
+| **`OI-A-13`** | Guarantee period past day 90? **Changes scope, not just a number.** | Apollo |
+| **`OI-HS-07`** | WhatsApp BSP, OCR, e-signature. **Template approval is weeks of calendar time.** | Tamajit Mukherjee with Mr. Sriram |
+| **`OI-A-09`** | Voice provider. **Language coverage cannot be tested without one.** | Apollo |
+| **`OI-M3-03`** | How many client HR systems? | Suman |
+| **`OI-M3-04`** | How many spreadsheet formats? | Shallu Kakkar |
+| **`OI-HS-05`** | Expected message volume per month | Shallu Kakkar with Hiresense |
+
+Plus two that are cheap now and expensive later:
+
+| **`OI-HS-01`** | Row-level scoping for site-resident recruiters | Shallu Kakkar with the tech lead |
+| **`OI-A-12`** | Link recipient identity model — **the day-90 trigger is not defensible without it** | Tamajit Mukherjee |
+

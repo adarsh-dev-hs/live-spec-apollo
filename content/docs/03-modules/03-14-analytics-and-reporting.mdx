@@ -1,0 +1,333 @@
+---
+title: "B14 · Analytics and Reporting"
+description: "Funnel and conversion, fill rate, time-to-fill, trial survival, stage-level conversion loss by client and by recruiter, channel and recruiter performance, the monthly MIS pack…"
+---
+
+**Package** `@apollo/analytics` · **Schema** `report` · **Plan** D9, D28, A11 / M9
+**Effort** ~47.5pd · **Risk** Medium (DATA, XMOD) · **Build in** Phase 7
+
+---
+
+## 1. Purpose
+
+Funnel and conversion, fill rate, time-to-fill, trial survival, stage-level conversion loss by client
+and by recruiter, channel and recruiter performance, the monthly MIS pack, and rate agreed against
+baseline.
+
+The plan notes this is a **separate workstream** from billing, sharing nothing beyond the underlying
+event data: *"this module holds two workstreams with no shared component beyond the underlying event
+data — a billing engine covering two distinct invoice paths, and a reporting layer. They can be
+staffed and sequenced independently."*
+
+One hard dependency worth stating up front: **D28's stage-level loss by recruiter cannot be produced
+without the D14 owner field in M3**, and none of it can be produced at all without the events written
+from phase 3 onwards (`02-09`).
+
+---
+
+## 2. Scope
+
+**In** — projections built from `event_store` · funnel and conversion · fill rate and time-to-fill ·
+trial survival · stage-level drop-out by client and recruiter · channel and recruiter performance ·
+monthly MIS pack, generated on a schedule · rate variance reporting
+
+**Out** — the event store and projection framework → `02-09` · operational lists → each module ·
+billing → `03-13` · demand prioritisation, which *consumes* this data → `03-20` · demand forecasting —
+**not in this contract** · any client-facing dashboard — clients see links until the portal in M10
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M9-I5` Funnel (D9, M, 3pd) | §9.1 |
+| `M9-I6` Fill and time to fill (D9, L, 5pd) | §9.2 |
+| `M9-I7` Trial survival (D9, M, 3pd) | §9.3 |
+| `M9-I8` Where candidates drop out (D28, L, 5pd) | §9.4 |
+| `M9-I9` Channel and recruiter performance (D28, M, 3pd) | §9.5 |
+| `M9-I10` Monthly pack (D28, L, 5pd) | §9.6 |
+| `M9-I11` Rate variance (A11, M, 3pd) | §9.7 |
+| `M9-I17` Reporting tables (D28, Service, XL, 7.5pd) | §5, §7 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `02-09` events (**and the events must have been emitted since go-live**),
+`03-04` requisitions (**the owner field**), `03-11` placements, `03-13` billing, `03-12` attendance
+**Consumed by:** `03-20` demand prioritisation (suggestions read this performance data), leadership
+
+---
+
+## 5. Data model — projections
+
+All tables in `report`, all **rebuildable from `event_store` alone** (`02-09 §7.4`), all written only
+by the projector.
+
+```sql
+-- One row per requisition, its full journey. The backbone of most reports.
+CREATE TABLE report.requisition_journey (
+  requisition_id   uuid PRIMARY KEY,
+  client_id uuid NOT NULL, location_id uuid, owner_user_id uuid,   -- D14 owner: REQUIRED for D28
+  category candidate_category_enum NOT NULL,
+  engagement_type engagement_type_enum NOT NULL,
+  source_channel  inbound_channel_enum NOT NULL,
+  positions integer NOT NULL,
+  created_at timestamptz NOT NULL,
+  published_at timestamptz, first_shortlist_at timestamptz,
+  first_interview_at timestamptz, first_offer_at timestamptz,
+  first_placement_at timestamptz, filled_at timestamptz, closed_at timestamptz,
+  close_reason_code text,
+  -- age EXCLUDING holds (03-04 §5.1)
+  active_seconds_to_fill bigint,
+  hold_seconds bigint NOT NULL DEFAULT 0,
+  positions_filled integer NOT NULL DEFAULT 0,
+  candidates_shortlisted integer NOT NULL DEFAULT 0,
+  candidates_interviewed integer NOT NULL DEFAULT 0,
+  offers_made integer NOT NULL DEFAULT 0,
+  placements integer NOT NULL DEFAULT 0,
+  dropouts integer NOT NULL DEFAULT 0
+);
+
+-- One row per candidate per requisition. Stage-level loss lives here.
+CREATE TABLE report.candidate_stage (
+  id uuid PRIMARY KEY,
+  candidate_id uuid NOT NULL, requisition_id uuid NOT NULL,
+  client_id uuid NOT NULL, owner_user_id uuid, recruiter_user_id uuid,
+  category candidate_category_enum NOT NULL, base supply_base_enum,
+  ranked_at timestamptz, shortlisted_at timestamptz, sent_to_client_at timestamptz,
+  interviewed_at timestamptz, offered_at timestamptz, offer_signed_at timestamptz,
+  joined_at timestamptz, trial_survived_at timestamptz,
+  lost_at_stage text,                        -- WHERE it stopped
+  loss_reason_code text,                     -- WHY — the shared taxonomy
+  UNIQUE (candidate_id, requisition_id)
+);
+
+CREATE TABLE report.placement_outcome (
+  placement_id uuid PRIMARY KEY,
+  candidate_id uuid NOT NULL, requisition_id uuid NOT NULL, client_id uuid NOT NULL,
+  owner_user_id uuid, category candidate_category_enum NOT NULL,
+  joining_date date NOT NULL,
+  survived_day_7 boolean, survived_day_30 boolean,
+  survived_day_60 boolean, survived_day_90 boolean,
+  ended_at date, end_reason_code text,
+  retention_source text,                     -- 'client_link'|'ops_recorded'|'deemed'
+  invoiced boolean NOT NULL DEFAULT false,
+  invoice_amount numeric(14,2)
+);
+
+CREATE TABLE report.channel_performance (
+  period_month date NOT NULL,
+  source_channel inbound_channel_enum NOT NULL,
+  client_id uuid,
+  requisitions_received integer NOT NULL DEFAULT 0,
+  requisitions_parsed_ok integer NOT NULL DEFAULT 0,
+  requisitions_manual integer NOT NULL DEFAULT 0,
+  requisitions_filled integer NOT NULL DEFAULT 0,
+  placements integer NOT NULL DEFAULT 0,
+  avg_seconds_to_fill bigint,
+  PRIMARY KEY (period_month, source_channel, COALESCE(client_id,'00000000-0000-0000-0000-000000000000'::uuid))
+);
+
+CREATE TABLE report.recruiter_performance (
+  period_month date NOT NULL,
+  recruiter_user_id uuid NOT NULL,
+  requisitions_held integer NOT NULL DEFAULT 0,
+  requisitions_filled integer NOT NULL DEFAULT 0,
+  candidates_submitted integer NOT NULL DEFAULT 0,
+  interviews_held integer NOT NULL DEFAULT 0,
+  offers_made integer NOT NULL DEFAULT 0,
+  placements integer NOT NULL DEFAULT 0,
+  trial_survivals integer NOT NULL DEFAULT 0,
+  avg_seconds_to_fill bigint,
+  PRIMARY KEY (period_month, recruiter_user_id)
+);
+```
+
+**`owner_user_id` on `requisition_journey` and `candidate_stage` is the D14 owner field.** The plan
+records this as a hard dependency: *"D28 stage-level loss by recruiter cannot be produced without the
+D14 owner field in M3."*
+
+---
+
+## 6. State machines
+
+**N/A** — projections have no lifecycle. Their `projection_state` (`02-09 §5.4`) tracks checkpoint
+and rebuild status.
+
+---
+
+## 7. API surface
+
+### 7.1 Projectors (`M9-I17`)
+
+*"Reshape events from every module into the tables the reports read."*
+
+| Projector | Reads | Writes |
+|---|---|---|
+| `requisition-journey` | `demand.requisition.*`, `match.shortlist.sent`, `select.*`, `place.placement.created`, `place.dropout.recorded` | `requisition_journey` |
+| `candidate-stage` | `match.ranked_set.generated`, `match.shortlist.sent`, `select.interview.completed`, `select.decision.recorded`, `select.offer.*`, `place.*` | `candidate_stage` |
+| `placement-outcome` | `place.placement.created`, `place.trial_event.responded`, `place.retention.confirmed`, `bill.invoice.raised` | `placement_outcome` |
+| `channel-performance` | `demand.inbound.*`, `demand.requisition.*` | `channel_performance` |
+| `recruiter-performance` | `demand.requisition.allocated`, `select.*`, `place.*` | `recruiter_performance` |
+| `rate-variance` | `bill.rate_variance.recorded` | reads `bill.rate_variance` directly |
+
+Every projector is **idempotent and replayable from sequence 0**. `pnpm events:reproject` is a CI
+gate (`02-09 §10`).
+
+### 7.2 Query service
+
+```ts
+export const AnalyticsService = {
+  funnel(filter): Promise<FunnelResult>
+  fillRate(filter): Promise<FillRateResult>
+  timeToFill(filter): Promise<TimeToFillResult>
+  trialSurvival(filter): Promise<SurvivalResult>
+  stageLoss(filter): Promise<StageLossResult>
+  channelPerformance(filter): Promise<ChannelPerformanceResult>
+  recruiterPerformance(filter): Promise<RecruiterPerformanceResult>
+  rateVariance(filter): Promise<RateVarianceResult>
+  generateMonthlyPack(month: Date): Promise<{ documentId: string }>
+}
+```
+
+All filters share a shape: date range, client, location, category, engagement type, recruiter,
+channel. **All reads go to the read replica** (`01-05 §13`).
+
+### 7.3 HTTP — `/api/v1/reports` (permission `report.*.read`)
+
+| Method | Path |
+|---|---|
+| GET | `/funnel` · `/fill-rate` · `/time-to-fill` · `/trial-survival` |
+| GET | `/stage-loss` · `/channel-performance` · `/recruiter-performance` · `/rate-variance` |
+| POST | `/monthly-pack` — 202 + job → S3 link |
+| GET | `/monthly-pack/:month` |
+| POST | `/{report}/export` | CSV/XLSX, via `02-06` |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `report.projection.updated` · `report.mis_pack.generated`
+
+**Subscribes:** every event listed in §7.1 — this module is the largest consumer in the platform.
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `analytics.project` | Every 15 min | Advances all projections from their checkpoint |
+| `analytics.rebuild` | On demand | Replays from 0 into a shadow table, then swaps (`02-09 §6`) |
+| **`analytics.mis-pack`** | Monthly, 1st, 05:00 IST | *"Generated on a schedule rather than assembled by hand"* (`M9-I10`) |
+| `analytics.freshness-check` | Hourly | Alarms if any projection lags the event store by more than 30 min |
+
+---
+
+## 9. Frontend — `/reports`
+
+Charts follow the `dataviz` conventions: one visual system, accessible in both themes, colour never
+the sole carrier of meaning.
+
+### 9.1 Funnel (`M9-I5`)
+
+*"Where vacancies turn into placements, and where they do not."*
+Requisitions → shortlisted → sent to client → interviewed → offered → signed → joined → survived day
+90. Absolute numbers **and** stage conversion rates. Filter by client, category, channel, period.
+
+### 9.2 Fill and time to fill (`M9-I6`)
+
+Fill rate by client, site, category, recruiter. Time-to-fill distribution — **median and p90, not just
+a mean**, because a handful of six-month vacancies makes a mean meaningless.
+
+**Time excludes hold periods** (`03-04 §5.1`). A requisition on hold for three weeks was not taking
+three weeks to fill.
+
+### 9.3 Trial survival (`M9-I7`)
+
+*"How many people last to day 90, **which is also when Apollo gets paid**."*
+Survival curve at day 7/30/60/90, by client, category, recruiter. Drop-out reasons.
+
+This is the report that connects operations to revenue, and it should say so.
+
+### 9.4 Where candidates drop out (`M9-I8`)
+
+*"Where candidates drop out, **by client and by recruiter**."*
+Stage-level loss with reasons from the shared taxonomy. Comparison across clients and recruiters.
+
+**Depends on the D14 owner field.** Where an older requisition has no owner, the report says
+"unattributed" rather than silently omitting it.
+
+### 9.5 Channel and recruiter performance (`M9-I9`)
+
+*"Which intake channels and which recruiters actually produce placements."*
+Per channel: volume, parse success, manual-queue rate, fill rate, time to fill, placements. Per
+recruiter: load, submissions, conversion, placements, trial survival.
+
+Consumed by `03-20` for allocation suggestions.
+
+### 9.6 Monthly pack (`M9-I10`)
+
+*"The monthly pack for Apollo leadership, generated on a schedule rather than assembled by hand."*
+
+A PDF combining the above with month-on-month movement and commentary placeholders. Generated on the
+1st, stored via `02-04`, delivered to a configured list.
+
+### 9.7 Rate variance (`M9-I11`)
+
+*"What was agreed against the standard rate, by client, role, specialty and acuity."*
+Variance amount and percentage, aggregated and per-instance. Outliers surfaced.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Every report is built from projections over `event_store`, never from operational tables | `M9-I17` |
+| 2 | **Every projection rebuilds from sequence 0 with no other input** | `02-09` — CI gate |
+| 3 | Stage-level conversion loss is available **by client and by recruiter** | D28, `M9-I8` |
+| 4 | Recruiter-level reporting uses the D14 owner field; unattributed records are labelled, not dropped | D28 hard dependency |
+| 5 | Time-to-fill **excludes hold periods** | `03-04` |
+| 6 | Time-to-fill shows median and p90, not only a mean | §9.2 |
+| 7 | Trial survival is reported at day 7, 30, 60 and 90 | D9, `M9-I7` |
+| 8 | Channel performance covers all five live channels plus verbal capture | `M9-I9` |
+| 9 | The monthly pack generates on a schedule, unattended | `M9-I10` |
+| 10 | Rate variance is reported by client, role, specialty and acuity | A11 |
+| 11 | Reports read the **replica**, never the primary | `01-05 §13` |
+| 12 | A projection lagging more than 30 minutes raises an alarm | §8 |
+| 13 | The monthly pack completes in under 5 minutes | `01-08 §7` |
+| 14 | Every report is exportable with the same filters and scope applied | `02-06 §8` |
+
+---
+
+## 11. Open questions
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| **Reporting period before go-live** | Reports can only cover the period since events began being written. **There is no backfill.** | State it plainly on every report: "Data available from *date*." Better than a chart that silently starts mid-story. This is the practical consequence of `M3-I31`. |
+| **Migrated CPAL history** | Migrated candidates arrive with no event history, so pre-migration placements do not appear in the funnel | **`AS-42`** — emit **synthetic historical events** during migration (`03-15`) for records with usable dates, tagged `source: 'migration'`, and let reports filter them out. Partial history clearly labelled beats no history and beats fake precision. |
+| `OI-M3-10` | Recruiter load against the 15–16 norm | Displayed on the board (`03-04`); reported here | Load is reported regardless — it is a performance measure here, not an enforcement |
+| **Report access and scope** | A recruiter seeing every recruiter's performance is a management decision, not a technical one | **`AS-43`** — `leadership` and `platform_admin` see all; `fulfilment_lead` sees their team; `recruiter` sees only their own. Configurable via permissions. **Confirm with Apollo** — it is a sensitive default either way. |
+| `OI-HS-01` | Row-level scoping | Affects what a scoped user sees in reports | **`AS-02`** — the same scope resolver applies to report queries |
+
+---
+
+## 12. Notes for the implementer
+
+**This module is only as good as the events written months earlier.** Before building anything here,
+verify against `01-06 §4` that every listed event is actually emitted with the documented payload. A
+missing `demand.requisition.allocated` means recruiter reporting silently reports nothing, and by
+phase 7 the gap is unrecoverable for the period already elapsed.
+
+**Projections, never live joins.** It is tempting to compute the funnel with a query across `demand`,
+`match`, `select` and `place`. It works on seed data and falls over on real volume, and it couples
+the reporting layer to five modules' schemas. Project once, read many.
+
+**Build the funnel first.** It exercises every projector and every event, so if the event catalogue is
+incomplete, you find out on day two of this module rather than day twenty.
+
+**Say what the data covers.** Every report carries its coverage window and, where relevant, the count
+of unattributed records. A leadership pack that quietly omits half the requisitions because they
+predate the owner field is worse than one that says so.
+

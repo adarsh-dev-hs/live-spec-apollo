@@ -1,0 +1,306 @@
+---
+title: "B07 · Candidate App and Backend"
+description: "The candidate mobile app: self-registration, resume upload and parsing, job and shift discovery, application tracking, document upload, availability answering, and shift check-in."
+---
+
+**Package** `@apollo/candidate-app` + `apps/mobile` · **Schema** `supply` · **Plan** D3 / M4
+**Effort** ~48pd · **Risk** High (SHARED, COMP) · **Build in** Phase 4 — **start in month 2**
+
+---
+
+## 1. Purpose
+
+The candidate mobile app: self-registration, resume upload and parsing, job and shift discovery,
+application tracking, document upload, availability answering, and **shift check-in**.
+
+The plan flags this as a three-way shared build and a hard dependency:
+
+> D3 sits in M4, but **shift discovery, acceptance and check-in serve M8**, and its response surface
+> is one of the two A14 channels in M5. Because **shift attendance is captured by app check-in with
+> no alternative route, D3 is a hard dependency of the contractual invoice chain — no app, no
+> attendance, no shift invoice.** Sequence it against all three consumers.
+
+**App store enrolment and first review are calendar time that no amount of team size removes.**
+Start in month 2.
+
+---
+
+## 2. Scope
+
+**In** — candidate-facing API surface · phone + OTP sign-up with consent · profile building from a
+parsed CV · category-specific attribute capture · job browsing (Base A) · shift browsing and
+acceptance (Base B) · application and shift tracking · document upload · notification preferences ·
+availability answering · **shift check-in and check-out with location stamp** · offline-tolerant
+check-in
+
+**Out** — candidate record model → `03-05` · credentials and verification logic → `03-06` ·
+availability confidence and cadence → `03-08` · timesheet building → `03-12` · associate onboarding
+flow → `03-17` · payslips → `03-19`
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M4-I1` App: sign up (D3, L, 5pd) | §9.1 |
+| `M4-I2` App: build profile (D3, L, 5pd) | §9.2 |
+| `M4-I3` App: specialty details (A9, L, 5pd) | §9.3 |
+| `M4-I4` App: jobs (D3, L, 5pd) | §9.4 |
+| `M4-I5` App: shifts (D3, XL, 8pd) | §9.5 |
+| `M4-I6` App: my applications (D3, L, 5pd) | §9.6 |
+| `M4-I7` App: shift check-in (D3, XL, 8pd) | §5.1, §9.7 |
+| `M4-I8` App: my documents (D3, L, 5pd) | §9.8 |
+| `M4-I9` App: notification settings (D3, M, 3pd) | §9.9 |
+| `M4-I10` App: am I available (D3, L, 5pd) | §9.10 |
+| `M4-I21` Candidate sign-in (D3, Service, L) | → `02-01 §5.3` |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `02-01` iam (OTP + JWT), `03-05` candidates, `02-04` files, `03-04` requisitions
+(shift lines), `02-05` ui (tokens)
+**Consumed by:** `03-08` engagement (**one of two A14 response channels**), `03-12` attendance
+(**the only attendance route**), `03-17` onboarding, `03-19` payroll
+
+---
+
+## 5. Data model
+
+Most state lives in `03-05` and `03-12`. This module owns two things.
+
+### 5.1 Check-in (`M4-I7`)
+
+```sql
+CREATE TABLE supply.app_check_in (
+  id                uuid PRIMARY KEY,
+  candidate_id      uuid NOT NULL,
+  shift_demand_line_id uuid NOT NULL,
+  shift_acceptance_id  uuid NOT NULL,
+  kind              check_in_kind_enum NOT NULL,     -- 'in' | 'out'
+  recorded_at       timestamptz NOT NULL,            -- when the CANDIDATE pressed it
+  received_at       timestamptz NOT NULL DEFAULT now(),  -- when the SERVER got it
+  -- location: RECORDED, NOT ENFORCED in R1 (enforcement is M12)
+  geo_lat           numeric(9,6),
+  geo_lng           numeric(9,6),
+  geo_accuracy_m    numeric(8,2),
+  geo_source        text,                            -- 'gps'|'network'|'unavailable'
+  device_id         text,
+  is_offline_sync   boolean NOT NULL DEFAULT false,
+  client_event_id   text NOT NULL,                   -- IDEMPOTENCY across offline retries
+  UNIQUE (candidate_id, client_event_id)
+);
+CREATE INDEX idx_check_in__shift ON supply.app_check_in (shift_demand_line_id, kind);
+```
+
+**`recorded_at` and `received_at` are separate, and both matter.** A nurse checks in at 19:00 in a
+hospital basement with no signal; the phone syncs at 22:30. The shift started at 19:00 and that is
+what gets billed and paid — but the gap is visible and auditable.
+
+**`client_event_id` is the idempotency key.** An offline queue retrying on reconnect must not produce
+three check-ins.
+
+**Location is recorded, not enforced** (`M8` CLOSED decision): *"Release 1 records a location stamp
+against each check-in without enforcing a boundary; geo-fencing moves off the exclusion list to a
+named Phase 2 item so the field exists when enforcement is specified."* `03-18` switches enforcement
+on with **no data change**.
+
+### 5.2 Device registration
+
+```sql
+CREATE TABLE supply.candidate_device (
+  id            uuid PRIMARY KEY,
+  candidate_id  uuid NOT NULL,
+  device_id     text NOT NULL,
+  platform      text NOT NULL,                   -- 'ios'|'android'
+  push_token    text,
+  app_version   text,
+  last_seen_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (candidate_id, device_id)
+);
+```
+
+---
+
+## 6. State machines
+
+Owned elsewhere; the app drives transitions:
+
+- **Candidate** — `registered → profile_complete` (`03-05`)
+- **Application** — `applied` (`03-05`)
+- **ShiftAcceptance** — `accepted → completed` \| `cancelled` (`03-05`)
+- **ShiftAttendance** — `expected → checked_in → checked_out` \| `no_show` (`03-12`)
+- **AvailabilityResponse** — `received → confirmed` (`03-08`)
+
+---
+
+## 7. API surface
+
+All under `/api/v1/app`, authenticated with `requireCandidate()`. Every endpoint is scoped to the
+authenticated candidate — **no candidate endpoint takes a candidate id from the request.**
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/auth/request-otp` · `/auth/verify-otp` · `/auth/refresh` | `02-01 §7.4` |
+| GET/PATCH | `/me` | Profile |
+| POST | `/me/consent` | Purpose-specific, versioned (`01-10 §4`) |
+| POST | `/me/cv` | Upload → 202, parse job |
+| GET | `/me/cv/parsed` | Parsed fields **with per-field confidence** |
+| POST | `/me/cv/confirm` | Candidate accepts/corrects — **only then are values written** |
+| GET | `/me/attributes/definitions` | From `03-05`, for this candidate's category |
+| GET/PUT | `/me/attributes` | |
+| GET | `/jobs` · `/jobs/:id` | Permanent roles (Base A) |
+| POST | `/jobs/:id/apply` | |
+| GET | `/shifts` · `/shifts/:id` | Open shift lines (Base B), by date and distance |
+| POST | `/shifts/:id/accept` · `/shifts/:id/cancel` | |
+| GET | `/my-applications` · `/my-shifts` | |
+| POST | `/shifts/:id/check-in` · `/check-out` | **Accepts a client timestamp and a `clientEventId`** |
+| POST | `/check-ins/sync` | Batch offline sync |
+| GET/POST | `/me/documents` | Upload via `02-04` presigned |
+| GET/PUT | `/me/notification-preferences` | |
+| GET | `/me/availability-question` | The current question, if any |
+| POST | `/me/availability-response` | **Same schema as the WhatsApp reply** |
+| POST | `/me/devices` | Push token registration |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `supply.candidate.registered` · `supply.application.created` ·
+`supply.shift.accepted` / `.cancelled` · **`supply.check_in.recorded`** (consumed by `03-12`) ·
+`engage.availability.responded` (consumed by `03-08`)
+
+**Subscribes:** `demand.shift_line.created` → push notification to matching Base B candidates ·
+`select.offer.sent` → push · `place.trial_event.due` → push · `supply.credential.expiring` → push
+
+**Jobs:** `app.notify-new-shifts` (every 30 min) — batched push for newly opened shift lines matching
+a candidate's profile. Batched deliberately: a nurse receiving eleven separate notifications in a
+minute uninstalls the app, and the app is on the revenue critical path.
+
+---
+
+## 9. Frontend — `apps/mobile` (React Native)
+
+### 9.1 Sign up (`M4-I1`)
+
+Phone → OTP → category → **consent**. Consent is purpose-specific and versioned; the notice text is
+shown, not linked (`01-10 §4`). Minimum friction: a shift nurse abandoning at step four costs Apollo
+a supply record.
+
+### 9.2 Build profile (`M4-I2`)
+
+Two paths, both offered: **upload a CV** (parsed, then corrected) or **type it in**. Parsed fields
+are pre-filled and **low-confidence fields are visually flagged** so the candidate knows what to
+check. Nothing is written until the candidate confirms.
+
+### 9.3 Specialty details (`M4-I3`)
+
+The category-specific attributes, rendered from `03-05`'s definitions. The screen states plainly that
+these determine which jobs and shifts they are matched to — *"these are exactly what M6 ranks on"*.
+
+### 9.4 Jobs (`M4-I4`) — Base A
+
+Permanent roles: title, location, salary band, requirements. **Whether the hospital is named depends
+on the client's `disclose_identity_to_candidates` flag** (`OI-HS-13`, `03-01 §11`).
+
+### 9.5 Shifts (`M4-I5`) — Base B
+
+*"This is the reason shift workers open the app regularly."*
+
+Open shifts by date, distance and rate. Calendar and list views. Accept, and see it appear in "my
+shifts". Cancellation within a configurable window; later cancellations require contacting Ops.
+
+This screen is the app's retention mechanism. If it is slow or empty, the whole Base B model —
+including attendance and therefore shift invoicing — degrades.
+
+### 9.6 My applications (`M4-I6`)
+
+*"Where a candidate sees what is happening with their applications and shifts."* Status per
+application in plain language: applied → shortlisted → interview → offer → joined. Upcoming shifts,
+past shifts, earnings summary.
+
+### 9.7 Shift check-in (`M4-I7`)
+
+**The most important screen in the app — it is the only way attendance reaches the platform.**
+
+Requirements beyond the obvious:
+
+| | |
+|---|---|
+| **Works offline** | Queue locally, sync on reconnect, show a clear pending state. Hospital basements have no signal and this cannot be a failure mode. |
+| **Records the candidate's timestamp** | `recorded_at`, not server time |
+| **Idempotent** | `clientEventId` survives retries |
+| **Location captured, never blocking** | Recorded with accuracy and source; a refused permission or no fix does not prevent check-in in R1 |
+| Large targets, one hand, gloves | Used at a ward door at shift change |
+| Obvious state | "Checked in at 19:02" — no ambiguity about whether it worked |
+| Raise an issue | Wrong shift, ward changed, cannot start — reaches `03-12`'s issue path |
+
+### 9.8 My documents (`M4-I8`)
+
+Which documents are needed, which are uploaded, which are verified, which were rejected **and why**.
+Camera capture with client-side compression (`02-04 §9`).
+
+### 9.9 Notification settings (`M4-I9`)
+
+Which channels the candidate accepts. **`03-08` must respect this on every send** — enforced at send
+time, not enqueue time (`02-07 §6`).
+
+### 9.10 Am I available (`M4-I10`)
+
+The availability question, answered in the app. *"Same answer format as the WhatsApp version"* — one
+schema, two channels, and a test that asserts both produce identical records (`03-08`).
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | A candidate registers with phone and OTP, entirely separately from Apollo staff logins | `M4-I1`, `M0-I1` |
+| 2 | Consent is captured at sign-up, purpose-specific and versioned | `M4-I26` |
+| 3 | A CV is parsed and the candidate corrects it before anything is written | `M4-I2`, `M4-I19` |
+| 4 | Category attributes come from one definition shared with Ops, M3 and M6 | `M4-I3`, `M4-I25` |
+| 5 | **Shift check-in works with no connectivity and syncs later without duplicating** | `M4-I7` |
+| 6 | The check-in records the candidate's timestamp, and the sync gap is visible | `M4-I7` |
+| 7 | **Location is recorded, never enforced, in R1** | `M8` CLOSED |
+| 8 | Switching enforcement on in M12 needs **no data change** | `M12-I5` |
+| 9 | An availability answer from the app is identical in structure to one from WhatsApp | `M4-I10`, A14 |
+| 10 | Notification preferences are respected on every send | `M4-I9` |
+| 11 | A candidate endpoint never accepts a candidate id — always the authenticated identity | `01-07` |
+| 12 | Whether a client is named on a job listing follows the client's disclosure flag | `OI-HS-13` |
+| 13 | Push notifications for new shifts are batched, not one per shift | §8 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-HS-08`** | **Native iOS and Android, or cross-platform** — and the store release cycle it implies | **D3 is a hard dependency of the contractual invoice chain. Store review cycles add calendar time that no amount of build capacity removes.** | **`AS-28`** — **React Native**. One codebase, adequate for this feature set, and the only native requirement (background location) is not needed in R1 because location is recorded at the moment of check-in, not tracked. **Start store enrolment in month 2** — Apple requires a D-U-N-S number in Apollo's name. |
+| `OI-HS-13` | Does the candidate see which hospital a role is with? | Straightforward now, awkward once listings are live | Flag on the client record, read here. Built now. |
+| `OI-A-08` | Free-text fallback in A14 — no accuracy threshold or human-review path specified | A misparsed response resets confidence wrongly and the candidate drops out of cadence silently | The app uses **structured answers only** — buttons, not free text. The ambiguity is a WhatsApp problem (`03-08`), and the app deliberately avoids it. |
+| — | Offline retention window | Not specified | **`AS-29`** — queue up to 7 days of check-ins locally; warn the candidate if a sync is more than 24h stale, since an unsynced check-in is unpaid work |
+| — | Regional languages | Not requested; voice provider language coverage is already open (`OI-A-09`) | i18n layer from the start, English only shipped (`02-05 §12`) |
+
+---
+
+## 12. Notes for the implementer
+
+**Start in month 2, before the backend is ready.** App store enrolment, the D-U-N-S registration and
+the first review are the long poles, and they are all administrative. The app can be built against
+fakes and the seed dataset.
+
+**Check-in is the revenue path — build it first and build it defensively.** Offline queue,
+idempotency key, candidate-side timestamp, unambiguous confirmation. Every other screen can degrade
+gracefully; this one cannot, because a lost check-in is an unbilled shift and an unpaid nurse.
+
+**One availability schema, two channels.** Write the test that submits the same answer through
+`/me/availability-response` and through the WhatsApp webhook, and asserts the resulting
+`AvailabilityResponse` rows are structurally identical. That is A14's actual requirement, and it is
+the kind of thing that quietly diverges.
+
+**Assume a mid-range Android on a poor connection.** Compress images before upload, paginate
+everything, cache aggressively, and never block a screen on a network call that is not essential to
+it.
+

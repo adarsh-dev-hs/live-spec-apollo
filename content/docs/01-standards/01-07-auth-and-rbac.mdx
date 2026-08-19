@@ -1,0 +1,266 @@
+---
+title: "01-07 · Authentication, Authorisation and Data Scope"
+description: "The plan is explicit that these must not be conflated: \"Candidate logins are completely separate from this — they use phone and code in M4\" (M0-I1)."
+---
+
+---
+
+## 1. Four identity types, deliberately separate
+
+The plan is explicit that these must not be conflated: *"Candidate logins are completely separate
+from this — they use phone and code in M4"* (`M0-I1`).
+
+| Identity | Who | Auth | Store | Introduced |
+|---|---|---|---|---|
+| **AppUser** | Apollo staff | Email + password + session cookie | `platform.app_user` | M0 |
+| **Candidate** | Nurses, doctors, allied health | Phone + OTP → JWT + refresh | `supply.candidate` | M4 |
+| **ClientUser** | Hospital staff | Email + password + session cookie | `platform.client_user` | M10 |
+| **LinkRecipient** | Hospital staff, no account | **Signed token in a URL** | `platform.link_recipient` | M7 |
+
+Separate tables, separate password/credential storage, separate session stores, separate cookie
+names, separate middleware, separate route namespaces. A candidate cannot authenticate to an Ops
+endpoint by any code path, because there is no code path.
+
+**LinkRecipient is not really an identity** — it is a capability. The token grants the right to
+answer one question about one record, once. That is the whole model, and it is why clients need no
+account in Release 1.
+
+---
+
+## 2. Apollo staff sessions
+
+| | |
+|---|---|
+| Password | `argon2id`, minimum 12 characters, checked against a breached-password list |
+| Session | Random 256-bit, stored **hashed** in Redis, cookie is `HttpOnly` `Secure` `SameSite=Lax` |
+| Idle timeout | Configurable (`platform.session_idle_minutes`), default 60 min, sliding |
+| Absolute timeout | 12 hours, non-sliding |
+| Lockout | 5 failed attempts / 15 min, per account **and** per IP |
+| Reset link | Single use, 30-minute expiry, invalidates all sessions on use |
+| Audit | Every login, failed login, lockout, reset and logout (`M0-I1`) |
+
+**Session expiry must not lose unsaved form state** (`M1-I1`). The client detects 401, shows a
+re-authentication dialog in place, and resumes the request on success — it does not hard-redirect
+away from a half-filled requisition form.
+
+---
+
+## 3. Candidate authentication
+
+| | |
+|---|---|
+| Identifier | Phone number, E.164 |
+| OTP | 6 digits, hashed in Redis, 5-minute TTL, single use |
+| Rate limit | 3 requests/hour per phone, 10/hour per IP |
+| Tokens | Access JWT 15 min, refresh token 30 days, **rotating** with reuse detection |
+| Reuse detection | A replayed refresh token revokes the whole family and logs a security event |
+| Device | Refresh tokens are per-device; a candidate can be signed in on two phones |
+| Recovery | Phone change requires Ops verification — it is the only identifier |
+
+No password anywhere in the candidate flow. This is correct for the population: many shift workers
+will not maintain one, and the phone is already the account.
+
+---
+
+## 4. Client link tokens
+
+The mechanism behind every no-login client interaction (`02-10`).
+
+```
+https://links.apollo-gwd.in/l/<48-char-random-token>
+```
+
+| Property | |
+|---|---|
+| Token | 256-bit random, URL-safe. Stored **hashed** — the plaintext exists only in the message we sent. |
+| Scope | One link record: one type, one target entity, one recipient |
+| Expiry | Per link type, configurable. Unanswered links expire on a schedule. |
+| Reuse | Answerable once. Re-opening after answering shows the answer, read-only. |
+| Attribution | Every open and every answer is timestamped **against the identified recipient** |
+| Rate limit | 20 req/min per token |
+| Enumeration | No sequential ids, no listing endpoint, constant-time comparison |
+
+**Why attribution is non-negotiable:** the day-90 answer is the legal evidence behind a placement
+invoice. "Somebody at the hospital clicked yes" does not survive a billing query. The recipient
+identity model is **open (`OI-A-12`)** — working assumption `AS-05`: recipients are held as
+`ClientContact` records against a client + location, and the link records which contact it was sent
+to and which contact answered.
+
+---
+
+## 5. Permission model
+
+```
+<module>.<resource>.<action>
+```
+
+```
+demand.requisition.read
+demand.requisition.close
+supply.candidate.merge
+bill.invoice.raise
+platform.user.deactivate
+```
+
+| Layer | |
+|---|---|
+| **Permission** | One capability. Declared by the module that owns the resource, in `permissions.ts`. |
+| **Role** | A named bundle of permissions |
+| **Assignment** | A user holds one or more roles, plus a site assignment |
+
+**Roles are configuration, not screen-edited.** `M0-I3` is explicit: *"Read only — the permission set
+for each role is held in configuration, not edited on screen."* The role screen shows what each role
+can reach; changing it is a config change through the settings mechanism, which is audited.
+
+### Release 1 roles
+
+| Role | Reaches |
+|---|---|
+| `platform_admin` | Everything, including settings, users, adapters, templates |
+| `fulfilment_lead` | Demand, allocation, matching, selection, placements, trial, timesheets |
+| `recruiter` | Requisitions, candidates, search, shortlist, interviews — scoped to their sites |
+| `bd` | Clients, contracts, rate cards, offers |
+| `verification` | Verification queue, credentials, documents |
+| `finance` | Invoices, receivables, timesheets, rate variance, billing evidence |
+| `leadership` | Read-only reporting across everything |
+| `client_user` (M10) | Portal only, scoped to their own client |
+
+A user with **no** role can sign in but reaches nothing — and sees a proper "no access" screen rather
+than an error on every page (`M0-I3`).
+
+---
+
+## 6. Enforcement
+
+Server-side, on every request, without exception.
+
+```ts
+router.post('/:id/close',
+  requirePermission('demand.requisition.close'),
+  validate({ params: idParam, body: closeBody }),
+  c.close)
+```
+
+| Rule | |
+|---|---|
+| The frontend check is **UX only** | It hides buttons. It is never the enforcement. |
+| Permission changes take effect on the **next request**, not the next login (`M0-I3`) | Permission sets are cached in Redis with a 60s TTL and explicitly invalidated on role change |
+| Every permission change is audited | |
+| No module builds its own access rules | The role set covers every Apollo user across every module (`M0-I3`) |
+| A test calls each mutating endpoint as the wrong role and asserts 403 | Part of the definition of done |
+
+---
+
+## 7. Data scope (row-level)
+
+Separate from permissions, and applied separately.
+
+```
+Permission answers: may this role do this kind of thing?
+Scope answers:      which rows may this user do it to?
+```
+
+```ts
+interface Scope {
+  kind:     'all' | 'sites' | 'client'
+  siteIds?: string[]      // AppUser with site assignment
+  clientId?: string       // ClientUser — portal
+}
+```
+
+Applied **inside the repository**, never in a controller:
+
+```ts
+list: (tx, filter, scope) => applyScope(baseQuery(filter), scope)
+```
+
+Because a new caller must not be able to forget it. A repository method that takes a filter but no
+scope is a review rejection.
+
+| Actor | Scope |
+|---|---|
+| `platform_admin`, `leadership`, `finance` | `all` |
+| `recruiter` (site-resident) | `sites` — **open (`OI-HS-01`)** |
+| `recruiter` (floating) | `all` |
+| `client_user` | `client` — always, no exceptions |
+
+**`OI-HS-01` is the most important open item in this document.** Whether a site-resident recruiter
+sees only their own site's requisitions and candidates, or the whole base, changes every list in the
+platform. It is cheap to decide now and expensive to retrofit.
+
+Working assumption `AS-02`: **build the scope mechanism from day one and apply it everywhere**,
+defaulting `recruiter` to `all` until Apollo decides. Switching the default is then a config change,
+not twenty migrations and twenty query rewrites.
+
+### Portal scoping is a security boundary, not a filter
+
+`M10-I8`: *"Every portal query must be limited to the signed-in user's client and sites. One mistake
+here leaks another hospital's data."*
+
+For the portal specifically:
+- Scope is applied at the repository **and** re-asserted on the returned rows before serialisation
+- A cross-client access attempt returns 403, is logged as a security event, and alarms
+- An integration test suite exists whose entire purpose is attempting cross-client access on every
+  portal endpoint
+
+---
+
+## 8. Actor context
+
+Resolved once by middleware, carried everywhere:
+
+```ts
+interface Actor {
+  type:     'user' | 'candidate' | 'client_user' | 'link' | 'system'
+  id:       string
+  roles:    string[]
+  scope:    Scope
+  sessionId?: string
+}
+```
+
+| Rule | |
+|---|---|
+| Every service method takes an `actor` | Never reads it from a global or from `req` |
+| Every audit entry records the actor | |
+| `system` is used by jobs and schedulers, and is a **real, distinguishable actor** in the audit trail | "who deemed this timesheet approved" must have an answer |
+| A job triggered by a user carries that user's actor, not `system` | |
+
+---
+
+## 9. Service-to-service and machine callers
+
+| Caller | Mechanism |
+|---|---|
+| Client HRMS feed | Per-client API key + HMAC-SHA256 body signature + timestamp window. Keys rotate; both old and new valid during rotation. |
+| Provider webhooks | Provider's own signature scheme, verified **before parsing the body** |
+| Finance system export | Pull with API key, or file drop to S3 — decided when the system is named (`OI-A-14`) |
+| Internal (api → worker) | No auth — same VPC, same trust boundary, not exposed |
+
+---
+
+## 10. Secrets
+
+| Rule | |
+|---|---|
+| All credentials in AWS Secrets Manager | Nothing in env vars, nothing in the image, nothing in git |
+| Rotation | Database and Redis credentials rotate automatically; external API keys manually with a documented runbook |
+| Local development | `.env.local`, gitignored, containing only fake-adapter values |
+| **After handover, no Hiresense-held credential is required at runtime** | `M1-I5` — a stated acceptance criterion |
+| `gitleaks` runs in CI | A committed secret fails the build |
+
+---
+
+## 11. What gets audited
+
+Everything in this list, without exception (`02-02`):
+
+authentication (login, failed login, lockout, logout, password reset) · permission and role changes ·
+user creation, activation, deactivation, site assignment · every state transition on every entity ·
+every configuration change · every client link issued, opened and answered · every billing trigger
+and invoice · every merge of duplicate records · every manual override of a system decision · every
+approval and rejection · every export of personal data · every cross-client access attempt.
+
+The day-90 billing trigger cannot be defended without this, which is the plan's own reason for
+building the audit trail once rather than six times (`M0-I4`).
+

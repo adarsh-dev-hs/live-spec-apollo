@@ -1,0 +1,11 @@
+{
+  "title": "Delivery",
+  "pages": [
+    "index",
+    "05-01-build-order",
+    "05-02-implementation-playbook",
+    "05-03-open-decisions"
+  ],
+  "icon": "Rocket",
+  "description": "Build order, playbook and the open decisions still blocking work."
+}

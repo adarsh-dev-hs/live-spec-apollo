@@ -1,0 +1,305 @@
+---
+title: "01-04 · API Contract"
+description: "Every endpoint in the platform follows this. No module invents its own shape."
+---
+
+Every endpoint in the platform follows this. No module invents its own shape.
+
+---
+
+## 1. Base
+
+| | |
+|---|---|
+| Base path | `/api/v1` |
+| Format | JSON only. `Content-Type: application/json`. |
+| Versioning | Path prefix. `v2` only for a genuine break; additive changes stay in `v1`. |
+| Time | ISO 8601 with offset: `2026-08-18T09:30:00.000Z`. Always UTC on the wire. |
+| Dates | `YYYY-MM-DD` for business dates (joining date, contract effective date) |
+| Money | `{ "amount": "45000.00", "currency": "INR" }` — **string, never a number** |
+| IDs | UUID v7 strings |
+| Casing | `camelCase` on the wire, `snake_case` in the database |
+
+### Route naming
+
+```
+/api/v1/requisitions                  collection
+/api/v1/requisitions/:id              member
+/api/v1/requisitions/:id/versions     sub-collection
+/api/v1/requisitions/:id/hold         action (POST) — a verb, when it is not CRUD
+```
+
+Actions are allowed and encouraged. `POST /requisitions/:id/hold` says what happens; a `PATCH` with
+`{status:'on_hold'}` pretends a state machine is a field.
+
+---
+
+## 2. Response envelope
+
+### Single resource
+
+```json
+{
+  "data": {
+    "id": "018f...",
+    "reference": "REQ-2026-00142",
+    "status": "in_fulfilment"
+  },
+  "meta": { "requestId": "01J2..." }
+}
+```
+
+### Collection
+
+```json
+{
+  "data": [ { "id": "..." } ],
+  "meta": {
+    "requestId": "01J2...",
+    "page": { "number": 1, "size": 25, "totalItems": 342, "totalPages": 14 }
+  }
+}
+```
+
+### Error
+
+```json
+{
+  "error": {
+    "code": "requisition.invalid_transition",
+    "message": "A closed requisition cannot be placed on hold.",
+    "details": [
+      { "path": "status", "code": "invalid_transition", "message": "closed → on_hold is not permitted" }
+    ]
+  },
+  "meta": { "requestId": "01J2..." }
+}
+```
+
+| Field | Rule |
+|---|---|
+| `code` | Machine-readable, stable, `<module>.<condition>`. Clients switch on this, never on `message`. |
+| `message` | Human-readable, safe to show a user, no internals |
+| `details` | Field-level errors, `path` addressable by the form |
+| `requestId` | On every response, success or failure. It is what a support ticket quotes. |
+
+**`data` and `error` are mutually exclusive.** Never both, never neither.
+
+---
+
+## 3. Status codes
+
+| Code | Meaning |
+|---|---|
+| 200 | OK |
+| 201 | Created — with `Location` header |
+| 202 | Accepted — work enqueued (migration batch, bulk export, pay run) |
+| 204 | No content |
+| 400 | Malformed request |
+| 401 | Not authenticated |
+| 403 | Authenticated, not permitted — **or out of data scope** (see §9) |
+| 404 | Not found |
+| 409 | Conflict — invalid state transition, duplicate, optimistic-lock failure |
+| 422 | Validation failed |
+| 429 | Rate limited — with `Retry-After` |
+| 502 | External adapter failed — body carries `adapterCallId` |
+| 503 | Dependency unavailable |
+
+---
+
+## 4. Pagination, filtering, sorting
+
+```
+GET /api/v1/requisitions
+    ?page[number]=2
+    &page[size]=50
+    &sort=-createdAt,reference
+    &filter[status]=open,in_fulfilment
+    &filter[clientId]=018f...
+    &filter[ageDays][gte]=7
+    &filter[q]=icu
+```
+
+| | |
+|---|---|
+| Default size | 25. Max **200**. A larger request is clamped, not rejected. |
+| Sort | Comma-separated, `-` for descending. Only whitelisted columns. |
+| Filter | `filter[field]=a,b` = IN. `filter[field][op]=v` for `gte`, `lte`, `gt`, `lt`, `ne`, `like`. |
+| Free text | `filter[q]` — the module defines which columns it searches |
+| Cursor pagination | Used only where offset paging genuinely fails: `event_store`, `audit_entry`, notification log. `page[after]=<cursor>`. |
+
+**Every list endpoint is paginated.** There is no "just return everything" endpoint, including for
+dropdowns — those use a dedicated `/lookup` endpoint that is capped and searchable.
+
+---
+
+## 5. Sparse fieldsets and expansion
+
+```
+GET /api/v1/requisitions?fields=id,reference,status,client.name
+GET /api/v1/requisitions/:id?expand=client,owner,rateCard
+```
+
+Expansion is **whitelisted per endpoint** and composed server-side. The browser never fans out
+across modules to assemble a screen — that is the backend's job (`00-04 §4`).
+
+---
+
+## 6. Idempotency
+
+```
+POST /api/v1/invoices
+Idempotency-Key: 018f2a...
+```
+
+Supported on every POST that creates something with a real-world consequence: invoices, offers,
+messages, payments, credit notes, pay runs.
+
+Behaviour: first call stores `(key, request hash, response)` in Redis for 24h. A repeat with the same
+key and same body returns the stored response. A repeat with the same key and a *different* body is
+`409 idempotency_key_reuse`.
+
+---
+
+## 7. Concurrency
+
+Optimistic locking on records more than one person edits — requisitions, contracts, candidates,
+timesheets:
+
+```
+GET  /api/v1/requisitions/:id      → ETag: "7"
+PATCH /api/v1/requisitions/:id     → If-Match: "7"
+```
+
+Mismatch → `409 stale_version`, and the client refetches and shows what changed. This matters most on
+the fulfilment board, where several recruiters work the same list.
+
+---
+
+## 8. Authentication
+
+Three identity types, three mechanisms, **completely separate** (`01-07`):
+
+| Caller | Mechanism | Header |
+|---|---|---|
+| Apollo staff (Ops) | Session cookie, `HttpOnly` `Secure` `SameSite=Lax` | — |
+| Candidate (mobile) | JWT access (15 min) + rotating refresh token | `Authorization: Bearer <jwt>` |
+| Client user (portal, M10) | Session cookie, separate cookie name and store | — |
+| Client link recipient | **Signed opaque token in the URL path** | none — the token *is* the request |
+| Client HRMS feed | API key + HMAC signature | `X-Apollo-Key`, `X-Apollo-Signature` |
+| Provider webhooks | Provider signature verification | provider-specific |
+
+Public token routes are namespaced so they can never be confused with authenticated ones:
+
+```
+GET  /api/v1/public/links/:token
+POST /api/v1/public/links/:token/respond
+```
+
+---
+
+## 9. Permissions and data scope
+
+Two independent checks. Both server-side. Both on every request.
+
+```
+requirePermission('demand.requisition.hold')   → 403 if the role lacks it
+applyScope(query, req.actor.scope)             → row-level filter
+```
+
+**A resource outside your scope returns 404, not 403.** Telling a recruiter "requisition X exists but
+you may not see it" leaks that it exists. The one exception is the portal, where a client user
+attempting cross-client access gets a 403 and it is logged as a security event.
+
+Whether a site-resident recruiter sees only their own site is **open (`OI-HS-01`)**. Working
+assumption `AS-02`: the scope resolver is built and applied everywhere from day one, defaulting to
+*all sites* until Apollo decides. Building the mechanism now costs little; retrofitting row-level
+scoping across twenty list endpoints later costs a great deal.
+
+---
+
+## 10. Rate limiting
+
+| Surface | Limit |
+|---|---|
+| Authenticated API | 300 req/min per user |
+| Login | 5 attempts / 15 min per account **and** per IP, then lockout (audited) |
+| Candidate OTP request | 3 / hour per phone, 10 / hour per IP |
+| Public link token | 20 req/min per token |
+| HRMS feed | Per client key, negotiated |
+| Webhooks | Not limited — but dedupe and verify signatures |
+
+`429` carries `Retry-After`. Every lockout is written to the audit trail.
+
+---
+
+## 11. Long-running operations
+
+Anything that could exceed ~5 seconds returns `202` and a job resource:
+
+```
+POST /api/v1/migration/batches/:id/start    → 202
+{ "data": { "jobId": "...", "status": "queued", "statusUrl": "/api/v1/jobs/018f..." } }
+
+GET /api/v1/jobs/:id
+{ "data": { "status": "running", "progress": { "processed": 4120, "total": 51200 },
+            "result": null, "error": null } }
+```
+
+Applies to: migration batches, bulk exports, ranking runs over a large pool, cadence campaigns,
+monthly MIS pack generation, pay runs, bulk salary revision.
+
+**Progress must be observable while the job runs, not only on completion** — a stated requirement for
+migration (`M1-I2`).
+
+---
+
+## 12. Webhooks in
+
+```
+POST /api/v1/webhooks/whatsapp
+POST /api/v1/webhooks/voice
+POST /api/v1/webhooks/esignature
+POST /api/v1/webhooks/verification
+POST /api/v1/webhooks/payroll
+POST /api/v1/hrms/:clientKey/requisitions
+```
+
+Every one of them, without exception:
+
+1. Verifies the signature **before parsing the body**
+2. Dedupes on the provider's message id
+3. Persists the **raw payload** immediately, before any interpretation
+4. Returns `200` fast — enqueue the work, never process inline
+5. Never trusts the payload shape without a zod parse
+
+Point 3 is the one people skip. The raw payload is what lets you replay a bad parse and what lets you
+answer "what did the client actually send us" months later.
+
+---
+
+## 13. OpenAPI
+
+The spec is generated from the zod contracts, not hand-written.
+
+```bash
+pnpm api:openapi     # → openapi.json → @apollo/api-client
+```
+
+- Generated in CI; a drift between code and spec fails the build
+- The typed client is what every frontend imports. A breaking API change fails the frontend typecheck
+  in the same PR — which is the main reason the monorepo exists.
+- Published as part of the technical documentation deliverable (`M1-I6`)
+
+---
+
+## 14. Deprecation
+
+Additive changes ship in `v1`. Removals do not.
+
+To remove a field: mark deprecated in OpenAPI → `Deprecation` and `Sunset` headers on responses →
+log every call still using it → remove after the sunset date. Minimum one full milestone of overlap.
+
+External consumers (client HRMS feeds, the finance export) get written notice, because their release
+cycles are not ours.
+

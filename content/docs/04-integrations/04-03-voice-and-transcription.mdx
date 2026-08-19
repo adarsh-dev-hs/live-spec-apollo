@@ -1,0 +1,264 @@
+---
+title: "04-03 · Outbound Voice and Speech-to-Text"
+description: "Two related but distinct capabilities, possibly from one supplier and possibly from two — which is itself an open question."
+---
+
+**Ports** `voice_outbound`, `speech_to_text` · **Supplier** not named (`OI-A-09`, `OI-M3-05`)
+**Risk** High · **Used by** `03-08` (A5), `03-03` (voice notes), `03-11` (escalated check-ins)
+
+---
+
+## 1. Purpose
+
+Two related but distinct capabilities, possibly from one supplier and possibly from two — **which is
+itself an open question**.
+
+| Capability | Purpose | Module |
+|---|---|---|
+| **Outbound voice (A5)** | Call candidates who have not responded on any other channel, ask whether they are still available, and write the answer back | `03-08` |
+| **Speech-to-text** | Transcribe WhatsApp voice notes from clients into the requisition schema | `03-03` |
+
+> A5 calls nurses who have not responded on any other channel, asks whether they are still available,
+> and writes the answer back. **Apollo buys the calling service; we build the integration and the part
+> that turns a spoken answer into structured data.** — `OI-A-09`
+
+---
+
+## 2. Why this is the hardest unnamed supplier
+
+> Different providers differ enormously in **how conversations are handled, what the transcript looks
+> like, and which Indian languages are covered.** Apollo has not named one.
+>
+> The integration cannot be sized against an unknown API, and **language coverage cannot be tested.**
+
+Three specific difficulties:
+
+1. **Language.** This workforce is not English-first. Coverage of Hindi, Tamil, Telugu, Malayalam,
+   Kannada, Bengali and Marathi varies enormously between providers, and a provider that handles
+   English beautifully and Tamil poorly is unusable for a Chennai-based shift pool.
+2. **Field audio.** *"Audio is captured in the field, not in a studio"* (`OI-M3-05`) — a nurse
+   recording a voice note in a ward corridor, a client dictating a requirement while walking. Accuracy
+   claims from clean-audio benchmarks do not transfer.
+3. **Conversation model.** Some providers offer a scripted IVR (DTMF and fixed prompts); others a
+   conversational agent. These produce completely different transcripts and completely different
+   integration work.
+
+---
+
+## 3. One provider or two?
+
+> Determines **one integration or two**, and whether language coverage is proven once. — `OI-M3-05`
+
+**Two separate ports either way.** Outbound voice is a conversation with a lifecycle; speech-to-text
+is a stateless transform. Keeping them separate means one supplier can serve both (two adapters, one
+account) or two can (two adapters, two accounts) with no structural difference.
+
+**Working assumption:** one provider, chosen partly on language coverage across both use cases. If
+Apollo names two, it is a second adapter, not a second design.
+
+---
+
+## 4. Ports
+
+### 4.1 Outbound voice
+
+```ts
+export const VoiceOutboundPort = definePort({
+  key: 'voice_outbound',
+  operations: {
+    placeCall: {
+      input: z.object({
+        to: z.string(),                      // E.164
+        scriptKey: z.string(),               // provider-hosted script/flow
+        language: z.string(),                // 'hi-IN' | 'ta-IN' | 'en-IN' | ...
+        variables: z.record(z.string()),
+        callbackUrl: z.string(),
+        maxDurationSeconds: z.number(),
+      }),
+      output: z.object({ providerCallId: z.string(), status: z.string() }),
+      redact: ['to'],
+      timeout: 20_000,
+      retryable: false,                       // a retried call is a second phone call to a person
+    },
+    getCallResult: {
+      input: z.object({ providerCallId: z.string() }),
+      output: z.object({
+        status: z.enum(['completed','no_answer','busy','failed','voicemail']),
+        durationSeconds: z.number(),
+        transcript: z.string().optional(),
+        structuredAnswers: z.record(z.unknown()).optional(),  // if the provider extracts
+        recordingUrl: z.string().optional(),
+        cost: z.object({ amount: z.number(), currency: z.string() }).optional(),
+      }),
+    },
+  },
+  manualFallback: {
+    supported: true,
+    createTask: (input) => ({ kind: 'manual_call', payload: input }),   // a recruiter phones them
+  },
+})
+```
+
+**`retryable: false` is deliberate.** A retried API call means a second phone call to a real person,
+billed per minute. Retry is a scheduling decision made by `03-08`'s cadence, with its own rules, not
+an adapter concern.
+
+**The manual fallback is a real path.** If the provider is down or the language is unsupported, the
+task becomes "a recruiter calls this person" — which is what Apollo does today anyway.
+
+### 4.2 Speech-to-text
+
+```ts
+export const SpeechToTextPort = definePort({
+  key: 'speech_to_text',
+  operations: {
+    transcribe: {
+      input: z.object({
+        audioUrl: z.string(),                // presigned, short expiry
+        languageHint: z.string().optional(),
+        durationSeconds: z.number(),
+      }),
+      output: z.object({
+        transcript: z.string(),
+        confidence: z.number(),
+        detectedLanguage: z.string().optional(),
+        cost: z.object({ amount: z.number(), currency: z.string() }).optional(),
+      }),
+      timeout: 120_000,                      // long audio
+      retryable: true,                       // but see §6 — per-minute billed
+    },
+  },
+  manualFallback: {
+    supported: true,
+    createTask: (input) => ({ kind: 'manual_transcription', payload: input }),
+  },
+})
+```
+
+Manual fallback here is the **manual entry queue** (`03-03 §9.5`) — the audio is playable, a person
+listens and types. This is why `02-04` requires voice notes to stay playable from the queue.
+
+---
+
+## 5. Answer extraction (`M5-I13`)
+
+*"Turn a phone conversation into the same answer format the app and WhatsApp produce."*
+
+Some providers return structured answers; others return only a transcript. The port covers both, and
+`03-08 §7.4` extracts where needed:
+
+```
+if provider returned structuredAnswers → normalise to AvailabilityResponse, confidence from provider
+else → extract from transcript via the classification model → confidence from the model
+
+if confidence < threshold (AS-30: 0.85) → needs_review, and confidence is NOT reset
+```
+
+**A low-confidence voice answer must not reset availability confidence.** *"A misparsed response
+resets confidence wrongly and the candidate drops out of cadence silently"* (`OI-A-08`). The review
+queue (`03-08 §9.5`) is what makes that failure visible.
+
+---
+
+## 6. Cost
+
+| | |
+|---|---|
+| Outbound voice | **Per minute**, plus inference for a conversational layer |
+| Speech-to-text | **Per minute** |
+| Recorded | `engage.voice_call.cost_amount`, `platform.adapter_call.cost_amount` |
+
+**Do not retry transcription blindly** (`01-06 §6`). A transient failure on a three-minute voice note
+retried five times bills fifteen minutes for one requirement. Retry twice, then fall back to the
+manual queue — which is cheaper and more reliable.
+
+Volume drivers: escalation rate × base size for voice; how many clients use voice notes for
+transcription. Both feed the `OI-HS-05` model.
+
+---
+
+## 7. Call flow
+
+```
+03-08 cadence: candidate unresponsive after N attempts on other channels
+   → engagement.escalate-to-voice job
+   → VoiceCall row created, status 'queued'
+   → adapters.call('voice_outbound','placeCall')          status 'dialling'
+   → provider dials
+        ├─ connected  → conversation → provider callback
+        └─ no answer  → callback → retry per cadence rules (NOT per adapter retry)
+   → POST /api/v1/webhooks/voice
+        → signature verified, raw persisted, 200 returned fast
+        → engagement.voice-extract job
+        → transcript → structured answer → confidence check
+             ├─ ≥ threshold → AvailabilityResponse, confidence RESET
+             └─ < threshold → review queue, confidence NOT reset
+```
+
+---
+
+## 8. Selection criteria — for when Apollo chooses
+
+Worth handing to Apollo as the basis for the decision, because the failure modes are not obvious:
+
+| Criterion | Why it matters here |
+|---|---|
+| **Indian language coverage** | The workforce is not English-first. Test the actual languages of Apollo's base. |
+| **Field-audio accuracy** | Benchmark on real WhatsApp voice notes from a ward, not on clean samples |
+| **Data residency** | Must process in India, or the DPDP position breaks (`01-10 §3`) |
+| Conversational vs IVR | Changes the integration substantially |
+| Structured extraction | Provider-side extraction reduces our model cost and our failure surface |
+| Transcript format and confidence reporting | Per-word confidence is far more useful than a single score |
+| Per-minute pricing and minimum billing increment | A 20-second call billed as a minute changes the model |
+| Callback reliability and retry semantics | |
+| Sandbox availability | Without one, the adapter cannot be built before go-live |
+
+**Language coverage and residency are the two that disqualify.** The rest are trade-offs.
+
+---
+
+## 9. Acceptance criteria
+
+| # | Criterion |
+|---|---|
+| 1 | Outbound voice and speech-to-text are separate ports, servable by one supplier or two |
+| 2 | A voice answer produces **the same structured record** as an app or WhatsApp answer |
+| 3 | Extraction below the confidence threshold goes to human review |
+| 4 | **A low-confidence answer does not reset availability confidence** |
+| 5 | A failed or unsupported call falls back to a manual task, not silence |
+| 6 | An untranscribable voice note reaches the manual entry queue with **playable audio** |
+| 7 | Transcription is not retried blindly — two attempts, then manual |
+| 8 | The adapter never retries `placeCall` — retry is a cadence decision |
+| 9 | Every call and transcription records duration and cost |
+| 10 | The transcript is retained against the call record for dispute and accuracy measurement |
+| 11 | The fake simulates: answered, no answer, busy, voicemail, low-confidence transcript, unsupported language, and provider outage |
+
+---
+
+## 10. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-09`** | **Which provider makes the automated calls?** | **Estimate blocker. 5 items, 44pd.** Cannot be sized against an unknown API; **language coverage cannot be tested.** | Port + fake. `03-08`'s cadence, extraction schema and review queue are built and demoable. **Escalate — the language question is not answerable by us, and it is the one that determines whether A5 works at all.** |
+| **`OI-M3-05`** | Same provider for speech-to-text, or separate? | One integration or two; whether language coverage is proven once | Two ports regardless. Assume one provider; a second is a second adapter. |
+| **`OI-A-08`** | Free-text fallback threshold and human-review path | A misparse silently drops a candidate out of cadence | **`AS-30`** — 0.85, configurable, review queue, no confidence reset until reviewed |
+| — | Call recording retention | Not specified; recordings are personal data | **`AS-68`** — retain 90 days for accuracy measurement and dispute, then delete. Transcript retained per `01-10 §6`. Consent notice must mention recording. |
+| — | Which languages in R1? | | **`AS-69`** — English, Hindi, Tamil, Telugu, Malayalam as a starting set. **Apollo must confirm against its actual base distribution before provider selection.** |
+
+---
+
+## 11. Notes for the implementer
+
+**Build the fake with realistic failure.** No answer, busy, voicemail, a garbled low-confidence
+transcript, and an unsupported language are all normal outcomes at real volume — not edge cases. If
+the fake only returns clean answers, `03-08`'s review queue and escalation logic never get exercised
+until production.
+
+**Keep extraction in `03-08`, not in the adapter.** The adapter returns a transcript and whatever
+structure the provider gives. Normalising to `AvailabilityResponse` is domain logic, and it must
+produce an identical record to the app and WhatsApp paths — which is A14's actual requirement.
+
+**Push for a sandbox during supplier selection.** Without one, the real adapter cannot be built or
+tested until after contracts are signed, and this is an XXL integration sitting on the availability
+loop that everything downstream depends on.
+

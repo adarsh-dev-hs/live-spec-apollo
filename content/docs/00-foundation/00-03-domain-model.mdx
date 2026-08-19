@@ -1,0 +1,314 @@
+---
+title: "00-03 · Domain Model"
+description: "Every entity in the platform, who owns it, and how it moves. This is the single reference — module specs give column-level detail, this gives the map."
+---
+
+Every entity in the platform, who owns it, and how it moves. This is the single reference — module
+specs give column-level detail, this gives the map.
+
+---
+
+## 1. Schema ownership
+
+One Postgres database. Ten schemas. **A table is written by exactly one module.**
+
+| Schema | Owning modules | Entities |
+|---|---|---|
+| `platform` | iam, audit, config, files, events, links, approvals, adapters | User, Role, Permission, AuditEntry, Setting, ListEntry, Document, EventStore, ClientLink, Approval, AdapterCall |
+| `clients` | clients, contracts | Client, Location, Department, ClientContact, SenderIdentity, RateCard, Contract, ClientWindowConfig |
+| `demand` | intake, requisitions, demand-ops | InboundRecord, Requisition, RequisitionVersion, ShiftTemplate, ShiftDemandLine, AllocationRecord, StatusTransition, PriorityScore |
+| `supply` | candidates, credentials, migration | Candidate, Credential, CandidateDocument, VerificationCase, CategoryAttributeSet, Application, DuplicateCandidate, MigrationBatch |
+| `engage` | engagement | NotificationTemplate, NotificationLog, ContactPreference, Segment, CadenceRule, AvailabilityResponse, VoiceCall, AvailabilityConfidence |
+| `match` | matching | RankedSet, RankEntry, WeightSet, RecruiterOverride, SavedSearch, TalentSegment, OutcomeSignal |
+| `select` | selection | Interview, InterviewFeedback, SelectionDecision, Offer, OfferVersion |
+| `place` | placements, attendance, onboarding, workforce | Placement, DropOut, TrialEvent, TrialResponse, RetentionRecord, ShiftAttendance, Timesheet, AssociateProfile, StatutoryForm, WorkforceRequest |
+| `bill` | billing, collections, payroll | Invoice, InvoiceLine, BillingTrigger, Receivable, Payment, CreditNote, PayrollCycle, PayrollInput |
+| `report` | analytics | ReportingEvent, projection tables, RateBaseline, RateVariance |
+
+---
+
+## 2. The core spine
+
+The eight entities everything else hangs off:
+
+```
+   Client ──< Location ──< Department
+     │                          │
+     │                          ▼
+     ├──< Contract ──< ContractVersion ────┐
+     ├──< RateCard ──< RateCardLine        │  (temporal: read AS AT a date)
+     │                                     │
+     └──< Requisition ──< RequisitionVersion
+              │    │
+              │    └──< ShiftDemandLine  (contract staffing only)
+              │
+              ▼
+          RankedSet ──< RankEntry ──▶ Candidate ──< Credential
+              │                           │    └──< CandidateDocument
+              ▼                           │
+          Application ─────────────────────┘
+              │
+              ▼
+          Interview ──< InterviewFeedback
+              │
+              ▼
+          SelectionDecision
+              │
+              ▼
+            Offer ──< OfferVersion
+              │
+              ▼
+          Placement ──┬──< TrialEvent ──< TrialResponse
+                      │        │
+                      │        └──▶ RetentionRecord (day 90)  ─────┐
+                      │                                            │
+                      └──< ShiftAttendance ──< Timesheet ──────────┤
+                                                                   ▼
+                                                            BillingTrigger
+                                                                   │
+                                                                   ▼
+                                                        Invoice ──< InvoiceLine
+                                                                   │
+                                                                   ▼
+                                                              Receivable
+```
+
+**Read this diagram as the revenue chain.** Every arrow is a place where a break stops billing.
+
+---
+
+## 3. Entity register
+
+### `platform` — foundations
+
+| Entity | Owner | Purpose | Notes |
+|---|---|---|---|
+| `User` | iam | Apollo staff account | Email + password. Separate from candidates and client users. |
+| `Role` | iam | Named permission bundle | Permission set held in configuration, not editable on screen in R1 |
+| `Permission` | iam | One capability | `<module>.<resource>.<action>` |
+| `UserSiteAssignment` | iam | Which sites a user covers | Distinguishes 15 site-resident recruiters from 7 floating |
+| `Session` | iam | Active login | Redis-backed, sliding idle expiry |
+| `AuditEntry` | audit | Who did what, when | **Append-only.** Written by six modules. Never edited or deleted from any surface. |
+| `Setting` / `ListEntry` | config | Configurable lists and waiting periods | Per-client override over platform default |
+| `Document` | files | Every uploaded file | Versioned; replacing keeps the previous version |
+| `EventStore` | events | Every domain event | **Append-only.** M9 reads this months later. |
+| `Outbox` | events | Transactional publish buffer | Drained by relay, deleted after publish |
+| `ClientLink` | links | Tokenised no-login URL | Four types on one mechanism |
+| `LinkRecipient` | links | Who at the client received it | Identity model **open** (`OI-A-12`) |
+| `ApprovalRequest` | approvals | Maker-checker request | Raiser can never be approver — enforced in service |
+| `MarketAdapter` / `AdapterCall` | adapters | External config + every call made | Call log is the evidence when a supplier misbehaves |
+
+### `clients` — commercial
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `Client` | The hospital group | Every requisition, offer and invoice hangs off this |
+| `Location` | A hospital / site | A requisition must attach to one |
+| `Department` | A unit within a location | |
+| `ClientContact` | People at the client | Probably also where link recipients live (`OI-A-12`) |
+| `SenderIdentity` | Email / WhatsApp number / HRMS tenant → one client | Intake checks **every** inbound against this |
+| `RateCard` / `RateCardVersion` / `RateCardLine` | Charges by role, skill, location | **Temporal.** Old versions never deleted — an old requisition prices at the rate that applied when raised. |
+| `Contract` / `ContractVersion` | The signed agreement | M9 reads the version in force **at the moment the trigger fired**, not today's |
+| `ClientWindowConfig` | Three waiting periods per client | Retention deemed-confirmation, timesheet deemed-approval, requisition follow-up. Platform default if unset. |
+
+### `demand` — what the client needs
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `InboundRecord` | One row per incoming message or file | **Kept forever**, including raw payload, even after the requisition is created |
+| `Requisition` | The demand record | Client, site, role, positions, category, category-attributes, rate, completeness, missing fields, owner, status, age |
+| `RequisitionVersion` | Every change | Revision is a versioning event, not an edit |
+| `ShiftTemplate` | Repeating shift pattern | Expands into demand lines without per-shift entry |
+| `ShiftDemandLine` | One row per shift | Contract staffing only. Consumed by M6 ranking and M8 attendance. |
+| `AllocationRecord` | Which recruiters, when, by whom | **Append-only.** A record of the morning call, not an assignment engine (R1). |
+| `StatusTransition` | Every status change with a timestamp | **Append-only.** Stage-level conversion loss cannot be computed retrospectively without it. |
+| `PriorityScore` / `AllocationSuggestion` / `RecruiterCapacity` | M14 only | Scores and suggestions; never writes an allocation directly |
+
+### `supply` — who we have
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `Candidate` | The person | Category, base assignment, availability confidence (M5 writes, M6 reads) |
+| `Credential` | A registration or qualification | Issuer, validity period, verification method. **Shared across both bases** — one record, not two. |
+| `CandidateDocument` | CVs, ID scans, certificates | OCR-extracted text attaches here with per-field confidence |
+| `VerificationCase` | One check | Green / amber / red, with pendency tracking |
+| `CategoryAttributeDefinition` / `CategoryAttributeValue` | Per-category fields | Configuration, not columns. Served to app, Ops, M3 and M6 from one place so they cannot drift. |
+| `Application` | What the candidate applied for | |
+| `ShiftAcceptance` | A shift the candidate agreed to work | |
+| `DuplicateCandidate` | Two records that look like one person | Merge never deletes either record |
+| `MigrationBatch` / `MigrationRecord` / `MigrationException` | CPAL import | Placeholder sizing until profiling runs (`OI-A-02`) |
+
+### `engage` — staying in touch
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `NotificationTemplate` | Message text per channel | WhatsApp templates need provider approval first — **weeks of calendar time** |
+| `NotificationLog` | One row per message per person | Delivery outcome and cost |
+| `ContactPreference` / `OptOut` | Channels the candidate accepts | Every send must respect this |
+| `Segment` / `CadenceRule` | Who to contact and how often | Base B: whole base every 3–4 days |
+| `AvailabilityResponse` | The reply | **One schema** whether it came from WhatsApp, app or phone call |
+| `VoiceCall` / `VoiceTranscript` | Automated call log | |
+| `AvailabilityConfidence` | Freshness score | Lives on the candidate, written here, read by matching |
+
+### `match` — who fits
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `RankedSet` | One ranked list for one requisition or shift | Records which weight set produced it and when |
+| `RankEntry` | One candidate in that list | Score, **why**, and what they do not meet |
+| `WeightSet` | How much each factor counts | Per category per base — **at least six**. Model unspecified (`OI-A-11`). |
+| `RecruiterOverride` | Manual move up or down, with reason | Append-only |
+| `SavedSearch` / `TalentSegment` | Reusable searches and groups | Segments shared with engagement |
+| `OutcomeSignal` | Rejection reasons and outcomes from M7 | Fed back into the next ranking run |
+
+### `select` — choosing and offering
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `Interview` | Slot, format, panel, state | Neither candidate nor client has a login — slots are proposed via links/app |
+| `InterviewFeedback` | Structured feedback | **Fixed fields, not free text** — free text cannot feed back into ranking |
+| `SelectionDecision` | Accept / hold / reject | Rejection reason mandatory, from a configured taxonomy |
+| `Offer` / `OfferVersion` | The document | Picked by state, role and skill. Expiry and reminders. |
+
+### `place` — working
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `Placement` | The person in the job | The 90-day clock hangs off this |
+| `DropOut` | Did not join, or left early | Position returns to M3 as open |
+| `TrialEvent` | Day 0 / 7 / 30 / 60 / 90 check-in | Both candidate side and client side |
+| `TrialResponse` | The answers | Attendance, pay timeliness, preceptor, accommodation |
+| `RetentionRecord` | **The day-90 answer** | Or the deemed version. This is the evidence behind the permanent invoice. Immutable. |
+| `ShiftAttendance` | Check-in and check-out | Location recorded, **not enforced** in R1 (enforcement is M12) |
+| `Timesheet` | A period of shifts | Carries a client approval state |
+| `AssociateProfile` / `StatutoryForm` / `OnboardingChecklist` | M11 | Blocks payroll if incomplete |
+| `WorkforceRequest` / `SalaryRevision` / `SalaryAdvance` / `SalaryHold` / `GeoFence` | M12 | All through the approval engine |
+
+### `bill` — money
+
+| Entity | Purpose | Notes |
+|---|---|---|
+| `BillingTrigger` | The evidence that allowed the invoice | Day-90 confirmation, or approved timesheet. Immutable, queryable years later. |
+| `Invoice` / `InvoiceLine` | Two kinds: placement fee, shift invoice | |
+| `Receivable` | Money owed | **This is where R1 stops.** |
+| `Payment` / `PaymentAllocation` / `CreditNote` / `DebitNote` / `DunningSchedule` | M15 | Part-payments, TDS, ageing, chasing |
+| `PayrollCycle` / `PayrollInput` / `PayrollOutput` / `StatutoryReport` | M13 | We do not calculate pay |
+
+### `report` — measuring
+
+| Entity | Purpose |
+|---|---|
+| `ReportingEvent` | Events from every module, reshaped |
+| Projection tables | Funnel, fill rate, time-to-fill, trial survival, stage loss, channel/recruiter performance |
+| `RateBaseline` / `RateVariance` | Agreed rate vs standard, by client/role/specialty/acuity |
+
+---
+
+## 4. State machines
+
+Every one of these is a transition table in the owning module's spec. Reproduced here as the master
+list — **if a state appears here it must exist in code, and if it appears in code it must be here.**
+
+| Entity | States |
+|---|---|
+| `User` | `invited → active → deactivated` (deactivated cannot sign in, stays visible on past records) |
+| `Document` | `uploaded → scanned → available` \| `quarantined` |
+| `Client` | `draft → active → suspended → closed` |
+| `Contract` | `draft → active → renewed (new version) → expired` \| `terminated (reason)` |
+| `RateCardVersion` | `draft → in_effect → superseded` (never deleted) |
+| `InboundRecord` | `received → identified \| unmatched → parsed \| unparseable → consumed` |
+| `Requisition` | `incomplete \| complete → awaiting_client → complete → open → in_fulfilment → partially_filled → filled` |
+| `Requisition` (hold) | `in_fulfilment ⇄ on_hold` — **hold stops the age clock; release resumes from where it stopped, not zero** |
+| `Requisition` (close) | `any → closed` — reason from configured list is mandatory |
+| `Requisition` (M14) | gains `created → awaiting_approval → approved → open` \| `rejected` |
+| `Candidate` | `registered → profile_complete → verification_pending → verified \| partly_verified \| failed` |
+| `Credential` | `claimed → submitted → checking → verified(green) \| flagged(amber) \| rejected(red) → expired` |
+| `VerificationCase` | `queued → in_progress → resolved \| awaiting_registry \| manual_review` |
+| `Application` | `applied → shortlisted → interviewing → offered → joined` \| `rejected` \| `withdrawn` |
+| `MigrationBatch` | `staged → profiled → transformed → loaded → reconciled → cut_over` |
+| `MigrationRecord` | `extracted → mapped → loaded` \| `extracted → exception → resolved → loaded` \| `rejected(reason)` |
+| `AdapterCall` | `requested → responded(green\|amber\|red)` \| `failed → retried` \| `manual_fallback` |
+| `Notification` | `queued → sent → delivered` \| `failed → retried → abandoned` |
+| `AvailabilityConfidence` | `confirmed(full) → decaying → stale → reselected` |
+| `AvailabilityResponse` | `received → understood \| unclear(→human review) → confirmed` |
+| `VoiceCall` | `queued → dialling → connected → answered` \| `no_answer → retried` |
+| `RankedSet` | `generating → current → stale` (requisition changed or new outcome data) |
+| `RankEntry` | `ranked → shortlisted → sent_to_client → outcome_recorded` |
+| `Interview` | `proposed → confirmed → held → feedback_recorded` \| `rescheduled` \| `cancelled(reason)` |
+| `SelectionDecision` | `pending → accepted \| held \| rejected(reason)` |
+| `Offer` | `draft → generated → sent → opened → signed` \| `expired` \| `declined` → linked to contract |
+| `ClientLink` | `issued → sent → opened → answered` \| `expired → deemed_agreed` (**day-90 and timesheet types only**, and only after the contract window) |
+| `Placement` | `joined → in_trial → trial_survived \| trial_ended(reason)` |
+| `Placement` (drop) | `offered → dropped_out(reason)` → position returns to open in M3 |
+| `TrialEvent` | `scheduled → due → answered \| escalated_to_call \| missed` |
+| `ShiftAttendance` | `expected → checked_in → checked_out` \| `no_show` \| `issue_raised → resolved` |
+| `Timesheet` | `building → built → sent_for_approval → approved \| deemed_approved → invoiced` |
+| `Timesheet` (M15) | gains `built → internally_approved → sent_to_client → client_approved → invoiced` |
+| `BillingTrigger` | `pending → confirmed \| deemed_confirmed → used_by_invoice` |
+| `Invoice` | `draft → raised → exported` (R1 stops here) → M15: `part_paid → paid` \| `credited` |
+| `WorkforceRequest` | `drafted → submitted → approved \| rejected(reason) → applied` |
+| `SalaryHold` | `requested → approved → held → released` |
+| `AssociateProfile` | `not_started → in_progress → complete → verified` |
+| `StatutoryForm` | `pending → submitted → verified` \| `returned(reason)` |
+| `PayrollCycle` | `open → inputs_locked → sent_to_engine → results_received → payslips_issued → closed` |
+| `PayrollInput` | `draft → validated → sent` \| `rejected(reason)` |
+| `Payment` | `received → matched → (remainder unmatched)` |
+
+**Rule:** state transitions are executed only by the owning module's service, in a transaction, and
+every transition writes a `StatusTransition` (where the entity has one) and a domain event. No
+module sets another module's status column.
+
+---
+
+## 5. Cross-module reference rules
+
+Foreign keys **within** a schema. Across schemas, hold the ID and read through the owning module's
+service.
+
+| Reference | Rule |
+|---|---|
+| `demand.requisition.client_id` → `clients.client` | ID only. Client details read via `ClientService.getById`. |
+| `match.rank_entry.candidate_id` → `supply.candidate` | ID only |
+| `bill.invoice.contract_version_id` → `clients.contract_version` | ID only — **and it is the version in force at trigger time**, resolved once and frozen on the invoice |
+| Anything → `platform.document` | ID only, via `FileService` |
+| Anything → `platform.user` | ID only, via `IamService` |
+
+Why: a foreign key across schemas is a hidden coupling that makes a module impossible to test or
+lift out. An ID plus a service call is explicit and mockable.
+
+---
+
+## 6. Records that must never be mutated
+
+These are the ones that end up in front of a lawyer or an auditor:
+
+| Record | Why |
+|---|---|
+| `AuditEntry` | Compliance. Insert-only grant at the database role level. |
+| `EventStore` | Reporting integrity. A rewritten event silently rewrites history. |
+| `StatusTransition` | Conversion-loss reporting cannot be recomputed retrospectively. |
+| `AllocationRecord` | Who was put on what, and when. Corrections are new rows. |
+| `RetentionRecord` | **The billing trigger.** Must still make sense to someone querying a charge a year later. |
+| `BillingTrigger` | Same. |
+| `RecruiterOverride` | Explains why ranking was ignored. |
+| `AdapterCall` | Evidence of what an external actually returned. |
+| `LinkResponse` | What the client actually clicked, and when, and as whom. |
+
+Enforce with `REVOKE UPDATE, DELETE` on the table for the application role. Not a code convention —
+a database grant.
+
+---
+
+## 7. Configuration, not columns
+
+Nine known configurable lists and windows (`02-03`). Adding an option must never require a release:
+
+close reason · hold reason · rejection reason · required fields per category · contact schedule ·
+retention confirmation window · timesheet approval window · follow-up window · market configuration
+
+Plus, per category: the attribute set itself (`03-05`), and per client: the three waiting periods
+(`03-02`).
+
+**A deactivated list entry stays readable on records that already used it.** Changing a setting never
+retrospectively alters records created under the old value.
+

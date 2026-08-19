@@ -1,0 +1,221 @@
+---
+title: "01-10 · Security and Data Protection"
+description: "Covers plan item M4-I26 / F13 — data protection: consent, residency, retention (XL, 5pd build, High risk, COMP). This is a platform concern, not a module feature, which is why it…"
+---
+
+Covers plan item `M4-I26` / `F13` — data protection: consent, residency, retention (XL, 5pd build,
+High risk, COMP). This is a platform concern, not a module feature, which is why it lives here.
+
+---
+
+## 1. What makes this harder than a typical build
+
+The platform holds **personal and health-related data about identified individuals** — clinical
+qualifications, registration numbers, Aadhaar and PAN, bank details, employment history, and
+attendance including location stamps. Under India's DPDP Act that is a regulated dataset, and two
+requirements in the plan pull in opposite directions:
+
+> The **Retained Pool** convention holds candidate records indefinitely.
+>
+> A **billing trigger record must survive a dispute years later** (`OI-HS-14`).
+>
+> A data principal may request **erasure** (`OI-HS-02`).
+
+These cannot all be honoured without an explicit written policy. **`OI-HS-02` is open** and needs
+Apollo legal. Working assumption `AS-08` is in §6.
+
+---
+
+## 2. Data classification
+
+Everything in the platform is classified, and the classification drives handling.
+
+| Class | Examples | Handling |
+|---|---|---|
+| **C0 Public** | Job titles, generic role descriptions | None |
+| **C1 Internal** | Requisitions, client names, rate cards, contract terms | RBAC + scope |
+| **C2 Personal** | Candidate name, phone, email, address, CV, application history | RBAC + scope + audit on read for bulk/export |
+| **C3 Sensitive personal** | Aadhaar, PAN, UAN, bank account, date of birth | **Column-encrypted**, restricted roles, audit on every read |
+| **C4 Health-adjacent** | Clinical specialty, acuity competency, registration status, verification outcomes | Treated as C2 with tighter export controls |
+
+`03-05` and `03-06` mark every column with its class. A new column with no class is a review
+rejection.
+
+---
+
+## 3. Residency — the non-negotiable one
+
+**No personal data leaves `ap-south-1`.**
+
+| Control | |
+|---|---|
+| All AWS resources in `ap-south-1` | Terraform provider is pinned; a resource in another region fails `terraform plan` review |
+| S3 documents in Mumbai (`M0-I6`, stated criterion) | |
+| Backups and snapshots stay in region | No cross-region copy |
+| Logs stay in region | CloudWatch in `ap-south-1` |
+| **Every external provider must process Indian data in India, or the contract must permit transfer** | Assessed per provider in `04-01` |
+| No third-party analytics, session replay, or error tracker that ships PII abroad | Sentry self-hosted in-region, or PII scrubbed before send |
+
+That fifth row is a **supplier selection criterion**, not just an engineering control. Several
+providers (voice, OCR, transcription, e-signature) are unselected. Data residency must be part of the
+selection, or the DPDP position collapses the day the supplier is chosen.
+
+---
+
+## 4. Consent
+
+`M4-I26`: consent is required **before a verification check runs**.
+
+```sql
+CREATE TABLE supply.consent_record (
+  id            uuid PRIMARY KEY,
+  candidate_id  uuid NOT NULL,
+  purpose       consent_purpose_enum NOT NULL,  -- registration, verification, marketing, background_check
+  version       text NOT NULL,                  -- the notice text version consented to
+  granted_at    timestamptz NOT NULL,
+  withdrawn_at  timestamptz,
+  channel       text NOT NULL,                  -- app, whatsapp, ops_recorded
+  evidence      jsonb NOT NULL                  -- what was shown, IP/device, actor
+);
+```
+
+| Rule | |
+|---|---|
+| Purpose-specific | One consent per purpose. Registering does not consent to a background check. |
+| Versioned | The notice text is versioned; the record says which version was agreed |
+| Withdrawable | Withdrawal is recorded, not deleted, and takes effect immediately |
+| **Enforced in the service** | `credentials.runCheck()` asserts a valid, unwithdrawn consent for `verification` and throws otherwise. Not a UI checkbox. |
+| Evidenced | What was shown, when, on what channel, by whom |
+| Audited | Grant and withdrawal both write audit entries |
+
+Consent capture points: candidate app sign-up (`M4-I1`), Ops-recorded consent for migrated CPAL
+candidates (`03-15` — **this is an open problem**, see §9), and WhatsApp opt-in for messaging.
+
+---
+
+## 5. Encryption
+
+| Layer | |
+|---|---|
+| In transit | TLS 1.2+ everywhere, including inside the VPC to RDS and Redis |
+| At rest | KMS on RDS, Redis, S3, EBS, and CloudWatch Logs |
+| **Column level (C3)** | `pgcrypto`, key in Secrets Manager, separate key per environment |
+| Passwords | `argon2id` — hashed, never encrypted |
+| OTPs | Hashed, 5-min TTL, single use |
+| Session and link tokens | Random 256-bit, stored **hashed** |
+| Documents | S3 SSE-KMS; presigned URLs only, short expiry |
+
+C3 columns are never indexed, never logged, never in an export unless the export is explicitly
+authorised and audited. Where lookup by a C3 value is needed, store a separate salted hash for
+lookup and keep the encrypted value for display.
+
+---
+
+## 6. Retention
+
+| Data | Retention | Basis |
+|---|---|---|
+| Candidate record, active | While the relationship is live | Legitimate use |
+| Candidate record, dormant | **Open (`OI-HS-02`)** — `AS-08`: 3 years from last interaction, then anonymised | Retained Pool vs erasure |
+| CV and documents | With the candidate record; superseded versions 1 year | |
+| Consent records | 7 years after withdrawal | Proof of lawful basis |
+| **Audit trail** | 7 years | Compliance |
+| **Event store** | 7 years | Reporting and dispute |
+| **Billing trigger and retention record** | **7 years minimum (`OI-HS-14`)** | A billing query may land years later |
+| Invoices, receivables | 8 years | Indian statutory |
+| Payroll records | 8 years | Statutory |
+| Inbound raw payloads | 3 years | Dispute traceability |
+| Message and delivery logs | 2 years | |
+| Application logs | 1 year prod | |
+| Sanitised UAT data | Refreshed per cycle, deleted after | |
+
+### The erasure conflict, stated plainly
+
+A candidate may request erasure. A billing trigger record naming them must survive seven years. Both
+cannot be literally true.
+
+**Working assumption `AS-08`** (needs Apollo legal sign-off, `OI-HS-02` and `OI-HS-14`):
+
+1. Erasure **anonymises** the candidate record — name, phone, email, address, documents, C3 fields
+   are destroyed or overwritten; the record itself survives with a surrogate key.
+2. Records with a statutory or contractual retention basis — billing triggers, invoices, payroll,
+   audit entries — **retain the surrogate key and the facts of the transaction**, not the identity.
+3. The retention record keeps *who at the client confirmed*, which is a client contact, not the
+   candidate — so the day-90 evidence survives erasure intact.
+4. Every erasure is itself audited, with what was destroyed and what was lawfully retained.
+
+This is defensible, but it must be **written down and agreed with Apollo legal before build**, not
+decided by an engineer in month four.
+
+---
+
+## 7. Data subject rights
+
+Built as an Ops-facing capability in P01/`03-05`, not as an afterthought:
+
+| Right | Implementation |
+|---|---|
+| Access | Export everything held about one candidate, as a structured file, with the audit trail of who touched it |
+| Correction | Normal editing, versioned and audited |
+| Erasure | The anonymisation flow in §6, requiring approval and fully audited |
+| Withdrawal of consent | Immediate effect; downstream processing stops; recorded not deleted |
+| Grievance | A named contact and an SLA — Apollo's obligation; the platform records the request and its resolution |
+
+`M0-I4` already requires *"an auditor can export everything touching one record for a given period"* —
+the access right reuses that.
+
+---
+
+## 8. Application security
+
+| Control | |
+|---|---|
+| Input validation | Zod at every boundary (`01-02 §7`) |
+| SQL injection | Parameterised queries only. Raw SQL requires review and named parameters. |
+| XSS | React escapes by default. `dangerouslySetInnerHTML` is banned by lint. |
+| CSRF | `SameSite=Lax` cookies + CSRF token on state-changing requests from cookie-auth surfaces |
+| Clickjacking | `X-Frame-Options: DENY`, CSP `frame-ancestors 'none'` |
+| CSP | Strict, nonce-based, no `unsafe-inline` |
+| **File upload** | Type allowlist, size cap, **virus scan before availability**, quarantine on failure, never served from the app origin |
+| SSRF | Adapters may only call allowlisted hosts. No user-supplied URL is ever fetched. |
+| Rate limiting | Per `01-04 §10` |
+| Dependencies | `pnpm audit` + Dependabot; criticals block release |
+| Containers | Distroless base, non-root, ECR scan on push, criticals block release |
+| Secrets | Secrets Manager only; `gitleaks` in CI |
+
+**File upload deserves the emphasis.** Candidates upload documents from unmanaged phones; those files
+are viewed by the verification team. Scan before availability is a stated requirement (`M0-I6`) and
+quarantine-on-failure means the file exists for investigation but is unreachable from the app.
+
+---
+
+## 9. Known unresolved risks
+
+Stated here so they are decisions, not discoveries.
+
+| Risk | Detail | Open item |
+|---|---|---|
+| **Migrated candidates have no consent record** | CPAL data arrives with no consent evidence. Running a verification check against it may have no lawful basis. Needs a re-consent campaign, or a documented legitimate-use position, before `03-15` cutover. | `OI-A-02`, `OI-HS-02` |
+| **Erasure vs retention** | §6. Needs legal sign-off. | `OI-HS-02`, `OI-HS-14` |
+| **Unselected suppliers and residency** | Voice, STT, OCR, e-sign, verification aggregator, payroll engine — all unnamed. Residency must be a selection criterion. | `OI-HS-07`, `OI-A-09`, `OI-HS-06` |
+| **Location stamps on shift check-in** | Recorded in M8, not enforced. Location is personal data with a purpose limitation; the notice must say why it is collected before M8, not when enforcement arrives in M12. | — |
+| **Backup retention vs erasure** | An erased candidate persists in 30 days of backups. Standard and defensible, but must be written into the policy. | `OI-HS-12` |
+| **Free-text availability replies** | Parsed replies may contain anything a candidate typed, including health information. Retention and access to raw reply text needs a rule. | `OI-A-08` |
+
+---
+
+## 10. Security review checkpoints
+
+| When | What |
+|---|---|
+| Phase 1 exit | Auth, session, RBAC, scope mechanism, audit trail |
+| Phase 3 exit | Webhook signature verification, inbound raw payload handling, file upload chain |
+| Phase 4 exit | Consent enforcement, C3 encryption, candidate auth, document access |
+| Phase 6 exit | **Link token security** — entropy, enumeration, expiry, attribution, replay |
+| Phase 7 exit | **Portal cross-client isolation** — a dedicated test suite whose only job is attempting to breach it |
+| Pre-go-live | Third-party penetration test, findings closed or accepted in writing |
+
+The phase 6 and 7 checkpoints are the two where a defect is a business incident rather than a bug:
+a forgeable link token means forgeable invoice evidence, and a portal scoping error leaks one
+hospital's data to another.
+

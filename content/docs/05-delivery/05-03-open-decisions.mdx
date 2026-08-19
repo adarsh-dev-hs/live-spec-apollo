@@ -1,0 +1,176 @@
+---
+title: "05-03 · Open Decisions and Working Assumptions"
+description: "45 open items. 7 must close before a fixed price can be committed. Every one has a working assumption so the build is never blocked — but an assumption is a decision someone else…"
+---
+
+45 open items. **7 must close before a fixed price can be committed.** Every one has a working
+assumption so the build is never blocked — but an assumption is a decision someone else should be
+making.
+
+---
+
+## 1. The seven estimate blockers
+
+These hold up a committable price, not just a design.
+
+| ID | Question | Items held | pd | Owner | Working assumption |
+|---|---|---|---|---|---|
+| **`OI-A-02`** | **How much data is in CPAL, and what condition is it in?** Never seen it. Volume, completeness, duplicates and field mapping all unknown. | 6 | **31** | Apollo (access), Hiresense (profiling) | **None possible.** `03-15` is built generically; profiling is scheduled in phase 2. Until it runs, **A10 is unpriced and go-live has no date.** *The single largest unpriced item in the six months.* |
+| **`OI-A-13`** | **Guarantee period — does it run past day 90?** If longer, an invoice already raised must be correctable, which needs credit notes — out of scope until M15. | 4 | **28.5** | Apollo | **`AS-20`** — `guarantee_period_days` on the contract version, default 90. `03-13` already tracks post-trial drop-outs and `03-21` already has `replacement_within_guarantee` as a reason. **If confirmed longer, credit notes move into phase 6.** |
+| **`OI-A-09`** | **Which provider makes the automated phone calls?** Providers differ enormously in conversation handling, transcript format and **Indian language coverage**. | 5 | **44** | Apollo | Port + fake (`04-03`). Cadence, extraction and review queue all built. **Language coverage cannot be tested against an unnamed provider** — this is the part we cannot work around. |
+| **`OI-HS-07`** | **Who supplies document OCR, e-signature and WhatsApp?** The BSP must also **approve every template — weeks, outside our control.** | 4 | **27.5** | Tamajit Mukherjee with Mr. Sriram | Ports + fakes (`04-02`, `04-04`). **Template approval is a calendar dependency that gates the whole M5 contact schedule going live.** Start BSP onboarding month 2; submit templates phase 5 day one. |
+| **`OI-M3-03`** | **How many client HR/ATS systems?** Each is a separate connector with its own payload, credentials and test data. | 3 | **22** | Suman | One generic connector with per-client payload mapping. **Each named system is then a bounded increment priced separately.** |
+| **`OI-M3-04`** | **How many client spreadsheet layouts?** The mapping screen is priceable; the per-client mappings are not. | 2 | **16.5** | Shallu Kakkar | One screen, N mappings. **~0.5pd per mapping once a sample file exists.** Price per client. |
+| **`OI-HS-05`** | **How many messages per month?** WhatsApp bills per conversation; volume is set by the cadence configuration nobody has settled. | 4 | **30.5** | Shallu Kakkar with Hiresense | **`AS-09`** — cost recorded per message from message one; consumption report and cadence preview give Apollo a per-scenario model. **The platform answers the question; it does not need the answer to be built.** |
+
+---
+
+## 2. High-impact non-blockers
+
+Cheap to decide now, expensive to retrofit.
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-HS-01`** | Does a site-resident recruiter see only their own site, or the whole base? | **Row-level scoping is a different build from screen-level permissions and touches every list in the platform.** | **`AS-02`** — build the scope mechanism from day one, applied in every repository, defaulting `recruiter` to `all`. Switching is then a config change, not 28 query rewrites. |
+| **`OI-A-12`** | Are link recipients held per client, location, requisition or placement? | **Without a recipient model the day-90 billing trigger is not defensible.** | **`AS-05`** — `client_contact` with a `purposes` array, per client + optional location. `02-10` creates `link_recipient` rows from these; `03-11` denormalises the respondent onto the retention record so the evidence survives whatever the model becomes. |
+| **`OI-A-11`** | The ranking weight model across credentials, specialty, availability and outcomes | **The largest unspecified design in Release 1.** 3 categories × 2 bases multiplies the sets. | **`AS-32`** — a provisional weight set, fully configurable, plus a **simulator** so Apollo tunes against real requisitions during UAT. **Run a weighting workshop in phase 4.** |
+| **`OI-HS-10`** | Does an expired credential / pending verification / stale availability **exclude** or **reduce score**? | *"The difference between a filter and a weight changes what a recruiter sees and what can be defended to a client."* | **`AS-27`** — configured per condition. Default: expired or red registration **excludes**; pending verification and stale availability **reduce**. |
+| **`OI-HS-06`** | IDfy or AuthBridge, and per-check pricing | Coverage and response schema differ; **late selection means adapter rework** | Build the port against the union of both. Selection becomes a config row. |
+| **`OI-HS-08`** | Native or cross-platform candidate app | **Store review cycles are calendar time; the app is on the revenue path** | **`AS-28`** — React Native. **Start Apple enrolment month 2 — it needs a D-U-N-S in Apollo's name.** |
+| **`OI-HS-02`** | DPDP erasure against the indefinite Retained Pool | A subject erasure request and indefinite retention cannot both be honoured | **`AS-08`** — erasure **anonymises in place**; statutory records keep the transaction facts, not the identity (`01-10 §6`). **Needs Apollo legal sign-off.** |
+| **`OI-HS-14`** | Finance retention for billing records vs DPDP candidate retention | A billing record must survive years; a candidate may ask for erasure sooner | Same, `AS-08`. The day-90 evidence rests on the **client-side** respondent, who is not the data subject — which is what makes it survivable. |
+| **`OI-HS-03`** | Mapping Apollo's 34 deliverables to the 24 capability blocks in the signed SOW | *"The two documents describe different releases and will drift within weeks."* | **Commercial, not technical.** Raise before this plan is baselined. |
+| **`OI-HS-04`** | Is "client-hosted AWS Mumbai" an Apollo-owned account? | Changes who holds credentials, who is on call, how deploys are approved | **`AS-13`** — Apollo-owned; Hiresense via cross-account role; **no Hiresense credential at runtime after handover.** Blocks phase 0. |
+
+---
+
+## 3. Full register
+
+### From Part A
+
+| ID | Question | Working assumption |
+|---|---|---|
+| `OI-A-01` | Which interface contracts proven against US/Germany/Ireland in R1? | **`AS-19`** — ports shaped around capabilities; prove with a deliberately foreign-shaped fake |
+| `OI-A-02` | CPAL volume and condition | §1 |
+| `OI-A-03` | Migrated base deduped via D3 mechanism or one-time process? | **`AS-26`** — use the `03-05` mechanism as a bulk scan. One implementation; ongoing dedupe stays. |
+| `OI-A-04` | Confirm R1 provisioning is Apollo users only | Confirmed by construction — client identity begins in `03-16` |
+| `OI-A-05` | Platform defaults for the two deemed windows | **`AS-06`** — 14 days retention, 7 days timesheet. **Flagged as provisional on the settings screen.** |
+| `OI-A-06` | Portal channel specified but not built? | **Handled** — `is_available = false`, enumerated and disabled (`03-03 §5.1`) |
+| `OI-A-07` | Clinical/communication rating with no producing system | Fields exist, unpopulated, **excluded from ranking**, with a note on screen |
+| `OI-A-08` | Free-text fallback threshold and human-review path | **`AS-30`** — 0.85; below → review; **confidence not reset until reviewed** |
+| `OI-A-09` | Voice provider | §1 |
+| `OI-A-10` | Does hand-assembled shortlisting survive? | **`AS-33`** — **both** paths. Shared components make supporting both marginal. |
+| `OI-A-11` | Ranking weight model | §2 |
+| `OI-A-12` | Link recipient identity | §2 |
+| `OI-A-13` | Guarantee period | §1 |
+| `OI-A-14` | Which finance system? | **No assumption needed** — build API **and** file export regardless (the plan's own instruction) |
+| `OI-A-15` | **No defined artefact handing approved timesheets to manual payroll** | **`AS-37`** — build a timesheet export in `03-12`. Small, obviously needed, **flag as a probable R1 scope addition with a number attached.** |
+| `OI-A-16` | Volume ceiling imposed by manual payroll | **`AS-38`** — design for 2,000 shifts/month. **Apollo should state the real number rather than discover it in month five.** |
+| `OI-A-17` | Are SMS and email outbound-only? | **`AS-11`** — yes. Replies logged and surfaced, not parsed. |
+
+### From Part B, M3 chapter
+
+| ID | Question | Working assumption |
+|---|---|---|
+| `OI-M3-01` | Does M3 or M4 own the requisition-side attribute set? | **`AS-23`** — `03-05` owns definitions with `applies_to`; `03-04` renders and stores values |
+| `OI-M3-02` | Dedupe match keys; automatic or human-confirmed merge | **`AS-04`** — (client, location, role, category, start ±3d) within 7 days. **Always human-confirmed.** |
+| `OI-M3-03` | How many HRMS connectors? | §1 |
+| `OI-M3-04` | How many spreadsheet formats? | §1 |
+| `OI-M3-05` | Same provider for STT and voice? | Two ports either way; assume one provider |
+| `OI-M3-06` | Classification threshold and fallback | **`AS-03`** — 0.80, as a P03 setting, **tuned against real volume in the first weeks.** Sets manual-queue load, which is a staffing number. |
+| `OI-M3-07` | Required fields per category — **no doctors owner named** | Nurses and allied configured; **doctors empty with a visible warning.** Nominate an owner before kick-off. |
+| `OI-M3-08` | Follow-up window per client or platform-wide? | Built client-overridable — satisfies both |
+| `OI-M3-09` | Can category change after creation? | **`AS-24`** — only while incomplete/complete/open with no candidates submitted |
+| `OI-M3-10` | Display recruiter load against the 15–16 norm? | Optional column, default off. **Never enforced.** |
+| `OI-M3-11` | Close-reason and hold-reason taxonomy | **`AS-07`** — minimal provisional set seeded, marked provisional |
+| `OI-M3-12` | Does a requisition auto-close when filled? | **`AS-22`** — close stays explicit. A drop-out returns positions. |
+| `OI-M3-13` | One email address with routing, or per client? | **`AS-10`** — one with routing; per-client aliases as configuration. Receiver handles both. |
+| `OI-M3-14` | Latency and load targets | **`AS-14`** — p95 &lt;2s board at 5,000; &lt;1s other lists; inbound visible &lt;60s. **No performance acceptance test exists without agreed targets.** |
+
+### Raised by Hiresense
+
+| ID | Question | Working assumption |
+|---|---|---|
+| `OI-HS-01` | RBAC row-level scoping | §2 |
+| `OI-HS-02` | DPDP erasure vs Retained Pool | §2 |
+| `OI-HS-03` | Deliverables vs signed SOW capability blocks | §2 — commercial |
+| `OI-HS-04` | Apollo-owned AWS account? | §2 |
+| `OI-HS-05` | Monthly message volume | §1 |
+| `OI-HS-06` | IDfy or AuthBridge | §2 |
+| `OI-HS-07` | OCR, e-sign, WhatsApp suppliers | §1 |
+| `OI-HS-08` | App platform decision | §2 |
+| `OI-HS-09` | Can one candidate serve both bases? | **`AS-25`** — `candidate_base` is a **table**, permitting both with per-base confidence. A check constraint forbids it if Apollo says so. |
+| `OI-HS-10` | Ranking eligibility — filter or weight? | §2 |
+| `OI-HS-11` | Is client interview feedback a fifth link type? | **`AS-34`** — Apollo-entered on the client's behalf in R1. A fifth type is a config row plus a page — **but unbudgeted, so confirm.** |
+| `OI-HS-12` | RPO, RTO and backup retention | **`AS-12`** — RPO 15 min, RTO 4h, 30-day retention. **Without targets there is no pass condition for a restore rehearsal.** |
+| `OI-HS-13` | Does a candidate see which hospital a role is with? | **Flag built now** on the client record (`03-01 §11`) — *"awkward to retrofit once listings are live"* |
+| `OI-HS-14` | Finance vs DPDP retention | §2 |
+
+---
+
+## 4. Gaps we found that neither document raises
+
+Not in the plan's register. Raised here because they are real.
+
+| Gap | Impact | Where | Proposed answer |
+|---|---|---|---|
+| **Consent for migrated CPAL candidates** | CPAL arrives with **no consent evidence**. `03-06` will refuse to run verification checks on the migrated base — **which is most of the pool at go-live.** | `03-15 §11`, `01-10 §9` | **`AS-44`** — re-consent campaign via `03-08`, or a documented legitimate-use position from Apollo legal, **before cutover** |
+| **GST treatment on invoices** | Nothing specifies place of supply, rates or reverse charge. **An invoice with wrong GST is a compliance problem, not a bug.** | `03-13 §11` | **`AS-40`** — fields exist, rates from configuration. **Apollo finance must specify before go-live.** |
+| **Reporting has no history before go-live** | Reports can only cover the period since events began. **No backfill exists.** | `03-14 §11` | State the coverage window on every report; emit synthetic migration events where dates are usable (**`AS-42`**) |
+| **Timesheet export for manual payroll** | Related to `OI-A-15` but broader — payroll runs manually for all of R1 with no defined artefact | `03-12 §11` | **`AS-37`** — build it. Small, obviously needed. |
+| **Invoice numbering series** | Indian statutory practice may require per-series numbering | `03-13 §11` | **`AS-41`** — `INV-YYYY-NNNNNN`, gapless. Confirm with finance. |
+| **Delegation while an approver is on leave** | A pending approval with no available approver stalls a pay run | `02-11 §11` | Build simple date-range delegation, audited |
+| **Report access scope** | Should a recruiter see other recruiters' performance? A management decision, not a technical one. | `03-14 §11` | **`AS-43`** — leadership/admin all; lead sees their team; recruiter sees own. **Sensitive default either way — confirm.** |
+
+---
+
+## 5. Assumption index
+
+Every `AS-` number, where it is defined, and what breaks if it is wrong.
+
+| AS | Assumption | Defined in | Blast radius if wrong |
+|---|---|---|---|
+| `AS-02` | Scope mechanism built, `recruiter` defaults to `all` | `01-07 §7` | **Low** — a config change. This is the point. |
+| `AS-03` | Classification threshold 0.80 | `02-08 §11` | Low — a setting; changes manual-queue load |
+| `AS-04` | Duplicate requisitions human-confirmed | `03-03 §11` | Low |
+| `AS-05` | Link recipients from `client_contact` + purposes | `02-10 §11` | **Medium** — the evidence is denormalised, so a model change does not invalidate past records |
+| `AS-06` | Deemed windows 14 / 7 days | `02-03 §12` | Low — configurable, flagged provisional |
+| `AS-07` | Provisional close/hold reasons | `02-03 §12` | Low |
+| `AS-08` | Erasure anonymises in place | `01-10 §6` | **High** — needs legal sign-off. Wrong = a compliance failure. |
+| `AS-09` | Cost recorded per message from day one | `02-07 §11` | **High if omitted** — cannot be backfilled |
+| `AS-10` | One email address with sender routing | `01-09 §7` | Low — receiver handles both |
+| `AS-11` | SMS/email outbound only | `02-07 §11` | Low |
+| `AS-12` | RPO 15m, RTO 4h, 30-day retention | `01-05 §14` | Medium — no restore-rehearsal pass condition without agreement |
+| `AS-13` | Apollo-owned AWS account | `00-02 §9` | **High** — blocks phase 0 |
+| `AS-14` | Performance targets | `01-02 §14` | Medium — no acceptance test without agreement |
+| `AS-19` | Ports shaped around capabilities | `02-12 §11` | Medium — determines whether A12 is a real abstraction |
+| `AS-20` | `guarantee_period_days` default 90 | `03-02 §11` | **High** — a longer period moves credit notes into phase 6 |
+| `AS-22` | Close stays explicit | `03-04 §11` | Low |
+| `AS-23` | `03-05` owns attribute definitions | `03-05 §11` | Medium — resolves `OI-M3-01` in the direction that prevents drift |
+| `AS-25` | `candidate_base` is a table | `03-05 §11` | **Low** — a check constraint forbids dual-base if needed. This is why it is a table. |
+| `AS-26` | Migration reuses the D3 dedupe mechanism | `03-15 §11` | Medium |
+| `AS-27` | Eligibility configured per condition | `03-09 §11` | Low — configurable |
+| `AS-28` | React Native | `03-07 §11` | Medium — a rewrite if wrong, but the token flow is identical |
+| `AS-30` | Response threshold 0.85, no reset until reviewed | `03-08 §11` | Low — configurable |
+| `AS-32` | Provisional ranking weights + simulator | `03-09 §11` | Low — the simulator is the answer |
+| `AS-33` | Both manual and ranked shortlist paths | `03-09 §11` | Low |
+| `AS-37` | Timesheet export for manual payroll | `03-12 §11` | Low — small addition |
+| `AS-40` | GST fields exist, rules from configuration | `03-13 §11` | **High** — a compliance gap until Apollo specifies |
+| `AS-42` | Synthetic migration events | `03-14 §11` | Low |
+| `AS-44` | Re-consent for migrated candidates | `03-15 §11` | **High** — blocks verification on the migrated base |
+| `AS-45`–`AS-75` | R2 module assumptions | `03-16`–`03-21` | Low — all Low-confidence modules with no client spec |
+
+---
+
+## 6. Review cadence
+
+| When | Do |
+|---|---|
+| **Weekly** | Chase the seven estimate blockers (`05-02 §11`). Report movement, or the absence of it. |
+| **Each phase gate** | Re-check every open item touching that phase; confirm assumptions still hold |
+| **When an item closes** | Update this register, update the affected specs, **assess the blast radius via the `AS-` index above**, raise a scope change if the answer differs from the assumption |
+| **Before baselining** | `OI-HS-03` — the deliverables-to-SOW mapping. *"The two documents describe different projects."* |
+
+**An open item that is still open at its "needed by" date is a schedule risk, not an admin task.**
+Report it as one.
+

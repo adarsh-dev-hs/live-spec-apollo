@@ -1,0 +1,289 @@
+---
+title: "01-09 · Infrastructure and Deployment"
+description: "Covers plan items M1-I5 (deploy to Apollo's AWS account, 10pd) and M1-I16 (environments and monitoring, 10pd). Build this in month one, not when M1 is scheduled — everything is…"
+---
+
+Covers plan items `M1-I5` (deploy to Apollo's AWS account, 10pd) and `M1-I16` (environments and
+monitoring, 10pd). Build this in **month one**, not when M1 is scheduled — everything is untestable
+until it exists.
+
+---
+
+## 1. AWS account model
+
+**All infrastructure is in `ap-south-1` (Mumbai). One region. No exceptions.** No personal data
+leaves it — this is what makes the DPDP position hold (`M4-I26`).
+
+**Open (`OI-HS-04`):** confirm "client-hosted AWS Mumbai" means an Apollo-owned account rather than a
+Hiresense-managed one. It changes who holds credentials, who is on call, and how deploy approvals
+work.
+
+**Working assumption `AS-13`:**
+- Apollo owns all four accounts
+- Hiresense accesses via cross-account IAM role assumption, with an expiry date
+- CI deploys via OIDC federation — **no long-lived AWS keys anywhere**
+- **After handover, no Hiresense-held credential is required at runtime** (`M1-I5`, stated criterion)
+
+| Account | Environment |
+|---|---|
+| `apollo-gwd-dev` | `dev` |
+| `apollo-gwd-qa` | `qa` |
+| `apollo-gwd-uat` | `uat` |
+| `apollo-gwd-prod` | `prod` |
+
+Separate accounts, not separate VPCs in one account. A misconfigured security group in `dev` must
+not be able to reach `prod` data.
+
+---
+
+## 2. Four environments
+
+| Env | Purpose | Data | Deploys | Sizing |
+|---|---|---|---|---|
+| `dev` | Integration of merged work | Synthetic seed | Auto on merge to `main` | Minimal, single AZ, scale to zero overnight |
+| `qa` | QA and performance testing | Synthetic, volume-realistic | Auto after `dev` passes | Half prod |
+| `uat` | Apollo acceptance testing | **Sanitised** prod-shaped | Manual, tagged release | Near prod |
+| `prod` | Live | Real | Manual approval, tagged release | Full |
+
+**`uat` data is sanitised, always.** Names, phone numbers, emails, Aadhaar/PAN, bank details and
+document contents are replaced by the sanitiser. Real candidate data in a UAT environment is a DPDP
+breach regardless of who is testing.
+
+---
+
+## 3. Network
+
+```
+VPC 10.<env>.0.0/16, 2 AZs
+
+  Public subnets      ALB, NAT Gateway
+  Private subnets     ECS tasks (api, worker)
+  Isolated subnets    RDS, ElastiCache — no route to the internet at all
+```
+
+| Rule | |
+|---|---|
+| ECS tasks reach the internet only via NAT | Outbound to providers |
+| RDS and Redis are unreachable from the internet | Isolated subnets, no IGW route |
+| Security groups reference other security groups, never CIDRs | |
+| VPC endpoints for S3, Secrets Manager, ECR, CloudWatch | Keeps traffic off the NAT and reduces cost |
+| Database access for engineers | Session Manager port-forward through a bastion-less SSM host. **No public RDS endpoint, ever.** |
+
+---
+
+## 4. Compute
+
+| Service | Config |
+|---|---|
+| `api` | ECS Fargate, 1 vCPU / 2 GB, 2–6 tasks, target tracking on CPU 60% + ALB request count |
+| `worker` | ECS Fargate, 1 vCPU / 2 GB, 1–3 tasks, scaling on queue depth |
+| Health | `/healthz` (liveness), `/readyz` (DB + Redis reachable) |
+| Deploy | Rolling, `minimumHealthyPercent: 100`, circuit breaker with automatic rollback |
+| Drain | 60s connection draining; `SIGTERM` finishes in-flight requests and lets the current job complete |
+
+`api` and `worker` are the same image with different commands. One build, one artefact, two
+services — so they cannot drift.
+
+---
+
+## 5. Data services
+
+### RDS PostgreSQL 16
+
+| | dev | qa | uat | prod |
+|---|---|---|---|---|
+| Instance | `db.t4g.small` | `db.t4g.medium` | `db.m7g.large` | `db.m7g.xlarge` |
+| Multi-AZ | No | No | Yes | **Yes** |
+| Storage | 20 GB gp3 | 50 GB | 100 GB | 200 GB, autoscaling |
+| Backups | 7 days | 7 days | 14 days | **30 days + PITR** |
+| Read replica | — | — | — | **Added in phase 7** for reporting |
+
+Performance Insights on in `uat` and `prod`. Slow query log at 1s.
+
+### ElastiCache Redis 7
+
+| | dev/qa | uat/prod |
+|---|---|---|
+| Node | `cache.t4g.micro` | `cache.m7g.large` |
+| Replication | Single node | **Multi-AZ with automatic failover** |
+| Encryption | In transit + at rest | In transit + at rest |
+| Persistence | AOF off | AOF on |
+
+Redis holds queues, sessions, idempotency keys and locks. Losing it costs in-flight jobs and logs
+everyone out — recoverable, but not free. Multi-AZ in prod is not optional.
+
+### S3
+
+| Bucket | Purpose | Config |
+|---|---|---|
+| `apollo-gwd-documents-<env>` | Every uploaded file | **Versioned**, SSE-KMS, block all public access, lifecycle to IA at 90 days |
+| `apollo-gwd-quarantine-<env>` | Failed virus scans | Versioned, KMS, no read access from the app |
+| `apollo-gwd-web-<env>` | Static frontends | Behind CloudFront OAC only |
+| `apollo-gwd-inbound-email-<env>` | SES inbound | Lifecycle delete at 30 days after processing |
+| `apollo-gwd-exports-<env>` | Generated exports, MIS packs | Lifecycle delete at 7 days |
+
+Access to documents is **only** via short-lived presigned URLs generated by the API after a
+permission check. No bucket policy grants read to anything else.
+
+---
+
+## 6. Edge
+
+| | |
+|---|---|
+| CloudFront | Single distribution per environment |
+| `/` | → S3 `apollo-gwd-web` (ops console) |
+| `/links/*` | → S3, the small links bundle |
+| `/portal/*` | → S3, portal bundle (M10) |
+| `/api/*` | → ALB, no caching, forward all headers |
+| TLS | ACM, TLS 1.2 minimum |
+| WAF | Managed common rules, SQLi/XSS, rate limit 2000 req/5min per IP, bot control on public link routes |
+| Headers | HSTS, CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` |
+
+Serving the API through CloudFront gives one origin to the browser, so no CORS on the main path and
+WAF in front of everything.
+
+---
+
+## 7. Email
+
+| Direction | Service |
+|---|---|
+| Outbound | SES, verified domain, DKIM + SPF + DMARC, configuration set with bounce/complaint handling to SNS → webhook |
+| Inbound | SES receipt rule → S3 → Lambda → `POST /api/v1/webhooks/email` |
+
+**Open (`OI-M3-13`):** one monitored address with sender routing, or one address per client. Working
+assumption `AS-10`: **one address with sender routing**, plus per-client aliases available as
+configuration. Per-client addresses shift operational setup onto Apollo for every new client, so the
+routing approach is the default until Apollo asks otherwise. The receiver handles both — the
+difference is configuration, not code.
+
+---
+
+## 8. Secrets and configuration
+
+| Kind | Where |
+|---|---|
+| Secrets (DB, Redis, API keys, signing keys) | **Secrets Manager**, injected as ECS secrets |
+| Non-secret config (region, bucket names, feature flags) | SSM Parameter Store, injected as env vars |
+| Business configuration (windows, lists, thresholds) | **The database** (`02-03`) — not infrastructure |
+
+That last row matters: a business user changing a follow-up window must not require a deployment.
+If it is in Terraform, it is the wrong kind of setting.
+
+Environment variables are parsed and validated with zod at boot (`@apollo/config-env`). A missing or
+malformed variable fails startup loudly, not at 3am when the code path is first hit.
+
+---
+
+## 9. Pipeline
+
+```
+push to feat/*      → lint · typecheck · unit · integration · build · boundaries · size · gitleaks
+merge to main       → all above · migrate dev · deploy dev · E2E on dev
+tag release/*       → deploy qa · E2E on qa · perf smoke
+manual approval     → deploy uat
+manual approval     → migrate prod · deploy prod · smoke
+```
+
+GitHub Actions, OIDC to AWS, no stored keys.
+
+| Rule | |
+|---|---|
+| Migrations run **as a separate pipeline step**, before the service deploy | Never on application boot — six tasks starting at once must not race the schema |
+| Migrations are forward-only, expand/contract across releases | So a rollback of code does not need a rollback of schema |
+| Rollback = redeploy the previous immutable image tag | Fast, and always available |
+| **Rollback to the prior release is possible without data loss** | `M1-I5`, stated criterion |
+| Every deploy is tagged, and the tag is in the health endpoint | "What is running in prod" has a one-command answer |
+| `prod` deploys need a named approver | Approval is recorded |
+
+---
+
+## 10. Observability
+
+### Logs
+Pino JSON → CloudWatch Logs. Retention: 30 days `dev`/`qa`, 90 days `uat`, **1 year `prod`**.
+Every line carries `requestId` or `jobId`, env, service, release tag. Logs Insights queries are
+saved for the common questions (see the runbook).
+
+### Metrics
+| Metric | Alarm |
+|---|---|
+| API 5xx rate | > 1% over 5 min |
+| API p95 latency | > 1s over 10 min |
+| Queue depth (per queue) | > 1000 for 5 min |
+| **DLQ depth** | **> 0** |
+| Outbox lag | > 60s |
+| **Scheduler heartbeat** (retention-deem, approval-deem, cadence) | Missed run |
+| DB connections | > 80% of pool |
+| DB CPU / storage | > 80% |
+| Redis memory | > 75% |
+| Adapter error rate, per provider | > 10% over 15 min |
+| ECS task restarts | > 3 in 15 min |
+
+The two deeming schedulers get their own alarm because their failure mode is silent: invoices simply
+stop being raised, and nobody notices until month end.
+
+### Tracing
+OpenTelemetry → AWS X-Ray. Trace HTTP, DB, Redis, queue and **every adapter call**. When a supplier
+is slow, the trace is what proves it was them.
+
+### Errors
+Sentry (or CloudWatch RUM equivalent) for backend exceptions and frontend errors, with release
+tagging and source maps.
+
+### Uptime
+External synthetic checks on: the Ops login page, `/healthz`, and **a link page** — the last one
+because a client link that will not load is a revenue outage even while everything else is green.
+
+---
+
+## 11. Cost controls
+
+| Control | |
+|---|---|
+| `dev` scales to zero overnight and at weekends | |
+| Budget alerts at 50/80/100% per account | |
+| Cost allocation tags: `env`, `component`, `owner` | |
+| S3 lifecycle to IA at 90 days, Glacier at 1 year | Documents are large and rarely re-read |
+| VPC endpoints instead of NAT for AWS services | NAT egress is a surprising line item |
+| **Per-message and per-minute external costs tracked in the delivery log** (`02-07`) | WhatsApp per conversation, transcription per minute, voice per minute — `OI-HS-05` |
+
+That last one is a build requirement, not just an ops nicety. Apollo has asked for consumption
+volumes and cannot get them unless the platform records cost per send from day one. If the shift
+pool is larger than assumed, per-conversation cost could exceed the build cost of the module that
+sends the messages.
+
+---
+
+## 12. Disaster recovery
+
+| | |
+|---|---|
+| RDS | Multi-AZ automatic failover; PITR 7 days; automated backups 30 days |
+| Redis | Multi-AZ failover. Queue loss = in-flight jobs lost; **the outbox re-emits**, which is why it exists. |
+| S3 | Versioning enabled; accidental delete is recoverable |
+| Application | Immutable images in ECR; redeploy any prior tag |
+| IaC | Everything in Terraform; an environment is rebuildable from the repo |
+| Rehearsal | Restore rehearsal before UAT and again before go-live |
+
+**RPO and RTO are unstated (`OI-HS-12`).** Working assumption `AS-12`: RPO 15 minutes, RTO 4 hours.
+Without agreed targets there is no pass condition for a restore rehearsal — raise this at kick-off.
+
+---
+
+## 13. Runbooks
+
+`docs/runbooks/`, one per failure mode, written **as the failure mode is created**, not afterwards.
+Minimum set:
+
+database failover · Redis failover · DLQ growth and replay · outbox lag · WhatsApp provider outage ·
+voice provider outage · OCR provider outage · verification aggregator outage · e-signature outage ·
+payroll engine rejection · migration batch failure and resume · a deemed-window scheduler missing a
+run · a client link reported as not working · rollback · restore from backup · **credential rotation
+and the handover boundary**.
+
+`M1-I6` requires runbooks to cover the failure modes named in the integration register (`04-01`).
+Half those integrations have no named supplier yet, so their runbooks are written against the port,
+and completed when the supplier is chosen.
+

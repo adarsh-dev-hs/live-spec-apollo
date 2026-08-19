@@ -1,0 +1,325 @@
+---
+title: "00-02 · System Architecture"
+description: "One Express application, split into strictly-bounded modules. One database. One deployable API image, one worker image, three static frontends."
+---
+
+---
+
+## 1. Shape: modular monolith, not microservices
+
+**One Express application, split into strictly-bounded modules.** One database. One deployable API
+image, one worker image, three static frontends.
+
+This is a deliberate choice, not a default:
+
+| Why not microservices | |
+|---|---|
+| Team size | ~11 average. Service-per-module means more ops surface than engineers. |
+| Transaction boundaries | Requisition → allocation → status → event must commit atomically. Distributed transactions here would be a permanent tax. |
+| Reporting | M9 reads events from every module. Cross-service joins for a monthly MIS pack is a rewrite waiting to happen. |
+| Six-month window | No budget for a service mesh, per-service pipelines, or distributed tracing debt. |
+
+**Decoupling is enforced in code, not by network boundaries.** The module rules in
+`01-02-backend-conventions.md` are what make this safe:
+
+- A module owns its tables. **No other module reads or writes them directly.**
+- Cross-module reads go through the owning module's exported service interface.
+- Cross-module *reactions* go through domain events, never direct calls.
+- No circular dependency between modules. Enforced by lint rule and by CI.
+
+If a module ever needs to scale independently, it lifts out cleanly because it already has a
+service interface, its own tables, and no inbound reach-arounds.
+
+---
+
+## 2. Processes
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                            AWS ap-south-1 (Mumbai)                        │
+│                          Apollo-owned account                             │
+│                                                                           │
+│   ┌─────────────┐    ┌──────────────────────────────────────────────┐     │
+│   │ CloudFront  │───▶│  S3: ops-console / client-links / portal     │     │
+│   └─────────────┘    └──────────────────────────────────────────────┘     │
+│         │                                                                 │
+│         │  /api/*                                                         │
+│         ▼                                                                 │
+│   ┌───────────────┐        ┌────────────────────────────────────────┐     │
+│   │      ALB      │───────▶│  api          (ECS Fargate, 2–6 tasks) │     │
+│   │  + AWS WAF    │        │  Express 5, stateless, no cron         │     │
+│   └───────────────┘        └────────────────────────────────────────┘     │
+│         ▲                                    │                            │
+│         │ webhooks                           │                            │
+│    (WhatsApp, voice,                         │                            │
+│     e-sign, HRMS)                            ▼                            │
+│                            ┌────────────────────────────────────────┐     │
+│                            │  worker       (ECS Fargate, 1–3 tasks) │     │
+│                            │  BullMQ consumers + schedulers         │     │
+│                            └────────────────────────────────────────┘     │
+│                                              │                            │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────┴───────┐  ┌─────────────┐   │
+│   │ RDS Postgres │  │ ElastiCache  │  │  S3 (docs)   │  │  Secrets    │   │
+│   │ 16, Multi-AZ │  │ Redis 7      │  │  versioned   │  │  Manager    │   │
+│   └──────────────┘  └──────────────┘  └──────────────┘  └─────────────┘   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### `api` process
+Stateless HTTP. Handles Ops console, candidate app, client link pages, portal, and inbound webhooks.
+**Never** runs a scheduler and **never** does long work inline — it enqueues.
+
+### `worker` process
+Same codebase, different entrypoint. Runs:
+- BullMQ queue consumers (parsing, sending, ranking, invoicing, migration, payroll)
+- Repeatable schedulers (confidence decay, cadence selection, deemed-approval sweeps, renewal alerts, dunning)
+- The transactional outbox relay
+
+Scaling the two independently matters: a WhatsApp cadence run across the whole shift pool is a
+worker problem, not an API problem.
+
+**Both images are built from one repo.** `pnpm --filter @apollo/api start` vs
+`pnpm --filter @apollo/worker start`. Identical module code, identical migrations.
+
+---
+
+## 3. The three request paths
+
+### 3.1 Synchronous HTTP
+
+```
+Request
+  → ALB
+  → express: requestId, logger, auth, tenant/scope resolution
+  → route (zod-validated)
+  → controller     (HTTP only: parse, call, shape response)
+  → service        (business logic, transaction boundary, emits events)
+  → repository     (SQL via Drizzle; the only layer that touches the DB)
+  → Postgres
+```
+
+The service layer opens the transaction. Domain events written to the **outbox table inside the same
+transaction** as the state change. Nothing is published from a controller.
+
+### 3.2 Background job
+
+```
+service.enqueue('queue.name', payload, { jobId })   ← idempotency key
+  → Redis (BullMQ)
+  → worker consumer
+  → same service layer, same repositories
+  → retry with exponential backoff → dead-letter queue after N attempts
+```
+
+Rules:
+- Every job payload carries an **idempotency key**; consumers must be safe to run twice.
+- Job payloads carry **IDs, never entities**. The consumer re-reads current state.
+- A job that fails permanently lands in the DLQ and raises an alert. It is never silently dropped.
+
+### 3.3 Domain event
+
+```
+service (in transaction) → INSERT INTO outbox
+                              ↓
+                     outbox relay (worker, every 1s)
+                              ↓
+                     publish to BullMQ topic queue
+                              ↓
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+        subscriber A     subscriber B    event_store
+        (another         (another        (append-only,
+         module)          module)         M9 reads this)
+```
+
+**Every domain event is persisted to `event_store` before anything else consumes it.** This is
+`F14` — the one prerequisite the plan says cannot be added afterwards. Reports in M9 read events
+written months earlier. If a module ships without emitting its events, the reporting period before
+that ship date is permanently unreportable.
+
+---
+
+## 4. Layer rules
+
+| Layer | May import | May **not** |
+|---|---|---|
+| `routes` | controllers, middleware, schemas | services, repositories |
+| `controllers` | own service, own schemas | any repository, another module's service |
+| `services` | own repos, own module's other services, **exported interfaces** of other modules, platform packages | another module's repositories, Express types (`req`/`res`) |
+| `repositories` | db client, own schema | services, other modules' schemas |
+| `events` | types only | anything |
+
+A service never sees `req` or `res`. This is what makes the same service callable from an HTTP
+controller, a queue consumer, and a test with no adaptation.
+
+---
+
+## 5. Module contract
+
+Every module — platform or business — exposes exactly this and nothing else:
+
+```ts
+// packages/modules/<name>/src/index.ts
+export const router: Router                  // mounted at /api/v1/<name>
+export const <Name>Service: PublicInterface   // what other modules may call
+export const events: EventDefinitions         // what it emits
+export const subscribers: Subscriber[]        // what it reacts to
+export const jobs: JobDefinition[]            // queues + schedulers it owns
+export const migrations: string               // path to its migration folder
+export const permissions: Permission[]        // permissions it defines
+```
+
+`src/internal/**` is off-limits to every other module. Enforced by
+`eslint-plugin-boundaries` + `no-restricted-imports`, and failing CI.
+
+---
+
+## 6. Data stores and what belongs in each
+
+### PostgreSQL 16 — system of record
+
+Everything durable. One database, **one schema per bounded context** (`iam`, `clients`, `demand`,
+`supply`, `engage`, `select`, `place`, `bill`, `report`, `platform`). Schemas make ownership
+visible in the database itself and make "who is reading my tables" answerable with a grep.
+
+Key patterns (detailed in `01-05`):
+- **Temporal lookups** — rate cards and contract terms must resolve *as at a date*, never "today"
+- **Versioned records** — requisitions, contracts, offers, rate cards keep every version
+- **Append-only** — `audit_entry`, `event_store`, `status_transition`, `allocation_record`, `retention_record`
+- **Soft delete never** — records deactivate; deactivated list entries stay readable on old records
+
+### Redis 7 — everything ephemeral
+
+| Use | Detail |
+|---|---|
+| BullMQ queues & schedulers | The only job runtime |
+| Session store | Ops + portal sessions, sliding idle expiry |
+| Idempotency keys | Webhook dedupe, `Idempotency-Key` header replay |
+| Rate limiting | Per-IP, per-user, per-token, per-external-provider |
+| Distributed locks | "one migration batch at a time", "one pay run at a time" |
+| Short-lived cache | Permission sets, category field definitions, rate lookups (TTL ≤ 60s, always invalidated on write) |
+
+**Redis is never a system of record.** Anything in Redis can be lost without data loss —
+if losing a key loses business state, it belongs in Postgres.
+
+### S3 — files
+
+Every uploaded file: CVs, certificates, ID scans, WhatsApp voice notes, signed offers, invoice PDFs,
+payslips. Versioned bucket, SSE-KMS, no public access, **presigned URLs with short expiry only**.
+Virus scan before a file becomes available; failed scan → quarantine prefix. See `02-04`.
+
+---
+
+## 7. Frontend architecture
+
+Three separate Vite builds. They share packages; they do not share a bundle.
+
+| App | Bundle | Why separate |
+|---|---|---|
+| `apps/ops` | Large SPA, code-split by module | Behind login, ~60 screens, all of RBAC |
+| `apps/links` | Deliberately tiny | Opened by a hospital administrator on a phone from a WhatsApp message. Must load fast on a bad connection. Shipping the Ops bundle here would be indefensible. |
+| `apps/portal` | Medium SPA (M10) | Different auth, client-scoped data, external users |
+
+Shared: `@apollo/ui` (design system), `@apollo/api-client` (generated typed client),
+`@apollo/list` (table engine), `@apollo/forms`.
+
+```
+apps/ops/src/
+  app/            router, providers, layout shell
+  features/       one folder per backend module — mirrors 03-*
+    requisitions/
+      api/        typed queries + mutations (TanStack Query)
+      components/
+      pages/
+      routes.tsx
+  shared/
+```
+
+**Feature folders mirror backend modules one-to-one.** When you implement `03-04-requisitions.md`,
+you touch `packages/modules/requisitions/` and `apps/ops/src/features/requisitions/` — nothing else.
+
+---
+
+## 8. Integration boundary
+
+Every external system sits behind an interface owned by us (`02-12`):
+
+```
+service  →  Port (our interface)  →  Adapter (their SDK/HTTP)  →  External
+                    │
+                    └→  Fake adapter (tests, local dev, demos)
+```
+
+This matters more here than usual: **half the external suppliers have not been named yet.**
+WhatsApp BSP, voice provider, speech-to-text, OCR, e-signature, verification aggregator, payroll
+engine, finance system — all unselected. The port lets us build, test and demo the module against a
+fake, and swap the adapter in when Apollo names the supplier, without reopening the module.
+
+Every adapter records an `adapter_call` row: request, response, latency, outcome. When a supplier
+misbehaves at 2am, that table is the evidence.
+
+Every port must define a **manual fallback**. Several Indian council registries have no API at all;
+they resolve to "a person checks a document" behind the identical interface.
+
+---
+
+## 9. AWS topology
+
+| Service | Configuration |
+|---|---|
+| **VPC** | 2 AZs, public subnets (ALB/NAT), private subnets (ECS), isolated subnets (RDS/Redis) |
+| **ALB** | HTTPS only, ACM cert, AWS WAF (rate limit + managed rules) |
+| **ECS Fargate** | `api` service (2–6 tasks, target-tracking on CPU + request count), `worker` service (1–3) |
+| **RDS Postgres 16** | Multi-AZ, encrypted, automated backups, PITR, read replica added in M9 for reporting |
+| **ElastiCache Redis 7** | Multi-AZ with automatic failover, encryption in transit and at rest |
+| **S3** | `apollo-gwd-documents-<env>` (versioned, KMS), `apollo-gwd-web-<env>` (static sites) |
+| **CloudFront** | Static frontends + `/api/*` behaviour to the ALB. Single origin for the browser. |
+| **SES** | Outbound email. Inbound email → S3 + Lambda → intake webhook. |
+| **Secrets Manager** | All credentials. Nothing in env vars, nothing in the image, nothing in git. |
+| **CloudWatch** | Logs (JSON), metrics, alarms. Structured log queries via Logs Insights. |
+| **ECR** | `api` and `worker` images, immutable tags, scan on push |
+
+Four environments: `dev`, `qa`, `uat`, `prod` — see `01-09`.
+
+**Open (`OI-HS-04`):** confirm "client-hosted AWS Mumbai" means an Apollo-owned account rather than a
+Hiresense-managed one. This changes who holds credentials, who is on call, and how deploys are
+approved. Working assumption: Apollo-owned, Hiresense has deploy-role access via IAM role assumption
+during the engagement, and **no Hiresense-held credential is required at runtime after handover**.
+
+---
+
+## 10. Cross-cutting concerns and where they live
+
+| Concern | Owner | Spec |
+|---|---|---|
+| Who you are | `@apollo/iam` | `02-01` |
+| What you may do | `@apollo/iam` permission middleware | `02-01`, `01-07` |
+| What you may see (row scope) | Scope resolver applied in repositories | `01-07` |
+| Who did what | `@apollo/audit` | `02-02` |
+| What happened (for reporting) | `@apollo/events` | `02-09` |
+| Configurable lists and windows | `@apollo/config` | `02-03` |
+| Files | `@apollo/files` | `02-04` |
+| Sending anything to anyone | `@apollo/messaging` | `02-07` |
+| Receiving anything from anyone | `@apollo/inbound` | `02-08` |
+| Reaching a client without a login | `@apollo/links` | `02-10` |
+| Two-person approval | `@apollo/approvals` | `02-11` |
+| Talking to an external | `@apollo/adapters` | `02-12` |
+| Background work | `@apollo/jobs` | `02-13` |
+
+If you find yourself writing any of these inside a business module, stop. It is already built.
+
+---
+
+## 11. Deliberate non-goals
+
+| Not doing | Why |
+|---|---|
+| Microservices | §1 |
+| GraphQL | REST + a generated typed client is enough; GraphQL adds a resolver layer nobody needs |
+| Kafka / EventBridge | BullMQ on Redis handles this volume. Postgres outbox gives durability. |
+| Event sourcing as the write model | Events are for *reporting and reaction*, not state reconstruction. Current state lives in normal tables. |
+| Multi-region | DPDP says Mumbai. One region. |
+| Separate read database at launch | A read replica in M9 when reporting load justifies it, not before |
+| Server-side rendering | Every surface is behind auth or a token. No SEO requirement. |
+| Real-time websockets | Polling with TanStack Query is sufficient for every screen in the plan |
+

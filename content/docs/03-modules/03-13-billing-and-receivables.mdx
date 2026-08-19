@@ -1,0 +1,411 @@
+---
+title: "B13 · Billing and Receivables"
+description: "Two invoice paths, one evidence model."
+---
+
+**Package** `@apollo/billing` · **Schema** `bill` · **Plan** D8, A7, D25 (thin) / M9
+**Effort** ~41pd · **Risk** High (XMOD, COMP) · **Build in** Phase 6
+
+---
+
+## 1. Purpose
+
+Two invoice paths, one evidence model.
+
+- **Permanent** — the placement fee (5–6% of salary) fires on the **day-90 client-acknowledged
+  retention record**, not at placement, against the contract terms in force at that moment.
+- **Contractual** — a shift invoice from the **client-approved timesheet** and contract.
+
+And the thing that makes both defensible: the **billing trigger** held as auditable evidence *capable
+of supporting a billing query* (A7).
+
+**The chain ends here in Release 1.** Invoice raised, receivable recorded. Payment receipt,
+reconciliation, TDS, ageing, dunning and credit notes are all `03-21`.
+
+---
+
+## 2. Scope
+
+**In** — billing triggers with their evidence · permanent placement invoice · shift invoice ·
+contract terms resolved and **frozen at trigger** · receivables · invoice export addressable by API
+and file · invoice, money-owed, shift-invoice and billing-evidence screens
+
+**Out** — payments, part-payments, TDS, reconciliation, ageing action, dunning, credit and debit
+notes → `03-21` · the finance system itself — **not named (`OI-A-14`)** · reporting → `03-14` ·
+forecasting demand · any client-facing dashboard — *"clients only see the links from M7 until the
+portal in M10"*
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M9-I12` Permanent invoice (D8, Service, XL, 7.5pd) | §7.2 |
+| `M9-I13` Day 90 record store (A7, Service, L, 4pd) | §5.1 |
+| `M9-I14` Contract terms at trigger (D8, Service, M, 3pd) | §7.3 |
+| `M9-I15` Shift invoice (D25, Service, L, 4pd) | §7.4 |
+| `M9-I16` Invoice export (D25, Service, L, 4pd) | §7.5 |
+| `M9-I1` Invoices (D8, L, 5pd) | §9.1 |
+| `M9-I2` Money owed (D8, M, 3pd) | §9.2 |
+| `M9-I3` Billing evidence (A7, L, 5pd) | §9.3 |
+| `M9-I4` Shift invoices (D25, M, 3pd) | §9.4 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `03-11` placements (**the day-90 record**), `03-12` attendance (**the approved
+timesheet**), `03-02` contracts (**terms at trigger**), `02-10` links, `03-04` requisitions (the owner
+field, for reporting)
+**Consumed by:** `03-14` analytics, `03-21` collections, `03-16` portal
+
+---
+
+## 5. Data model
+
+### 5.1 Billing trigger (A7 — the evidence)
+
+```sql
+CREATE TABLE bill.billing_trigger (
+  id                uuid PRIMARY KEY,
+  reference         text NOT NULL UNIQUE,             -- 'TRG-2026-000418'
+  trigger_type      billing_trigger_type_enum NOT NULL,   -- 'retention_day_90' | 'timesheet_approved'
+  status            trigger_status_enum NOT NULL,
+  -- what it points at
+  placement_id      uuid,
+  retention_record_id uuid,
+  timesheet_id      uuid,
+  client_id         uuid NOT NULL,
+  -- THE EVIDENCE, denormalised so it survives everything upstream
+  evidence          jsonb NOT NULL,
+  /* {
+       source: 'client_link' | 'ops_recorded' | 'deemed',
+       isDeemed: false,
+       answeredAt: '2026-11-14T09:12:03Z',
+       respondent: { name, role, email, recipientId, ip },
+       linkReference: 'LNK-2026-008412',
+       question: 'Is this person still employed with you?',
+       answer: 'yes',
+       deemedWindowDays: null,
+       remindersSent: 2
+     } */
+  -- terms in force AT THIS MOMENT, resolved once and frozen
+  contract_id       uuid NOT NULL,
+  contract_version_id uuid NOT NULL,
+  resolved_terms    jsonb NOT NULL,
+  occurred_at       timestamptz NOT NULL,
+  invoice_id        uuid,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+REVOKE UPDATE, DELETE ON bill.billing_trigger FROM apollo_app;
+CREATE UNIQUE INDEX uq_trigger__retention ON bill.billing_trigger (retention_record_id)
+  WHERE retention_record_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_trigger__timesheet ON bill.billing_trigger (timesheet_id)
+  WHERE timesheet_id IS NOT NULL;
+```
+
+**The unique indexes are the second line of defence against double-billing.** `02-10` and `03-11`
+prevent a day-30 answer creating a trigger; these prevent one retention record producing two.
+
+**`evidence` is denormalised deliberately.** A billing query may land years later, by which time the
+client contact has left, the link record may have been pruned, and the contact record edited. The
+trigger must be self-contained: *"capable of supporting a billing query"* (A7).
+
+### 5.2 Invoice
+
+```sql
+CREATE TABLE bill.invoice (
+  id                uuid PRIMARY KEY,
+  reference         text NOT NULL UNIQUE,             -- 'INV-2026-000087'
+  invoice_type      invoice_type_enum NOT NULL,       -- 'placement_fee' | 'shift'
+  client_id         uuid NOT NULL,
+  billing_trigger_id uuid NOT NULL,
+  contract_version_id uuid NOT NULL,
+  status            invoice_status_enum NOT NULL,
+  invoice_date      date NOT NULL,
+  due_date          date NOT NULL,                    -- invoice_date + payment_terms_days
+  subtotal          numeric(14,2) NOT NULL,
+  tax_amount        numeric(14,2) NOT NULL DEFAULT 0,
+  total_amount      numeric(14,2) NOT NULL,
+  currency          text NOT NULL DEFAULT 'INR',
+  -- frozen billing snapshot
+  bill_to           jsonb NOT NULL,
+  gstin             text,
+  place_of_supply   text,
+  document_id       uuid,                             -- the generated PDF
+  exported_at       timestamptz, export_reference text,
+  notes             text,
+  created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+  CONSTRAINT uq_invoice__trigger UNIQUE (billing_trigger_id),
+  CONSTRAINT ck_invoice__total CHECK (total_amount >= 0)
+);
+
+CREATE TABLE bill.invoice_line (
+  id            uuid PRIMARY KEY,
+  invoice_id    uuid NOT NULL REFERENCES bill.invoice(id),
+  line_number   integer NOT NULL,
+  description   text NOT NULL,
+  -- permanent
+  placement_id  uuid, candidate_name text, role_title text,
+  annual_salary numeric(14,2), fee_percent numeric(6,3),
+  -- shift
+  timesheet_line_id uuid, shift_date date, quantity numeric(10,2),
+  unit          text, unit_rate numeric(14,2),
+  amount        numeric(14,2) NOT NULL,
+  tax_rate      numeric(6,3) NOT NULL DEFAULT 0,
+  tax_amount    numeric(14,2) NOT NULL DEFAULT 0
+);
+
+CREATE TABLE bill.receivable (
+  id             uuid PRIMARY KEY,
+  invoice_id     uuid NOT NULL UNIQUE REFERENCES bill.invoice(id),
+  client_id      uuid NOT NULL,
+  amount_due     numeric(14,2) NOT NULL,
+  amount_paid    numeric(14,2) NOT NULL DEFAULT 0,    -- 03-21 writes this
+  status         receivable_status_enum NOT NULL,      -- 'open'|'part_paid'|'paid'|'written_off'
+  due_date       date NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+```
+
+`uq_invoice__trigger` is the constraint that makes double-invoicing structurally impossible.
+
+### 5.3 Rate variance (A11)
+
+```sql
+CREATE TABLE bill.rate_variance (
+  id             uuid PRIMARY KEY,
+  requisition_id uuid, placement_id uuid, invoice_id uuid,
+  client_id      uuid NOT NULL,
+  role_code text, specialty_code text, acuity_code text,
+  baseline_rate  numeric(14,2) NOT NULL,     -- the rate card line
+  agreed_rate    numeric(14,2) NOT NULL,     -- what was actually agreed
+  variance_amount numeric(14,2) NOT NULL,
+  variance_percent numeric(6,3) NOT NULL,
+  recorded_at    timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Written here at invoice time; reported by `03-14` (`M9-I11`).
+
+---
+
+## 6. State machines
+
+**BillingTrigger:** `pending → confirmed | deemed_confirmed → used_by_invoice`
+
+**Invoice:** `draft → raised → exported`
+
+R1 ends at `exported`. `03-21` extends with `part_paid → paid` \| `credited`.
+
+**Receivable:** `open` — and stays open in R1. `03-21` moves it.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const BillingService = {
+  /** Called ONLY by handlers for link types where is_billing_trigger = true. */
+  createTrigger(input: {
+    triggerType, placementId?, retentionRecordId?, timesheetId?, clientId, evidence, occurredAt
+  }): Promise<BillingTrigger>
+
+  raiseInvoiceFor(triggerId, actor): Promise<Invoice>
+  get(invoiceId): Promise<InvoiceWithLines>
+  list(request, scope): Promise<Page<Invoice>>
+  export(invoiceId): Promise<InvoiceExport>
+  getEvidence(invoiceId): Promise<BillingEvidence>
+  listReceivables(request, scope): Promise<Page<Receivable>>
+}
+```
+
+`createTrigger` asserts that the calling link type carries `is_billing_trigger`. A day-30 or day-60
+answer reaching this function throws — and there is a test that tries it (`02-10 §12`).
+
+### 7.2 Permanent invoice (`M9-I12`)
+
+*"Raise the permanent invoice once the day-90 record exists. **Not at placement.**"*
+
+```
+on place.retention.confirmed:
+  if not retentionRecord.isStillEmployed → no invoice; record the outcome
+  trigger = createTrigger('retention_day_90', evidence from the retention record)
+  terms   = ContractService.getTermsAsAt(clientId, trigger.occurredAt, 'permanent')
+  fee     = max(placement.agreedSalary × terms.placementFeePercent / 100, terms.feeMinimum)
+  invoice = draft with the frozen terms, the placement, the candidate
+  emit bill.invoice.raised
+```
+
+Money arithmetic in `numeric`, never floats. The fee is a percentage of a real salary on a real
+invoice; rounding is visible.
+
+### 7.3 Contract terms at trigger (`M9-I14`)
+
+*"Read the contract terms that applied **at the moment the trigger fired**."*
+
+Resolved once via `ContractService.getTermsAsAt(clientId, occurredAt)`, then **frozen onto the
+trigger and the invoice**. Even a correct as-at lookup can give a different answer later if someone
+back-dates a contract version — the freeze is what makes an invoice permanent
+(`01-05 §6.2`, `03-02 §12`).
+
+### 7.4 Shift invoice (`M9-I15`)
+
+*"Turn an approved timesheet into an invoice at the right rate."*
+
+```
+on place.timesheet.approved (or .deemed_approved):
+  trigger = createTrigger('timesheet_approved', evidence from the timesheet approval)
+  lines   = timesheet lines, at the rates ALREADY FROZEN on them by 03-12
+  invoice = draft, totalled, taxed
+```
+
+The rates are not re-resolved — `03-12` froze them at build. Re-resolving here would mean the
+approved timesheet and the invoice could disagree.
+
+### 7.5 Invoice export (`M9-I16`)
+
+*"Expose the invoice by API and file export so a finance system can attach later. **Nobody has said
+which one.**"*
+
+Both are built regardless (`OI-A-14`):
+
+| Route | |
+|---|---|
+| API | `GET /api/v1/invoices/:id/export` — a stable, documented JSON shape |
+| File | Scheduled CSV/XLSX per period to S3, or SFTP drop when named |
+| Webhook | Push to a configured endpoint, behind the adapter port |
+
+The plan's instruction is explicit: *"build the invoice object addressable by API or file export so
+the target system attaches later without reopening the module."*
+
+### 7.6 HTTP
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/api/v1/invoices` · `/:id` | `bill.invoice.read` |
+| POST | `/:id/raise` · `/:id/regenerate-pdf` | `bill.invoice.raise` |
+| GET | `/:id/evidence` | `bill.invoice.read` |
+| GET | `/:id/export` | `bill.invoice.export` |
+| GET | `/api/v1/receivables` | `bill.receivable.read` |
+| GET | `/api/v1/billing-triggers` · `/:id` | `bill.trigger.read` |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `bill.trigger.created` · **`bill.invoice.raised`** (→ `03-14`, `03-21`) ·
+`bill.invoice.exported` · `bill.receivable.opened` · `bill.rate_variance.recorded`
+
+**Subscribes:** **`place.retention.confirmed`** → permanent invoice ·
+**`place.timesheet.approved`** / `.deemed_approved` → shift invoice ·
+`place.dropout.recorded` (post-trial) → flag for `03-21` if a guarantee period applies (`OI-A-13`)
+
+**Jobs**
+
+| Job | Concurrency | Notes |
+|---|---|---|
+| `billing.raise-invoice` | **2** | Deliberately low — money. **No aggressive auto-retry**; a failure alarms and a human decides (`01-06 §6`). |
+| `billing.generate-pdf` | 5 | Renders and stores via `02-04` |
+| `billing.export` | 2 | To the configured target |
+| `billing.unbilled-check` | Daily | **Triggers with no invoice after 24h.** This is the alarm that catches a silent revenue stop. |
+
+`billing.unbilled-check` matters as much as the invoicing itself: if a trigger is created and the
+invoice job fails, revenue stops silently. A daily reconciliation of triggers-without-invoices is the
+cheapest possible insurance.
+
+---
+
+## 9. Frontend — `/billing`
+
+### 9.1 Invoices (`M9-I1`)
+
+*"Both kinds of invoice in one list, **each linked to the evidence behind it**."*
+
+`<DataTable/>`: reference, type, client, date, due, amount, status, **evidence link**. Filter by type,
+client, status, date, overdue.
+
+### 9.2 Money owed (`M9-I2`)
+
+*"Money owed against invoices raised. **The process stops here in this milestone.**"*
+
+Receivables by client with ageing buckets — **displayed, not acted on**. The screen says so, and
+points at M15 for collections. Better than a screen that looks like it should do something and does
+not.
+
+### 9.3 Billing evidence (`M9-I3`)
+
+*"The evidence behind each permanent invoice: **who confirmed, when, against which terms**."*
+
+The screen finance opens when a client queries a charge:
+
+- The retention record: the question asked, the answer, when, **by whom** (name, role, email)
+- **How it was answered** — client link / Ops recorded / **deemed**, prominently
+- If deemed: which window, when it expired, **how many reminders were sent**
+- The link trail from `02-10`: issued, sent, opened, answered
+- The contract version and the resolved terms as frozen
+- The placement, candidate and requisition
+
+Exportable as a single document, because that is what gets emailed to a hospital's finance team.
+
+### 9.4 Shift invoices (`M9-I4`)
+
+Each linked to the timesheet it came from, with the approval evidence.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | The permanent invoice fires on the **day-90 client-acknowledged retention record**, not at placement | D8, A7 |
+| 2 | The shift invoice is raised from the **client-approved timesheet**, not raw attendance | D25, plan CLOSED |
+| 3 | **One billing trigger can produce at most one invoice** — enforced by a unique constraint | §5.2 |
+| 4 | Day 30 and day 60 answers can never create a billing trigger | Plan CLOSED |
+| 5 | Contract terms are resolved **as at the trigger moment** and frozen onto the invoice | `M9-I14` |
+| 6 | A contract or rate card change after raising does not alter an existing invoice | `01-05 §6.2` |
+| 7 | The billing trigger is **immutable** and holds evidence sufficient to support a query years later | A7, `M9-I13` |
+| 8 | A deemed confirmation is visible as such on the invoice and its evidence | `M8-I15`, `M2-I10` |
+| 9 | The evidence screen shows who confirmed, when, how, and against which terms | `M9-I3` |
+| 10 | A negative day-90 answer produces **no invoice**, and the outcome is recorded | §7.2 |
+| 11 | The invoice is addressable by **both** API and file export, before a finance system is named | `M9-I16`, `OI-A-14` |
+| 12 | Money arithmetic uses `numeric`; no float appears anywhere in the path | `01-02 §11` |
+| 13 | A trigger with no invoice after 24 hours raises an alarm | §8 |
+| 14 | Receivables are recorded and displayed; **no payment handling in R1** | Scope boundary |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-13`** | **How long is the guarantee period, and does it run past day 90?** | **This changes scope, not just a number.** If the guarantee runs to six months, a candidate leaving in month five means an already-raised invoice must be corrected — **which requires credit and debit notes, currently out of scope until M15**, and the contract screen must capture the period. | **`AS-20`** — `guarantee_period_days` is on the contract version and defaults to 90. This module **subscribes to post-trial drop-outs and flags affected invoices** even in R1, so the data exists either way. **If Apollo confirms a longer period, `03-21` credit notes move into phase 6.** Estimate blocker — escalate. |
+| **`OI-A-14`** | **The finance system invoices post to has not been named.** | | Build both API and file export regardless — the plan's own instruction. Adapter port ready (`02-12`). |
+| **`OI-HS-14`** | **Finance retention for invoices and billing trigger records vs DPDP candidate retention** | *"A billing trigger record must survive a dispute years later; a candidate may request erasure sooner. The two periods need reconciling explicitly."* | **`AS-08`** — trigger and invoice retained 7–8 years; DPDP erasure **anonymises the candidate identifiers within them** while preserving the transaction facts and the *client-side* respondent, who is the person the evidence actually rests on. Needs Apollo legal sign-off. |
+| `OI-A-05` | Platform defaults for the two deemed windows | | **`AS-06`** |
+| — | GST treatment, place of supply, reverse charge | Not specified anywhere | **`AS-40`** — fields exist on the invoice (`gstin`, `place_of_supply`, per-line `tax_rate`); the rate comes from configuration. **Apollo's finance team must specify the treatment before go-live** — this is a compliance gap, not a build gap. Raise at kick-off. |
+| — | Invoice numbering format and series | Not specified | **`AS-41`** — `INV-YYYY-NNNNNN`, one sequence, gapless. Indian statutory practice may require per-series numbering; confirm with finance. |
+
+---
+
+## 12. Notes for the implementer
+
+**The evidence is the product, not the invoice.** Anyone can generate a PDF. What makes this module
+worth 41 days is that when a hospital's finance director asks "why are you charging us ₹180,000",
+Apollo can produce, in one click: the question asked, the answer given, the named person who gave it,
+the timestamp, the contract clause it was billed under, and the version of that contract in force
+that day. Build `billing_trigger.evidence` first.
+
+**Low concurrency and no blind retries on the invoice job.** A retried invoice is a duplicate charge
+to a client. The unique constraint catches it, but the correct behaviour is to fail loudly and let a
+person look.
+
+**Build `billing.unbilled-check` in the first week of this module.** It is twenty lines and it is the
+only thing standing between a broken subscriber and a month of silently unbilled placements.
+
+**Flag the GST gap now.** Nothing in either client document specifies tax treatment, and an invoice
+with wrong GST is a compliance problem rather than a bug. The fields are there; the rules are not.
+

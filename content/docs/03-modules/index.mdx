@@ -1,0 +1,72 @@
+---
+title: "Modules"
+description: "The business modules, one spec per implementable unit."
+---
+
+This section contains 21 documents.
+
+<Cards>
+  <Card title="B01 · Clients, Sites and Contacts" href="/docs/03-modules/03-01-clients">
+  The client entity with its locations and departments, the people at the client, and the list of addresses each client sends demand from. Every requisition, offer, placement and…
+  </Card>
+  <Card title="B02 · Contracts and Rate Cards" href="/docs/03-modules/03-02-contracts-and-rate-cards">
+  What Apollo charges, and what the signed agreement says. M9 reads these terms at the moment it raises an invoice, so errors here become billing errors.
+  </Card>
+  <Card title="B03 · Demand Intake Channels" href="/docs/03-modules/03-03-demand-intake">
+  Five live channels plus verbal capture, all normalising to one requisition schema, with the source retained, completeness scored against required fields, and follow-up routed back…
+  </Card>
+  <Card title="B04 · Requisitions and Fulfilment" href="/docs/03-modules/03-04-requisitions">
+  The requisition object and its lifecycle: creation, versioning, hold, revise, close; shift templates and demand lines; the fulfilment board and aging. Plus the owner field and the…
+  </Card>
+  <Card title="B05 · Candidates and Supply Bases" href="/docs/03-modules/03-05-candidates">
+  The candidate as one record spanning two supply bases against a shared credential object, covering three categories, with a per-category attribute set that is configuration rather…
+  </Card>
+  <Card title="B06 · Credentials and Verification" href="/docs/03-modules/03-06-credentials-and-verification">
+  The credential object — issuer, validity period, verification method — shared across both supply bases, with document OCR, identity verification behind the M1 adapter layer, and a…
+  </Card>
+  <Card title="B07 · Candidate App and Backend" href="/docs/03-modules/03-07-candidate-app-backend">
+  The candidate mobile app: self-registration, resume upload and parsing, job and shift discovery, application tracking, document upload, availability answering, and shift check-in.
+  </Card>
+  <Card title="B08 · Engagement and Availability" href="/docs/03-modules/03-08-engagement-and-availability">
+  Determine which candidates to contact, on what schedule, through which channel and with which question set; deliver on that decision; capture the response on one structured schema…
+  </Card>
+  <Card title="B09 · Matching and Ranking" href="/docs/03-modules/03-09-matching-and-ranking">
+  Produce a ranked candidate set against a requisition, exposing the rationale for each rank together with unmet or partially met criteria, applying different weightings per…
+  </Card>
+  <Card title="B10 · Selection and Offers" href="/docs/03-modules/03-10-selection-and-offers">
+  Interview slot proposal and confirmation, reschedule and cancellation, feedback capture, the accept / hold / reject decision with mandatory structured rejection reasons, then…
+  </Card>
+  <Card title="B11 · Placements and Trial Tracking" href="/docs/03-modules/03-11-placements-and-trial">
+  Joining confirmation with date tracking, drop-out capture with reasons, and a configurable set of check-in events across day 0, 7, 30, 60 and 90 capturing attendance, salary…
+  </Card>
+  <Card title="B12 · Attendance and Timesheets" href="/docs/03-modules/03-12-attendance-and-timesheets">
+  Shift-level attendance captured by check-in on the candidate app, and the timesheet — which carries an approval state set by the client through a tokenised link, and which 03-13…
+  </Card>
+  <Card title="B13 · Billing and Receivables" href="/docs/03-modules/03-13-billing-and-receivables">
+  Two invoice paths, one evidence model.
+  </Card>
+  <Card title="B14 · Analytics and Reporting" href="/docs/03-modules/03-14-analytics-and-reporting">
+  Funnel and conversion, fill rate, time-to-fill, trial survival, stage-level conversion loss by client and by recruiter, channel and recruiter performance, the monthly MIS pack…
+  </Card>
+  <Card title="B15 · Legacy CPAL Migration" href="/docs/03-modules/03-15-legacy-migration">
+  Move Apollo's existing candidate data out of CPAL and into the platform, after which the platform becomes the system of record and the old tool is switched off.
+  </Card>
+  <Card title="B16 · Client Portal" href="/docs/03-modules/03-16-client-portal">
+  A logged-in website for clients: raise vacancies, track them, review shortlists, approve timesheets, download invoices. The first client login the platform has ever had.
+  </Card>
+  <Card title="B17 · Associate Onboarding" href="/docs/03-modules/03-17-associate-onboarding">
+  The extra employment details needed once a shift worker actually starts, beyond their candidate record: associate profile, statutory forms including PF/UAN transfer and gratuity…
+  </Card>
+  <Card title="B18 · Workforce Operations" href="/docs/03-modules/03-18-workforce-operations">
+  The day-to-day changes that happen once people are working: salary revisions for one person or in bulk, salary advances, and putting a salary on hold or releasing it. Each needs…
+  </Card>
+  <Card title="B19 · Payroll" href="/docs/03-modules/03-19-payroll">
+  Paying the shift workers. This connects the platform to a third-party payroll engine — we do not build a payroll calculator. It sends the inputs the engine needs, configures the…
+  </Card>
+  <Card title="B20 · Demand Prioritisation and Approval" href="/docs/03-modules/03-20-demand-prioritisation">
+  03-04 records which recruiter was put on which vacancy, as decided on the daily morning call. This module makes the system do the deciding: score which vacancies matter most on…
+  </Card>
+  <Card title="B21 · Timesheet Operations and Collections" href="/docs/03-modules/03-21-collections">
+  Two things left out of the thin slices.
+  </Card>
+</Cards>

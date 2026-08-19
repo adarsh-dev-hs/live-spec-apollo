@@ -1,0 +1,14 @@
+{
+  "title": "Foundation",
+  "pages": [
+    "index",
+    "00-01-product-context",
+    "00-02-system-architecture",
+    "00-03-domain-model",
+    "00-04-component-map",
+    "00-05-delivery-roadmap",
+    "00-06-glossary"
+  ],
+  "icon": "Compass",
+  "description": "What the business does and how the system is shaped. Read once, first."
+}

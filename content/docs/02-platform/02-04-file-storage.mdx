@@ -1,0 +1,301 @@
+---
+title: "P04 · File Storage"
+description: "Where every uploaded file lives: CVs, registration certificates, ID scans, WhatsApp voice notes, signed offers, invoices, payslips, spreadsheet uploads, attendance imports…"
+---
+
+**Package** `@apollo/files` · **Schema** `platform` · **Plan** F06 (M0-I6)
+**Effort** ~8pd · **Risk** Medium (COMP) · **Build in** Phase 1
+
+---
+
+## 1. Purpose
+
+Where every uploaded file lives: CVs, registration certificates, ID scans, WhatsApp voice notes,
+signed offers, invoices, payslips, spreadsheet uploads, attendance imports, statutory forms.
+
+One store, one upload control, one viewer, one retention policy. **Files never leave the Mumbai
+region — this is what makes the DPDP position hold** (`M0-I6`, `M4-I26`).
+
+---
+
+## 2. Scope
+
+**In**
+- Upload, store, virus scan, retrieve, version, retain
+- Presigned upload and download URLs with short expiry
+- Virus scanning before a file becomes available; quarantine on failure
+- Version history — replacing a document keeps the previous version
+- The upload control and file viewer other screens drop in
+- Region enforcement and retention hooks
+
+**Out**
+- OCR / text extraction → `04-04` and `03-06`. This component stores the file; another reads it.
+- Document *review* screens → `03-06`
+- Generating documents (offer PDF, invoice PDF, payslip) → the owning module produces the bytes and
+  hands them here
+- The verification workflow → `03-06`
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M0-I6` File storage (F06, Service, XL, 8pd) | All sections |
+
+Consumed by: `M3-I23` (voice notes), `M3-I25` (email attachments), `M3-I6` (spreadsheets),
+`M4-I8`/`M4-I14`/`M4-I22` (candidate documents and OCR), `M7-I15` (signed offers), `M9-I1`
+(invoices), `M11-I2` (statutory forms), `M12-I4` (attendance uploads), `M13-I4` (payslips).
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/jobs` (P13), `@apollo/adapters` (P12, for the scanner), `@apollo/audit` (P02)
+**Consumed by:** nine modules.
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE platform.document (
+  id             uuid PRIMARY KEY,
+  kind           document_kind_enum NOT NULL,   -- 'cv'|'certificate'|'id_proof'|'voice_note'|
+                                                -- 'signed_offer'|'invoice'|'payslip'|'spreadsheet'|
+                                                -- 'statutory_form'|'attendance_import'|'other'
+  owner_type     text NOT NULL,                 -- 'candidate'|'requisition'|'placement'|'client'|...
+  owner_id       uuid NOT NULL,
+  current_version_id uuid,
+  data_class     data_class_enum NOT NULL,      -- C1..C4 (01-10 §2) — drives access and retention
+  retention_key  text NOT NULL,                 -- resolves to a policy in 01-10 §6
+  is_active      boolean NOT NULL DEFAULT true,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  created_by     uuid NOT NULL
+);
+CREATE INDEX idx_document__owner ON platform.document (owner_type, owner_id, kind);
+
+CREATE TABLE platform.document_version (
+  id             uuid PRIMARY KEY,
+  document_id    uuid NOT NULL REFERENCES platform.document(id),
+  version_number integer NOT NULL,
+  s3_key         text NOT NULL,
+  s3_bucket      text NOT NULL,
+  file_name      text NOT NULL,
+  content_type   text NOT NULL,
+  size_bytes     bigint NOT NULL,
+  checksum_sha256 text NOT NULL,
+  status         document_status_enum NOT NULL, -- 'uploading'|'scanning'|'available'|'quarantined'|'failed'
+  scan_result    jsonb,
+  uploaded_at    timestamptz NOT NULL DEFAULT now(),
+  uploaded_by    uuid NOT NULL,
+  UNIQUE (document_id, version_number)
+);
+
+CREATE TABLE platform.document_access_log (
+  id           uuid PRIMARY KEY,
+  version_id   uuid NOT NULL,
+  actor_type   actor_type_enum NOT NULL,
+  actor_id     uuid,
+  action       text NOT NULL,                   -- 'download'|'view'|'presign'
+  occurred_at  timestamptz NOT NULL DEFAULT now(),
+  ip_address   inet
+);
+```
+
+`document_access_log` exists because C3/C4 documents — ID scans, bank proofs, clinical certificates —
+need read auditing, and putting every download into the main audit trail would drown it.
+
+### S3 layout
+
+```
+apollo-gwd-documents-<env>/
+  <ownerType>/<ownerId>/<documentId>/v<n>/<filename>
+
+apollo-gwd-quarantine-<env>/
+  <documentId>/v<n>/<filename>
+```
+
+| Property | |
+|---|---|
+| Versioning | Enabled on the bucket, in addition to our own version rows |
+| Encryption | SSE-KMS, environment-specific key |
+| Public access | Blocked entirely at the account level |
+| Region | `ap-south-1`. **Enforced in Terraform and asserted at boot** — the service refuses to start against a bucket in another region. |
+| Lifecycle | IA at 90 days, Glacier at 1 year, expiry per retention policy |
+
+---
+
+## 6. State machines
+
+**DocumentVersion**
+
+| From | To | Trigger |
+|---|---|---|
+| — | `uploading` | Presigned URL issued |
+| `uploading` | `scanning` | Upload confirmed (client callback or S3 event) |
+| `uploading` | `failed` | Upload not confirmed within 1 hour |
+| `scanning` | `available` | Scan clean |
+| `scanning` | `quarantined` | **Scan detected a threat** — object moved to the quarantine bucket |
+| `scanning` | `failed` | Scanner unavailable after retries |
+| `available` | — | Superseded by a new version; the old version **stays available**, marked not-current |
+
+*"Document: uploaded → scanned → available. Or quarantined if the scan fails"* (`M0-I6`).
+
+A `quarantined` version is never downloadable through the app. It exists for investigation and is
+reachable only by an operator with direct bucket access.
+
+A `failed` scan (scanner down, not a threat) is **not** treated as clean. The file stays unavailable
+and the owning module is told, so a candidate is asked to re-upload rather than a threat being
+waved through because a supplier was offline.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const files = {
+  /** Step 1: get a presigned PUT. Enforces kind, size and content-type allowlists. */
+  requestUpload(input: {
+    kind, ownerType, ownerId, fileName, contentType, sizeBytes, actor,
+    replacesDocumentId?: string          // creates a new VERSION, not a new document
+  }): Promise<{ documentId, versionId, uploadUrl, expiresAt }>
+
+  /** Step 2: client confirms; enqueues the scan. */
+  confirmUpload(versionId, actor): Promise<Document>
+
+  /** Short-lived download URL. Permission-checked, access-logged. */
+  presignedUrl(versionId, actor, opts?: { expirySeconds?: number }): Promise<string>
+
+  get(documentId): Promise<Document>
+  listFor(ownerType, ownerId, kind?): Promise<Document[]>
+  versions(documentId): Promise<DocumentVersion[]>
+
+  /** Server-side ingest — for inbound email attachments, WhatsApp media, generated PDFs. */
+  ingest(input: { kind, ownerType, ownerId, fileName, contentType, buffer|stream, actor }): Promise<Document>
+
+  retire(documentId, actor, reason): Promise<void>
+  /** DPDP erasure: destroys bytes, keeps the row and the fact it existed (01-10 §6). */
+  destroyContent(documentId, actor, reason): Promise<void>
+}
+```
+
+### 7.2 HTTP — `/api/v1/files`
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/uploads` | → presigned PUT + ids |
+| POST | `/uploads/:versionId/confirm` | → enqueues scan |
+| GET | `/:documentId` | Metadata + versions |
+| GET | `/versions/:versionId/url` | → 302 to a short-lived presigned URL. Permission-checked. |
+| GET | `/for/:ownerType/:ownerId` | List for an owner |
+| POST | `/:documentId/retire` | |
+
+Candidate app routes are the same, under `requireCandidate()`, scoped so a candidate can only reach
+documents whose `ownerId` is their own candidate id.
+
+**Files are never served from the application origin.** Always a redirect to S3 with a presigned URL.
+This keeps large transfers off ECS and means a leaked link expires.
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | When | Consumed by |
+|---|---|---|
+| `platform.document.available` | Scan clean | `03-06` (OCR), `03-03` (spreadsheet parse), `03-08` (voice transcription) |
+| `platform.document.quarantined` | Threat found | Ops alert; owning module marks the upload rejected |
+| `platform.document.scan_failed` | Scanner unavailable | Ops alert |
+| `platform.document.version_created` | New version of an existing document | Owning module |
+
+`platform.document.available` is the hook every consumer uses. OCR does not poll; it subscribes.
+
+**Jobs**
+
+| Job | Queue | Notes |
+|---|---|---|
+| Virus scan | `files.virus-scan` | Concurrency 5, 3 attempts, exp backoff. Blocks availability. |
+| Abandoned upload sweep | `files.sweep` (hourly) | `uploading` older than 1h → `failed`, S3 object removed |
+| Retention prune | `files.retention` (daily) | Applies `01-10 §6` per `retention_key` |
+
+**Virus scanning** goes through a port (`02-12`) so the implementation is swappable: ClamAV in a
+sidecar for `dev`, a managed scanner for `prod`. The fake adapter in tests can be told to return a
+threat, so the quarantine path is actually tested.
+
+---
+
+## 9. Frontend
+
+Two components in `@apollo/ui`, used by every screen that touches a file. No screen of its own.
+
+### `<FileUpload/>`
+
+Drag-and-drop or browse, direct-to-S3 presigned upload with progress, client-side type and size
+validation before requesting a URL, multi-file, and — importantly — a **clear "scanning" state**
+between upload and availability. A user who uploads a certificate and sees nothing happen will
+upload it three more times.
+
+Error states: too large, wrong type, upload failed, **scan failed**, **quarantined**. Each says what
+to do next.
+
+### `<FileViewer/>`
+
+Inline PDF and image preview, **audio player for WhatsApp voice notes** (`M0-I6`: "a WhatsApp voice
+note is stored and stays playable from the M3 queue"), download, version history with "restore this
+version", and metadata: who uploaded, when, size.
+
+### Mobile
+
+`03-07` uses the same presigned flow, with camera capture and client-side compression before upload —
+shift workers on mobile data uploading a 12MP photo of a certificate is a real cost and a real
+failure mode.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | A file uploaded anywhere in the platform is stored, scanned and retrievable | `M0-I6` |
+| 2 | Download links expire, so a shared link does not stay open indefinitely | `M0-I6` |
+| 3 | Files never leave the Mumbai region | `M0-I6`, `M4-I26` |
+| 4 | A WhatsApp voice note is stored and stays playable from the M3 queue | `M0-I6` |
+| 5 | Replacing a document keeps the previous version rather than overwriting it | `M0-I6` |
+| 6 | A file that fails the virus scan is quarantined and never downloadable through the app | §6 |
+| 7 | A scan that fails because the scanner is unavailable does **not** make the file available | §6 |
+| 8 | A candidate can only reach documents belonging to their own record | §7.2 |
+| 9 | Every download of a C3/C4 document is access-logged | §5 |
+| 10 | The service refuses to start against a bucket outside `ap-south-1` | §5 |
+| 11 | An abandoned upload is cleaned up within an hour | §8 |
+| 12 | DPDP erasure destroys the bytes but keeps the record that a document existed | `01-10 §6` |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| `OI-HS-02` | DPDP erasure against indefinite candidate retention | A candidate requesting erasure and a Retained Pool holding records forever cannot both be honoured | **`AS-08`** — `destroyContent()` destroys bytes and keeps the metadata row; the retention policy in `01-10 §6` governs when it fires. Needs Apollo legal sign-off. |
+| `OI-HS-12` | Backup retention period vs erasure | An erased document persists in backups for the retention window | Standard and defensible, but must be written into the policy |
+| — | Virus scanner supplier | Not named in either client document | Port + ClamAV in `dev`. Choose a managed scanner before `prod`; it is a small decision but it gates every upload. |
+| — | Maximum file sizes | Not stated | **`AS-15`** — CV 10 MB, ID/certificate 10 MB, voice note 25 MB, spreadsheet 25 MB, attendance import 50 MB. Configurable per kind via P03. |
+
+---
+
+## 12. Notes for the implementer
+
+**Direct-to-S3, always.** Never proxy an upload through the API. Six ECS tasks with 2 GB each will
+not survive twenty recruiters uploading spreadsheets, and the presigned pattern costs nothing extra.
+
+**The scan gate is a real gate.** It is tempting to make files available immediately and scan
+asynchronously. Do not — the verification team opens these documents, and the whole point of the
+control is that a malicious file never reaches them.
+
+**Version, do not overwrite.** Several flows replace a document: a candidate re-uploads a corrected
+certificate, an offer is re-issued, a timesheet is re-generated. Every one of those needs the prior
+version to survive, because a dispute is precisely about what the earlier version said.
+

@@ -1,0 +1,269 @@
+---
+title: "P06 · List Engine"
+description: "The shared table component every Ops screen uses. Around twenty screens in this plan are lists; building filtering and paging separately in each is the same work twenty times."
+---
+
+**Package** `@apollo/list` (frontend `<DataTable/>` + backend query helper) · **Plan** F08 (M2-I14)
+**Effort** ~7.5pd · **Risk** Low (SHARED) · **Build in** Phase 1
+
+---
+
+## 1. Purpose
+
+The shared table component every Ops screen uses. **Around twenty screens in this plan are lists;
+building filtering and paging separately in each is the same work twenty times.**
+
+First needed for the client, site and rate card lists in phase 2 — the handful of lists in phase 1
+do not justify the framework, but by phase 2 they do.
+
+This is deliberately two halves that agree: a React component and a backend query builder that speak
+the same filter language, so a filter defined once works end to end.
+
+---
+
+## 2. Scope
+
+**In**
+- `<DataTable/>` — columns, sorting, server pagination, row selection, virtualisation
+- Filter system — typed filter definitions, rendered controls, URL serialisation
+- Column chooser with per-user persistence
+- **Saved views** — named filter+column+sort combinations, personal and shared
+- **Export** — CSV/XLSX, sync for small results and a job for large ones
+- Backend `buildListQuery()` — filter → SQL, with scoping and pagination applied
+- Loading, empty, error and no-permission states, inherited from P05
+
+**Out**
+- The design system → `02-05`
+- Screen-specific columns and filters → each module defines its own
+- Reporting tables and charts → `03-14`. Those are aggregates, not lists.
+- Bulk *actions* → each module. The engine provides selection; what you do with a selection is domain
+  logic.
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M2-I14` Shared list component (F08, Service, XL, 7.5pd) | All sections |
+
+The plan's scope discipline note is explicit that this is inherited, not rebuilt:
+*"Export, saved views and column choosers appear once in M0-I7 and are inherited by every list.
+Listing them per screen inflated the estimate without adding work."*
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/ui` (P05), `@apollo/iam` (P01, for scope)
+**Consumed by:** every list screen. Non-exhaustively —
+
+client list · contract list · rate card lines · inbound list · unmatched senders · manual entry queue ·
+suspected duplicates · requisition list · fulfilment board · shift demand lines · candidate list ·
+verification queue · credentials · delivery log · contact history · replies to review · candidate
+search · interview list · offer tracking · link log · placements · trial dashboard · shift attendance ·
+timesheet tracking · invoices · money owed · shift invoices · requests · overdue invoices
+
+That is 28 screens. The case for building it once is not subtle.
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE platform.saved_view (
+  id           uuid PRIMARY KEY,
+  list_key     text NOT NULL,               -- 'requisitions' | 'candidates' | ...
+  user_id      uuid NOT NULL,
+  name         text NOT NULL,
+  is_shared    boolean NOT NULL DEFAULT false,
+  is_default   boolean NOT NULL DEFAULT false,
+  definition   jsonb NOT NULL,              -- { filters, sort, columns, pageSize }
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_saved_view__lookup ON platform.saved_view (list_key, user_id);
+
+CREATE TABLE platform.list_preference (
+  user_id      uuid NOT NULL,
+  list_key     text NOT NULL,
+  columns      jsonb NOT NULL,              -- visible + order + widths
+  page_size    integer NOT NULL DEFAULT 25,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, list_key)
+);
+```
+
+A shared saved view is visible to anyone with read access to that list. Only its creator or a
+`platform_admin` may edit it — a fulfilment lead publishing "Aged over 14 days, ICU, unallocated"
+for the whole team is the point, and someone else silently changing it is not.
+
+---
+
+## 6. State machines
+
+**N/A**
+
+---
+
+## 7. API surface
+
+### 7.1 Backend query helper
+
+```ts
+export function buildListQuery<T>(opts: {
+  base:     SelectQuery<T>
+  filters:  FilterDefinition[]     // the module's declared filters
+  request:  ListRequest            // parsed from query params (01-04 §4)
+  scope:    Scope                  // ALWAYS applied — 01-07 §7
+  sortable: string[]               // whitelist
+  searchable?: string[]            // columns filter[q] hits
+}): { query: SelectQuery<T>; countQuery: SelectQuery<{count:number}> }
+```
+
+Used by every list repository:
+
+```ts
+list: (tx, request, scope) => {
+  const { query, countQuery } = buildListQuery({
+    base: tx.select(requisitionColumns).from(requisition),
+    filters: requisitionFilters,
+    request, scope,
+    sortable: ['createdAt','reference','ageDays','status','positions'],
+    searchable: ['reference','roleTitle','clientName'],
+  })
+  return paginate(query, countQuery, request.page)
+}
+```
+
+| Rule | |
+|---|---|
+| **Scope is a required parameter.** | A repository method that takes a filter but no scope does not compile. This is the mechanism that makes `OI-HS-01` a one-line change later. |
+| Sortable and searchable columns are whitelists | No user-supplied column name reaches SQL |
+| Pagination is always applied | Default 25, max 200 |
+| The count query is separate and cached for 30s per filter combination | Counting 50k rows on every keystroke is the classic way to make a board feel slow |
+
+### 7.2 Filter definitions
+
+```ts
+export const requisitionFilters = defineFilters({
+  status:    { type: 'enum',  options: requisitionStatuses, multiple: true },
+  clientId:  { type: 'lookup', endpoint: '/api/v1/clients/lookup' },
+  category:  { type: 'enum',  options: candidateCategories, multiple: true },
+  ownerId:   { type: 'lookup', endpoint: '/api/v1/users/lookup?role=recruiter' },
+  ageDays:   { type: 'number', operators: ['gte','lte'] },
+  createdAt: { type: 'dateRange' },
+  q:         { type: 'search', placeholder: 'Reference, role or client' },
+})
+```
+
+**One definition drives three things:** the rendered filter control, the URL parameter parsing, and
+the SQL predicate. They cannot drift apart, which is the usual failure of hand-built filter bars.
+
+### 7.3 HTTP — `/api/v1/lists`
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/:listKey/views` | Personal + shared saved views |
+| POST | `/:listKey/views` · PATCH · DELETE `/views/:id` | |
+| GET/PUT | `/:listKey/preferences` | Columns, order, page size |
+| POST | `/:listKey/export` | 202 + job for large results; 200 with the file for small |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `platform.list.exported` — every export of personal data is audited (`01-07 §11`).
+
+**Jobs**
+
+| Job | Notes |
+|---|---|
+| `list.export` | Rows over the sync threshold (5,000). Streams from Postgres to S3, returns a presigned link. **Applies the same scope and filters as the screen** — an export must never be a way to see more than the list showed. |
+
+That last point deserves emphasis: export is the most common way row-level scoping gets bypassed,
+because it is often built as a separate code path. Here it reuses `buildListQuery` with the same
+scope, so it cannot.
+
+---
+
+## 9. Frontend
+
+```tsx
+<DataTable
+  listKey="requisitions"
+  columns={requisitionColumns}
+  filters={requisitionFilters}
+  useQuery={useRequisitions}
+  onRowClick={(r) => navigate(`/requisitions/${r.id}`)}
+  selection={{ enabled: true, actions: <RequisitionBulkActions /> }}
+  savedViews
+  export
+/>
+```
+
+### Provided once, inherited everywhere
+
+| Feature | Behaviour |
+|---|---|
+| Sorting | Click a header. Multi-sort with shift. Whitelisted server-side. |
+| **Filters in the URL** | Shareable link to exactly the board you are looking at. Back/forward works. This is what makes "switching modules preserves filter state within a session" (`M1-I1`) work. |
+| Pagination | Server-side, with page size selector. `keepPreviousData` so paging does not flash empty. |
+| Column chooser | Show/hide, reorder, resize. Persisted per user per list. |
+| Saved views | Save current filters+columns+sort. Set a default. Share with the team. |
+| Export | Current filters and columns. Warns when the result is large and switches to a job. |
+| Selection | Checkbox column, select-all-on-page and select-all-matching (which passes the filter, not 50k ids) |
+| Virtualisation | Above 100 rows. The fulfilment board must render 500 rows in under a second. |
+| Density | From P05 — `compact` in Ops |
+| States | Loading skeleton, empty (with a clear-filters action), error with retry and request id, no-permission |
+| Sticky | Header and first column, so a wide board stays readable |
+
+### Empty state distinguishes two cases
+
+"No requisitions yet" and "No requisitions match these filters" are different problems for the user
+and get different messages and different actions. Getting this wrong makes a filtered board look
+like a broken system.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Around twenty list screens use this component rather than a bespoke table | `M2-I14` |
+| 2 | Filtering, sorting and paging are implemented once and inherited | `M2-I14` |
+| 3 | Export, saved views and column choosers exist once and are available on every list | Plan scope note |
+| 4 | Filter state lives in the URL and is shareable | `M1-I1` |
+| 5 | Every list is paginated; no endpoint returns unbounded rows | `01-02 §14` |
+| 6 | **Row-level scope is applied by the query builder, not by the caller** | `01-07 §7` |
+| 7 | Export applies the same scope and filters as the screen | §8 |
+| 8 | A sort or filter on a non-whitelisted column is rejected, not passed to SQL | §7.1 |
+| 9 | The fulfilment board renders 500 rows in under 1 second | `01-08 §7` |
+| 10 | Empty-because-no-data and empty-because-filtered show different messages | §9 |
+| 11 | A shared saved view is visible to the team and editable only by its creator or an admin | §5 |
+| 12 | Every export of personal data is audited | `01-07 §11` |
+
+---
+
+## 11. Open questions
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| `OI-M3-14` — latency and load targets for the fulfilment board and unmatched queue | Without targets there is no performance acceptance test | **`AS-14`** — p95 &lt; 2s for the fulfilment board at 5,000 open requisitions, &lt; 1s for other lists. Virtualise above 100 rows. Revise when Apollo answers. |
+| `OI-HS-01` — row-level scoping for site-resident recruiters | Touches every list in the platform | **`AS-02`** — the scope parameter is mandatory in `buildListQuery` from day one, defaulting `recruiter` to `all`. Switching to site-scoped is then a config change, not 28 query rewrites. **This component is the reason that assumption is cheap.** |
+| Export row cap | Not stated | **`AS-17`** — 5,000 rows synchronous, above that a job. Hard cap 100,000 with a message suggesting a narrower filter. |
+
+---
+
+## 12. Notes for the implementer
+
+**Build the backend half first.** The query builder with scoping and whitelisting is where the
+correctness and security value is; the React table is well-trodden ground.
+
+**Do not use a heavyweight grid library.** TanStack Table (headless) plus P05 primitives gives full
+control over states, density and accessibility. A batteries-included grid brings its own design
+language, which is precisely what the design system exists to prevent.
+
+**The `listKey` is the contract.** It ties saved views, preferences and export permissions together.
+Register it once per list, next to the filter definition.
+

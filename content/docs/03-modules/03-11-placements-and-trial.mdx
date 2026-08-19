@@ -1,0 +1,436 @@
+---
+title: "B11 · Placements and Trial Tracking"
+description: "Joining confirmation with date tracking, drop-out capture with reasons, and a configurable set of check-in events across day 0, 7, 30, 60 and 90 capturing attendance, salary…"
+---
+
+**Package** `@apollo/placements` · **Schema** `place` · **Plan** D7, A6 / M8
+**Effort** ~54pd · **Risk** High (XMOD, SPEC) · **Build in** Phase 6
+
+---
+
+## 1. Purpose
+
+Joining confirmation with date tracking, drop-out capture with reasons, and a configurable set of
+check-in events across day 0, 7, 30, 60 and 90 capturing attendance, salary payment timeliness,
+preceptor assignment and accommodation status — with client intent captured at day 60 and **an
+auditable client-acknowledged record at day 90**.
+
+**The day-90 record is the single most commercially important object in the platform.** It is the
+trigger and the evidence for the permanent placement invoice, and it must still make sense to
+someone querying a charge a year later.
+
+---
+
+## 2. Scope
+
+**In** — placement record and the 90-day clock · joining confirmation · drop-out capture returning
+the position to fulfilment · trial event scheduling and firing (day 0/7/30/60/90) · candidate-side
+and client-side check-ins · configurable question sets per category · **the day-90 retention record,
+immutable, including the deemed variant** · trial dashboard and outcomes · the client check-in link
+page
+
+**Out** — the link *mechanism* → `02-10` · shift attendance and timesheets → `03-12` · invoicing →
+`03-13` (this module produces the trigger; that one decides what it means) · associate onboarding →
+`03-17` · payroll → `03-19`
+
+**Explicitly not built:** paying the nurses — *"payroll runs outside the platform for this whole
+period"* · salary changes, advances, holds → `03-18` · joining paperwork → `03-17` · leave, overtime
+and internal timesheet routing → `03-21`
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M8-I1` Confirm joining (D7, L, 5pd) | §9.1 |
+| `M8-I2` Placements (D7, L, 6.5pd) | §9.2 |
+| `M8-I3` Trial dashboard (A6, XL, 8pd) | §9.3 |
+| `M8-I4` Check-in settings (A6, Config, L, 5pd) | §5.3, §9.4 |
+| `M8-I5` Candidate answers (A6, L, 5pd) | §9.5 |
+| `M8-I6` Trial outcome (A6, L, 5pd) | §9.6 |
+| `M8-I10` Check-in scheduling (A6, Service, L, 4pd) | §7.2, §8 |
+| `M8-I11` Check-in questions (A6, Service, L, 4pd) | §7.3 |
+| `M8-I12` Day 90 record (A6, Service, XL, 7pd) | §5.4, §7.4 |
+| `M7-I11` Client page: check-in (A13, XL, 8pd) | §9.7 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `03-10` selection (the accepted offer), `02-10` links, `03-04` requisitions,
+`02-07` messaging, `03-02` contracts (the deemed window)
+**Consumed by:** `03-13` billing (**the day-90 trigger**), `03-14` analytics, `03-17` onboarding,
+`03-04` requisitions (fill counts and drop-outs)
+
+**What breaks without it:** *"M9 needs the day-90 record to raise a permanent invoice."*
+
+---
+
+## 5. Data model
+
+### 5.1 Placement
+
+```sql
+CREATE TABLE place.placement (
+  id                uuid PRIMARY KEY,
+  reference         text NOT NULL UNIQUE,            -- 'PLC-2026-000842'
+  candidate_id      uuid NOT NULL,
+  requisition_id    uuid NOT NULL,
+  offer_id          uuid,
+  client_id         uuid NOT NULL,
+  location_id       uuid NOT NULL,
+  department_id     uuid,
+  engagement_type   engagement_type_enum NOT NULL,
+  -- the contract version whose terms M9 reads. Frozen at joining.
+  contract_id       uuid NOT NULL,
+  contract_version_id uuid NOT NULL,
+  agreed_salary     numeric(14,2),
+  salary_basis      text,                            -- 'annual_ctc'|'annual_gross'
+  -- the 90-day clock hangs off this
+  joining_date      date NOT NULL,
+  confirmed_at      timestamptz NOT NULL,
+  trial_end_date    date NOT NULL,                   -- joining_date + retention_confirm_day
+  status            placement_status_enum NOT NULL,
+  ended_at          timestamptz, end_reason_code text,
+  created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+  version integer NOT NULL DEFAULT 1
+);
+CREATE INDEX idx_placement__trial ON place.placement (trial_end_date)
+  WHERE status IN ('joined','in_trial');
+CREATE INDEX idx_placement__client ON place.placement (client_id, status);
+```
+
+**`contract_version_id` is frozen at joining**, carried through from the offer (`03-10 §7.4`). At day
+90, billing reads *this* version, not whatever is current then.
+
+### 5.2 Drop-out
+
+```sql
+CREATE TABLE place.drop_out (
+  id             uuid PRIMARY KEY,
+  placement_id   uuid,                              -- NULL if they never joined
+  candidate_id   uuid NOT NULL,
+  requisition_id uuid NOT NULL,
+  offer_id       uuid,
+  stage          dropout_stage_enum NOT NULL,       -- 'pre_joining'|'in_trial'|'post_trial'
+  reason_code    text NOT NULL,                     -- configured list
+  reason_note    text,
+  occurred_on    date NOT NULL,
+  recorded_by    uuid NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+```
+
+*"The position goes back to M3 as open"* — emitted as `place.dropout.recorded`, consumed by `03-04`.
+
+### 5.3 Trial events and question sets
+
+```sql
+CREATE TABLE place.check_in_config (
+  id             uuid PRIMARY KEY,
+  category       candidate_category_enum,           -- NULL = all
+  engagement_type engagement_type_enum,
+  day_offset     integer NOT NULL,                  -- 0, 7, 30, 60, 90
+  side           check_in_side_enum NOT NULL,       -- 'candidate' | 'client'
+  channels       message_channel_enum[] NOT NULL,
+  question_set   jsonb NOT NULL,
+  is_billing_trigger boolean NOT NULL DEFAULT false, -- TRUE only for client day 90
+  escalate_to_voice_after_days integer,
+  is_active      boolean NOT NULL DEFAULT true,
+  UNIQUE (category, engagement_type, day_offset, side)
+);
+
+CREATE TABLE place.trial_event (
+  id             uuid PRIMARY KEY,
+  placement_id   uuid NOT NULL REFERENCES place.placement(id),
+  config_id      uuid NOT NULL,
+  day_offset     integer NOT NULL,
+  side           check_in_side_enum NOT NULL,
+  due_on         date NOT NULL,
+  status         trial_event_status_enum NOT NULL,
+  link_id        uuid,                              -- platform.client_link, for client side
+  message_id     uuid,                              -- engage.message, for candidate side
+  fired_at timestamptz, responded_at timestamptz, escalated_at timestamptz,
+  UNIQUE (placement_id, day_offset, side)
+);
+CREATE INDEX idx_trial_event__due ON place.trial_event (due_on, status)
+  WHERE status IN ('scheduled','due');
+
+CREATE TABLE place.trial_response (
+  id             uuid PRIMARY KEY,
+  trial_event_id uuid NOT NULL REFERENCES place.trial_event(id),
+  answers        jsonb NOT NULL,     -- attendance, salary_on_time, preceptor_assigned, accommodation_ok
+  source_channel text NOT NULL,      -- 'app'|'whatsapp'|'voice'|'client_link'|'ops'
+  respondent_type text NOT NULL,     -- 'candidate'|'client'
+  respondent_id  uuid,
+  raw_answer     jsonb NOT NULL,
+  received_at    timestamptz NOT NULL DEFAULT now()
+);
+```
+
+**`is_billing_trigger` is true for exactly one config row: client-side, day 90.** Day 30 and day 60
+*"capture signal and must not create a second trigger path"* — enforced here as well as in `02-10`.
+
+### 5.4 The retention record (`M8-I12`)
+
+```sql
+CREATE TABLE place.retention_record (
+  id                uuid PRIMARY KEY,
+  placement_id      uuid NOT NULL UNIQUE REFERENCES place.placement(id),
+  trial_event_id    uuid,
+  -- the answer
+  is_still_employed boolean NOT NULL,
+  as_at_date        date NOT NULL,
+  -- HOW we know, and WHO said so
+  source            retention_source_enum NOT NULL,   -- 'client_link'|'ops_recorded'|'deemed'
+  link_id           uuid,
+  respondent_recipient_id uuid,                        -- the identified person
+  respondent_name   text,                              -- denormalised: survives contact changes
+  respondent_role   text,
+  respondent_email  text,
+  respondent_ip     inet,
+  answered_at       timestamptz,
+  -- deemed variant
+  is_deemed         boolean NOT NULL DEFAULT false,
+  deemed_reason     text,
+  deemed_window_days integer,
+  deemed_at         timestamptz,
+  -- terms in force AT THIS MOMENT, frozen
+  contract_version_id uuid NOT NULL,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+REVOKE UPDATE, DELETE ON place.retention_record FROM apollo_app;
+```
+
+**Everything about this table is deliberate.**
+
+- **Append-only by grant.** It is the evidence behind an invoice.
+- **Respondent details denormalised.** *"It must still make sense to someone querying a charge a year
+  later"* (`M8-I12`) — by which time the contact may have left the hospital and the contact record may
+  have been edited.
+- **`is_deemed` explicit and never hidden.** An invoice raised on a deemed confirmation is a different
+  commercial conversation from one raised on an actual answer, and finance must be able to tell them
+  apart at a glance.
+- **`contract_version_id` frozen** at the moment the record is created.
+
+---
+
+## 6. State machines
+
+**Placement:** `joined → in_trial → trial_survived` \| `trial_ended(reason)`
+Plus `offered → dropped_out(reason)` before joining — the position returns to open in `03-04`.
+
+**TrialEvent:** `scheduled → due → answered` \| `escalated_to_call` \| `missed`
+
+| Transition | Rules |
+|---|---|
+| `scheduled → due` | `due_on` reached; message or link issued |
+| `due → answered` | Response received |
+| `due → escalated_to_call` | No response after the configured days → outbound voice (`03-08`) |
+| `due → missed` | Escalation exhausted. **For client day 90, this is what starts the deemed clock.** |
+
+**RetentionRecord** has no lifecycle — it is created once, immutably, from one of three sources.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const PlacementService = {
+  confirmJoining(input: { offerId, joiningDate, actor }): Promise<Placement>
+  get(id): Promise<Placement>
+  list(request, scope): Promise<Page<Placement>>
+  recordDropOut(input: { placementId?, candidateId, requisitionId, stage, reasonCode, occurredOn, actor }): Promise<DropOut>
+  endTrial(placementId, outcome, actor): Promise<Placement>
+
+  listTrialEvents(placementId): Promise<TrialEvent[]>
+  recordResponse(trialEventId, answers, source, respondent): Promise<TrialResponse>
+
+  /** M8-I12 — creates the immutable evidence. Called by the link handler or by Ops. */
+  recordRetentionAnswer(input: {
+    placementId, answer, recipientId?, answeredAt, isDeemed
+  }): Promise<RetentionRecord>
+
+  getRetentionRecord(placementId): Promise<RetentionRecord | null>
+}
+```
+
+### 7.2 Check-in scheduling (`M8-I10`)
+
+On `confirmJoining`, create every `TrialEvent` from the matching `check_in_config` rows:
+`due_on = joining_date + day_offset`, both sides. A daily job fires them.
+
+### 7.3 Check-in questions (`M8-I11`)
+
+*"Serve the right questions for the candidate's category, rendered for app, WhatsApp or phone call."*
+
+One question set per config row, rendered three ways: app form, WhatsApp interactive template, voice
+script. **The answer schema is identical across all three** — the same principle as A14.
+
+Standard candidate-side questions (A6): attendance, **salary paid on time**, **preceptor assigned**,
+**accommodation status**. These are not arbitrary — their absence predicts drop-out, which is why the
+plan names them.
+
+### 7.4 The day-90 record (`M8-I12`)
+
+Three routes in, one record out:
+
+| Source | How |
+|---|---|
+| `client_link` | The client answered the day-90 link — the normal path |
+| `ops_recorded` | A recruiter recorded a phone confirmation, with who said it and when |
+| `deemed` | The contract's deemed window passed with no answer |
+
+All three produce a `RetentionRecord` and emit `place.retention.confirmed`. `03-13` treats them
+identically as a trigger and distinguishably as evidence.
+
+### 7.5 HTTP
+
+| Method | Path | Permission |
+|---|---|---|
+| POST | `/api/v1/placements/confirm-joining` | `place.placement.write` |
+| GET | `/api/v1/placements` · `/:id` | `place.placement.read` |
+| POST | `/:id/drop-out` · `/:id/end-trial` | `place.placement.write` |
+| GET | `/:id/trial-events` · `/:id/retention-record` | read |
+| POST | `/trial-events/:id/record-response` | `place.trial.record` |
+| POST | `/:id/retention/record-manual` | `place.retention.record` — **audited, high-privilege** |
+| GET/POST/PATCH | `/api/v1/check-in-configs` | `place.check_in_config.write` |
+| GET | `/api/v1/trial-dashboard` | read |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** **`place.placement.created`** (→ `03-04` fill, `03-17`) · **`place.dropout.recorded`**
+(→ `03-04` reopens the position) · `place.trial_event.due` (→ `02-07`, `02-10`) · `.responded` ·
+`.missed` · **`place.retention.confirmed`** (→ **`03-13` billing**) · `place.trial.survived` / `.ended`
+
+**Subscribes:** `select.offer.signed` → ready for joining confirmation ·
+`platform.link.answered` (`trial_checkin_*`) → record the response ·
+`platform.link.deemed_agreed` (`trial_checkin_90`) → **create the deemed retention record** ·
+`engage.availability.responded` → candidate-side answers arriving through the engagement loop
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `placements.checkin-due` | Daily 06:00 IST | Fires due events both sides |
+| `placements.checkin-escalate` | Daily | No response → outbound voice via `03-08` |
+| **`placements.retention-deem`** | Daily 06:00 IST | Applies the **contract** deemed window. **Revenue-critical — heartbeat alarm** (`01-09 §10`). |
+| `placements.trial-complete` | Daily | Day 90 passed with a retention record → `trial_survived` |
+
+---
+
+## 9. Frontend — `/placements`
+
+### 9.1 Confirm joining (`M8-I1`)
+
+*"This opens the placement and starts the 90-day clock."* — and the screen says so, showing the
+computed day-90 date and the deemed window that will apply.
+
+Joining date may differ from the offer's expected date; the difference is captured.
+
+### 9.2 Placements (`M8-I2`)
+
+`<DataTable/>`: reference, candidate, client, site, role, joining date, **trial day**, status,
+**close to billing**. Filter by client, status, trial stage, recruiter, engagement type.
+
+*"Whether they are close to billing"* is a first-class column — finance uses this list to forecast.
+
+### 9.3 Trial dashboard (`M8-I3`)
+
+*"Every placement in its trial period, and which check-ins are done, due or missed."*
+
+A grid: placements down, day 0/7/30/60/90 across, each cell showing both sides' status. Missed
+client-side day-90 events are the most important cell in the platform and are visually loudest.
+
+Filters by client, stage, missed-only, deemed-pending.
+
+### 9.4 Check-in settings (`M8-I4`)
+
+Which check-ins happen, on which days, with which questions, per category. **Day 90 client-side is
+marked as the billing trigger and is not deletable.**
+
+### 9.5 Candidate answers (`M8-I5`)
+
+*"What candidates are reporting: late pay, no preceptor, accommodation problems."*
+
+A queue of concerning answers, not a raw log. Late salary, no preceptor and accommodation problems
+are surfaced as actionable items with an owner — because each is a leading indicator of a drop-out
+that costs Apollo an invoice.
+
+### 9.6 Trial outcome (`M8-I6`)
+
+*"Did the person stay or leave, and did the client confirm at day 90."*
+
+Per placement: outcome, retention record with its source clearly shown (**answered / deemed / Ops
+recorded**), and a link to the evidence.
+
+### 9.7 Client page: check-in (`M7-I11`) — `apps/links`
+
+*"Day 90 asks one question and its answer allows an invoice."*
+
+- **Day 30 / 60:** a short question set — is the person attending, performing, any concerns.
+- **Day 90:** deliberately minimal. **One question: is this person still employed with you?**
+  Yes / No, an optional comment, submit.
+
+The day-90 page is the most commercially significant page in the product and should look it: plain,
+unambiguous, one action, and a clear confirmation afterwards that their answer was recorded.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Joining confirmation opens the placement and starts the 90-day clock | D7, `M8-I1` |
+| 2 | A drop-out is captured with a reason and **returns the position to fulfilment** | D7, `03-04` |
+| 3 | Check-ins fire at day 0, 7, 30, 60 and 90, on both sides, per a configurable set | A6, `M8-I10` |
+| 4 | Question sets differ by candidate category | A6, `M8-I11` |
+| 5 | The same question set renders for app, WhatsApp and voice, producing one answer schema | `M8-I11` |
+| 6 | **Only the client-side day-90 event can trigger billing.** Day 30 and 60 capture signal only. | Plan CLOSED note |
+| 7 | The day-90 record is **immutable** and records who confirmed, when, and against which terms | `M8-I12`, A7 |
+| 8 | An unanswered day 90 becomes **deemed confirmed** after the contract window, and the record says so | `M2-I10`, `M8-I15` |
+| 9 | A deemed record is visually and structurally distinguishable from an answered one, everywhere | §5.4 |
+| 10 | The retention record still makes sense a year later — respondent details survive contact changes | `M8-I12` |
+| 11 | The contract version is frozen on the placement at joining and on the retention record at creation | `M9-I14` |
+| 12 | Candidate answers about late pay, preceptor and accommodation surface as actionable items | A6, `M8-I5` |
+| 13 | `placements.retention-deem` missing a run raises an alarm | `01-09 §10` |
+| 14 | Manually recording a retention answer requires a distinct permission and is audited | §7.5 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-12`** | A13 recipient identity model | **Without a recipient model the billing trigger is not defensible** | **`AS-05`** (`02-10 §11`). This module denormalises the respondent onto the retention record so the evidence survives whatever the model turns out to be. |
+| **`OI-A-13`** | **Guarantee period past day 90?** | If the guarantee runs longer, a candidate leaving in month five means an already-raised invoice must be corrected — **which requires credit notes, out of scope until M15** | **`AS-20`** — `guarantee_period_days` is on the contract version. **This module tracks post-trial departures regardless** (`drop_out.stage = 'post_trial'`), so if Apollo confirms a longer guarantee, `03-21` has the data it needs and only the credit-note capability moves. Estimate blocker — escalate. |
+| `OI-A-05` | Platform default for the deemed-confirmation window | An unconfigured client must not stall invoicing | **`AS-06`** — 14 days |
+| `OI-A-15` | **No specified handoff from the approved timesheet to the manual payroll process** | Payroll runs outside the platform for all of R1; approved timesheet data currently leaves the system with no defined artefact | Affects `03-12` more than here, but worth flagging: **potential R1 scope addition.** |
+| — | Can the trial period differ from 90 days per client? | `retention_confirm_day` exists on the contract version | Defaults to 90; configurable. Costs nothing to support and Apollo will eventually ask. |
+
+---
+
+## 12. Notes for the implementer
+
+**The retention record is the deliverable.** Everything else in this module exists to produce it
+correctly. Build it first, with its append-only grant, its denormalised respondent, its deemed flag
+and its frozen contract version — then build the machinery that fills it in.
+
+**Test the deemed path as carefully as the answered path.** In practice a meaningful fraction of
+clients will never click the link, and the deemed route will carry real revenue. It needs the same
+evidence quality: which window applied, when it expired, that reminders were sent, and that the
+client was reachable.
+
+**Day 30 and day 60 must not be able to trigger billing.** It is enforced in `02-10` by
+`is_billing_trigger` and here by `check_in_config.is_billing_trigger`. Write the test that tries to
+create a `BillingTrigger` from a day-60 response and asserts it fails.
+
+**Escalate to voice before deeming.** The plan gives A5 the specific job of calling people who have
+not responded on any other channel. Applying the deemed window without having tried a phone call is
+technically compliant and commercially poor — and it is exactly the case a client will dispute.
+

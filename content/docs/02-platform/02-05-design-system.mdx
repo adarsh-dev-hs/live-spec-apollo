@@ -1,0 +1,274 @@
+---
+title: "P05 · Design System and Component Library"
+description: "The shared visual language and the components built from it. Five different surfaces exist in this plan — if each is designed separately the work is done five times and it looks…"
+---
+
+**Package** `@apollo/ui` · **Plan** F12 (M1-I4) · **Effort** ~13.5pd (design 6, build 6, QA 1.5)
+**Risk** Low (SHARED) · **Build in** Phase 0
+
+---
+
+## 1. Purpose
+
+The shared visual language and the components built from it. **Five different surfaces exist in this
+plan — if each is designed separately the work is done five times and it looks like it.**
+
+The plan is explicit that this must be complete *before* screen design is finalised, not alongside
+it. It is first needed for the Ops console shell, which is the first surface anyone designs.
+
+---
+
+## 2. Scope
+
+**In**
+- Design tokens: colour, type, spacing, radius, elevation, motion
+- Primitives: button, input, select, checkbox, radio, switch, textarea, date picker, combobox
+- Composites: card, dialog, drawer, tabs, accordion, dropdown menu, tooltip, popover, toast
+- **Patterns for every screen state**: loading, empty, error, no-permission, partial failure
+- Form patterns: field, label, help text, inline validation, form-level error summary
+- Status and badge system, shared across every entity's states
+- Layout primitives: page shell, section, toolbar, split view, detail panel
+- `<ActivityPanel/>` (P02), `<FileUpload/>` and `<FileViewer/>` (P04)
+- Accessibility baseline, applied in the primitives so screens inherit it
+- Storybook, published as the design and engineering reference
+
+**Out**
+- `<DataTable/>` → `02-06`. It is large enough to be its own component, and it depends on this one.
+- Screen-level layouts → each module
+- WhatsApp templates and voice scripts → `03-08`. They draw from the same content rules but are
+  provider-hosted artefacts, not React.
+- Marketing or public site — none exists
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M1-I4` Component library (F12, XL, 13.5pd) | All sections |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** nothing. This is one of three phase-0 components.
+**Consumed by:** `apps/ops`, `apps/links`, `apps/portal`, `apps/mobile` (token layer), `02-06`.
+
+---
+
+## 5. Data model
+
+**N/A** — this is a frontend package with no persistence.
+
+---
+
+## 6. State machines
+
+**N/A**
+
+---
+
+## 7. API surface
+
+The exported component API. Every component is typed, and every one accepts the state props that
+make the five screen states possible without each screen inventing them.
+
+```ts
+// packages/platform/ui/src/index.ts
+export { Button, IconButton, LinkButton } from './primitives/button'
+export { Input, Textarea, Select, Combobox, DatePicker, Checkbox, Radio, Switch } from './primitives/form'
+export { Field, FormError, FormSummary } from './patterns/form'
+export { Card, Dialog, Drawer, Tabs, Accordion, Menu, Tooltip, Popover } from './composites'
+export { Toast, toast } from './composites/toast'
+
+// The five states — the ones screens must never hand-roll
+export { PageSkeleton, TableSkeleton, InlineSpinner } from './states/loading'
+export { EmptyState }        from './states/empty'
+export { ErrorState }        from './states/error'
+export { PermissionDenied }  from './states/permission'
+export { PartialResult }     from './states/partial'
+
+export { StatusBadge, statusTone } from './patterns/status'
+export { PageShell, Section, Toolbar, SplitView, DetailPanel } from './layout'
+export { ActivityPanel } from './patterns/activity'
+export { FileUpload, FileViewer } from './patterns/files'
+export { tokens } from './tokens'
+```
+
+### The five states, in detail
+
+These carry most of the value in this component, because they are what stops sixty screens each
+inventing their own answer.
+
+```tsx
+<EmptyState
+  title="No requisitions match these filters"
+  description="Try widening the date range or clearing the site filter."
+  action={<Button onClick={clear}>Clear filters</Button>}
+/>
+
+<ErrorState
+  title="Could not load requisitions"
+  requestId={error.requestId}     // what a support ticket quotes
+  onRetry={refetch}
+/>
+
+<PermissionDenied
+  resource="invoices"
+  // Deliberately NOT an error. A user with no role must reach a proper
+  // screen rather than an error on every page (M0-I3).
+/>
+
+<PartialResult
+  succeeded={412}
+  failed={88}
+  failures={rows}                  // each named, with its reason
+  onDownloadFailures={...}
+  // 'A spreadsheet with some bad rows reports each bad row by name
+  //  and still loads the good ones' (M1-I4)
+/>
+```
+
+`<PartialResult/>` is needed by at least four flows — user bulk import (`M0-I2`), spreadsheet
+requisition upload (`M3-I6`), migration exceptions (`M1-I2`), attendance upload (`M12-I4`) — which is
+exactly why it belongs here rather than in any one of them.
+
+### Status system
+
+Every entity state in `00-03 §4` maps to a tone, once, centrally:
+
+```ts
+export const statusTone = {
+  neutral: ['draft','queued','scheduled','building'],
+  info:    ['open','in_fulfilment','in_progress','sent','proposed'],
+  warning: ['on_hold','awaiting_client','incomplete','flagged','stale','due'],
+  success: ['filled','verified','approved','signed','confirmed','paid'],
+  danger:  ['closed','rejected','failed','expired','quarantined','no_show'],
+} as const
+```
+
+**Colour is never the sole carrier of meaning** — each tone has a distinct shape and always shows its
+label. Required for accessibility, and necessary anyway for anyone printing a board.
+
+---
+
+## 8. Events and jobs
+
+**N/A**
+
+---
+
+## 9. Frontend
+
+### Tokens
+
+```ts
+export const tokens = {
+  color: {
+    // Semantic names only. No component ever references a raw hex or a palette step.
+    surface, surfaceRaised, surfaceSunken, border, borderStrong,
+    textPrimary, textSecondary, textDisabled, textInverse,
+    accent, accentHover, accentSubtle,
+    success, warning, danger, info,   // each with -subtle and -strong
+  },
+  space:  { 0:'0', 1:'4px', 2:'8px', 3:'12px', 4:'16px', 6:'24px', 8:'32px', 12:'48px' },
+  radius: { sm:'4px', md:'8px', lg:'12px', full:'9999px' },
+  type: {
+    family: { sans: '...', mono: '...' },
+    size:   { xs:'12px', sm:'14px', base:'16px', lg:'18px', xl:'24px', '2xl':'32px' },
+    weight: { regular:400, medium:500, semibold:600 },
+    leading:{ tight:1.25, normal:1.5, relaxed:1.75 },
+  },
+  elevation: { none, sm, md, lg },
+  motion: { fast:'120ms', base:'200ms', slow:'320ms', ease:'cubic-bezier(.2,0,0,1)' },
+}
+```
+
+Tokens are the Tailwind config. Components use Tailwind classes bound to tokens; there is no
+component-level CSS file and no raw hex anywhere outside `tokens.ts`.
+
+### Density
+
+The Ops console is a dense operational tool used all day — the fulfilment board, the verification
+queue, the candidate list. The links app is the opposite: one question, large targets, a phone,
+possibly one-handed, possibly outdoors.
+
+```tsx
+<PageShell density="compact">   {/* ops   — 32px rows, 14px base */}
+<PageShell density="comfortable"> {/* links — 48px targets, 16px base */}
+```
+
+Same components, different density token set. This is why the two surfaces can share a library at
+all.
+
+### Storybook
+
+Every component, every state, every density. Published per environment. It is the design team's
+reference and the engineering team's contract — *"a new screen can be assembled from existing
+components rather than designed from scratch"* (`M1-I4`).
+
+Visual regression runs against Storybook, not against application screens, so a design change is
+caught in one place instead of sixty.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | The Ops console, candidate app, WhatsApp templates, voice scripts and client link pages all draw from one set | `M1-I4` |
+| 2 | A new screen can be assembled from existing components rather than designed from scratch | `M1-I4` |
+| 3 | Every state a screen can be in has a defined pattern, so developers are not inventing them | `M1-I4` |
+| 4 | Components meet the agreed accessibility baseline | `M1-I4` |
+| 5 | **This is complete before screen design is finalised, not alongside it** | `M1-I4` |
+| 6 | The set includes patterns for inline validation, form errors, empty states, permission denied and partial failures | `M1-I4` |
+| 7 | A spreadsheet with some bad rows reports each bad row by name and still loads the good ones | `M1-I4` |
+| 8 | No raw colour value exists outside `tokens.ts` | §9 |
+| 9 | Every interactive element is keyboard-operable with a visible focus ring | §11 |
+| 10 | `axe` reports zero violations across the Storybook suite | §11 |
+| 11 | The links density variant meets 44px minimum touch targets | §9 |
+
+---
+
+## 11. Accessibility baseline
+
+Built into the primitives so that screens inherit it rather than each having to remember:
+
+| | |
+|---|---|
+| Keyboard | Every interactive element reachable and operable. Logical tab order. No keyboard traps. |
+| Focus | Visible ring on every focusable element. Trapped inside dialogs and drawers, returned to the trigger on close. |
+| Labels | Every input has a programmatic label. Placeholder is never the label. |
+| Errors | Announced via `aria-live`, associated with the field via `aria-describedby`, and never conveyed by colour alone |
+| Contrast | WCAG AA — 4.5:1 body text, 3:1 large text and UI boundaries |
+| Motion | Respects `prefers-reduced-motion` |
+| Tables | Proper `<th scope>`, caption, and a screen-reader summary of applied filters |
+| Targets | 44×44px minimum in `comfortable` density |
+| Language | `lang` attribute set; the links app may be opened by non-English readers |
+
+`axe` runs in Storybook CI and in Playwright E2E. Violations fail the build.
+
+---
+
+## 12. Open questions
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| Apollo brand guidelines — colour, type, logo usage | The token palette is a placeholder until these arrive | **`AS-16`** — build with a neutral accessible palette and a system font stack. Tokens are one file; a rebrand is a token change, not a component rewrite. **Request brand assets in week one.** |
+| Language support beyond English | Client link pages and the candidate app may need regional languages. The voice provider's language coverage is already an open item (`OI-A-09`). | Build with an i18n-ready string layer (`react-i18next`) from the start and ship English only. Retrofitting extraction across sixty screens is far more expensive than the layer. |
+| Dark mode | Not requested | Not built. Tokens are structured so it would be a second token set, if ever asked for. |
+
+---
+
+## 13. Notes for the implementer
+
+**Build this in phase 0, before any screen.** The plan says so explicitly, and the reason is
+economic: sixty screens designed against a finished component set cost far less than sixty screens
+designed against an evolving one.
+
+**Do not build a component until two screens need it.** The exception is the five state patterns and
+the form patterns, which are needed by everything and are specified above.
+
+**Resist theming.** One brand, one product, four surfaces. A theming layer here would be
+infrastructure for a requirement that does not exist.
+

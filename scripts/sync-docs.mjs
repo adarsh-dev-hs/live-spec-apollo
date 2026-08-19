@@ -284,9 +284,16 @@ function convert(absPath, fileRel) {
 // --------------------------------------------------------------------- main
 
 function main() {
+  // The source markdown lives outside this repo, so it is absent in CI and on
+  // fresh clones. `content/docs` is committed, so keep the existing mirror and
+  // let the build proceed instead of failing.
   if (!fs.existsSync(SRC)) {
-    console.error(`[sync-docs] source folder not found: ${SRC}`);
-    process.exit(1);
+    console.warn(`[sync-docs] source folder not found: ${SRC} — keeping existing content/docs`);
+    if (!fs.existsSync(OUT)) {
+      console.error('[sync-docs] no content/docs mirror to fall back on');
+      process.exit(1);
+    }
+    return;
   }
 
   fs.rmSync(OUT, { recursive: true, force: true });

@@ -1,0 +1,336 @@
+---
+title: "P07 · Outbound Messaging"
+description: "The plumbing underneath every message the platform sends. The client's D10 covers templates and preferences; the queue, retries and delivery receipts underneath are assumed but…"
+---
+
+**Package** `@apollo/messaging` · **Schema** `engage` · **Plan** F07 (M3-I30), M5-I8, M5-I9
+**Effort** ~18pd · **Risk** High (EXT — no provider named) · **Build in** Phase 3
+
+---
+
+## 1. Purpose
+
+The plumbing underneath every message the platform sends. The client's D10 covers templates and
+preferences; **the queue, retries and delivery receipts underneath are assumed but never specified.**
+
+First needed when demand intake chases a client for missing requisition fields on the channel the
+requisition arrived on — which is why it is built in phase 3, before the engagement module that will
+become its heaviest user.
+
+One sending path across WhatsApp, SMS, email and app push, each provider behind an interface.
+
+---
+
+## 2. Scope
+
+**In**
+- One send API used by every module
+- Channel adapters: WhatsApp, SMS, email, app push — each behind a port
+- Queue, rate limiting per provider, retry with backoff, give-up rules
+- Delivery receipts and status tracking
+- Opt-out and contact-preference enforcement, on every send
+- Delivery log with **per-message cost recording**
+- Suppression list
+
+**Out**
+- Template *content and management* → `03-08` (`M5-I1`). This component renders and sends a template;
+  it does not own the library.
+- Cadence — who to contact and when → `03-08` (`M5-I5`, `M5-I11`)
+- Inbound messages → `02-08`. **Same WhatsApp number, opposite direction.**
+- Voice calls → `03-08` / `04-03`. A voice call is not a message; it is a conversation with its own
+  lifecycle.
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M3-I30` Message sending (F07, Service, XL, 6pd build) | §5, §7, §8 |
+| `M5-I8` Message sender (D10, Service, XL, 5pd) | §7.1, §8 |
+| `M5-I9` Retry and receipts (D10, Service, L, 3pd) | §6, §8 |
+| `M5-I3` Delivery log (D10, Screen, L, 3pd) | §9 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/jobs` (P13), `@apollo/adapters` (P12), `@apollo/config` (P03)
+**Consumed by:** `03-03` intake (chase), `03-08` engagement (cadence, the heaviest user), `03-10`
+selection (offer delivery, link delivery), `03-11` placements (trial check-ins), `03-17` onboarding
+(document chasing), `03-19` payroll (payslip delivery), `03-21` collections (dunning), `02-10` links
+(link delivery), `02-01` iam (invites, password resets, OTP).
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE engage.message (
+  id             uuid PRIMARY KEY,
+  channel        message_channel_enum NOT NULL,     -- 'whatsapp'|'sms'|'email'|'push'
+  template_key   text NOT NULL,
+  template_version integer NOT NULL,                -- what was ACTUALLY sent, frozen
+  recipient_type recipient_type_enum NOT NULL,      -- 'candidate'|'client_contact'|'user'
+  recipient_id   uuid NOT NULL,
+  recipient_address text NOT NULL,                  -- phone E.164 / email — as sent
+  variables      jsonb NOT NULL,
+  rendered_body  text,                              -- what was sent, for dispute and support
+  status         message_status_enum NOT NULL,
+  provider_key   text,                              -- which adapter handled it
+  provider_message_id text,
+  attempt_count  integer NOT NULL DEFAULT 0,
+  queued_at      timestamptz NOT NULL DEFAULT now(),
+  sent_at        timestamptz,
+  delivered_at   timestamptz,
+  read_at        timestamptz,
+  failed_at      timestamptz,
+  failure_reason text,
+  cost_amount    numeric(10,4),                     -- COST RECORDING — see §11
+  cost_currency  text,
+  cost_unit      text,                              -- 'conversation'|'segment'|'email'|'minute'
+  context_type   text,                              -- 'requisition'|'placement'|'invoice'|...
+  context_id     uuid,
+  idempotency_key text UNIQUE
+);
+CREATE INDEX idx_message__recipient  ON engage.message (recipient_type, recipient_id, queued_at DESC);
+CREATE INDEX idx_message__status     ON engage.message (status, queued_at) WHERE status IN ('queued','sending','retrying');
+CREATE INDEX idx_message__context    ON engage.message (context_type, context_id);
+CREATE INDEX idx_message__cost       ON engage.message (channel, queued_at) WHERE cost_amount IS NOT NULL;
+
+CREATE TABLE engage.message_event (
+  id          uuid PRIMARY KEY,
+  message_id  uuid NOT NULL REFERENCES engage.message(id),
+  event_type  text NOT NULL,                        -- 'queued'|'sent'|'delivered'|'read'|'failed'|'bounced'
+  provider_payload jsonb,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE engage.contact_preference (
+  id             uuid PRIMARY KEY,
+  recipient_type recipient_type_enum NOT NULL,
+  recipient_id   uuid NOT NULL,
+  channel        message_channel_enum NOT NULL,
+  is_enabled     boolean NOT NULL DEFAULT true,
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (recipient_type, recipient_id, channel)
+);
+
+CREATE TABLE engage.suppression (
+  id             uuid PRIMARY KEY,
+  channel        message_channel_enum NOT NULL,
+  address        text NOT NULL,                     -- phone or email
+  reason         suppression_reason_enum NOT NULL,  -- 'opt_out'|'hard_bounce'|'invalid'|'complaint'|'manual'
+  suppressed_at  timestamptz NOT NULL DEFAULT now(),
+  released_at    timestamptz,
+  UNIQUE (channel, address)
+);
+```
+
+**`rendered_body` and `template_version` are stored deliberately.** When a candidate says "you told
+me the shift was at 9", the answer needs to be what was actually sent, not what the current template
+would produce.
+
+**Suppression is by address, not by recipient.** A hard-bounced email must not be retried because the
+same person was re-created as a new candidate record.
+
+---
+
+## 6. State machines
+
+**Message**
+
+| From | To | Trigger |
+|---|---|---|
+| — | `queued` | `messaging.send()` accepted |
+| `queued` | `suppressed` | Opt-out, suppression list, or preference disabled — **checked at send time, not at enqueue** |
+| `queued` | `sending` | Worker picked it up |
+| `sending` | `sent` | Provider accepted |
+| `sending` | `retrying` | Transient failure |
+| `retrying` | `sending` | Backoff elapsed |
+| `retrying` | `failed` | Attempts exhausted |
+| `sent` | `delivered` | Delivery receipt |
+| `delivered` | `read` | Read receipt (WhatsApp only) |
+| `sent` \| `delivered` | `failed` | Async failure receipt |
+
+*"Notification: queued → sent → delivered. Or failed → retried → given up on"* (`00-03 §4`).
+
+The preference check happening **at send time** matters: a cadence run may enqueue 20,000 messages
+and take hours to drain. A candidate opting out at minute five must not receive the message queued at
+minute one.
+
+**Retry policy per channel**
+
+| Channel | Attempts | Backoff | Give up |
+|---|---|---|---|
+| WhatsApp | 3 | 1m, 5m, 30m | Then try SMS if the template allows a fallback |
+| SMS | 3 | 1m, 5m, 30m | Suppress on hard failure |
+| Email | 5 | 1m, 5m, 30m, 2h, 6h | Suppress on hard bounce |
+| Push | 2 | 1m, 10m | Fall back to WhatsApp |
+
+Hard failures (invalid number, unsubscribed, blocked) **never retry** — they suppress immediately.
+Retrying a per-conversation-billed message to a blocked number costs money and achieves nothing.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const messaging = {
+  /** The one send path. Everything goes through here. */
+  send(input: {
+    templateKey: string
+    channel:     Channel | Channel[]        // array = ordered fallback
+    recipient:   { type, id, address? }     // address resolved from the record if omitted
+    variables:   Record<string, unknown>
+    context?:    { type, id }               // links the message to a requisition/placement/invoice
+    idempotencyKey?: string
+    priority?:   'high' | 'normal' | 'bulk' // high = OTP, offers; bulk = cadence
+  }): Promise<Message>
+
+  /** Bulk enqueue for cadence — one row per recipient, one job per batch. */
+  sendBulk(inputs: SendInput[]): Promise<{ queued: number; suppressed: number }>
+
+  get(messageId): Promise<Message>
+  historyFor(recipientType, recipientId, opts?): Promise<Message[]>
+
+  isSuppressed(channel, address): Promise<boolean>
+  suppress(channel, address, reason, actor): Promise<void>
+  release(channel, address, actor): Promise<void>
+
+  setPreference(recipientType, recipientId, channel, enabled, actor): Promise<void>
+  getPreferences(recipientType, recipientId): Promise<ContactPreference[]>
+}
+```
+
+### 7.2 HTTP — `/api/v1/messages`
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/` | `engage.message.read` | Delivery log (`M5-I3`). Filter by channel, status, recipient, date, context. |
+| GET | `/:id` | | Full detail including `rendered_body` and the event trail |
+| POST | `/:id/resend` | `engage.message.send` | Audited |
+| GET | `/for/:recipientType/:recipientId` | | Contact history (`M5-I4`) |
+| GET | `/suppressions` · POST · DELETE | `engage.suppression.manage` | |
+| GET | `/costs?from=&to=&groupBy=` | `engage.message.read` | **The consumption report Apollo asked for** — §11 |
+
+### 7.3 Webhooks in
+
+```
+POST /api/v1/webhooks/whatsapp/status
+POST /api/v1/webhooks/sms/status
+POST /api/v1/webhooks/email/status     (SES → SNS)
+POST /api/v1/webhooks/push/status
+```
+
+Each verifies the signature before parsing, dedupes on the provider message id, persists the raw
+payload, and returns fast (`01-04 §12`).
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | Consumed by |
+|---|---|
+| `engage.message.queued` | analytics |
+| `engage.message.sent` | analytics |
+| `engage.message.delivered` | `03-08` (contact recorded), analytics |
+| `engage.message.failed` | `03-08` (try another channel), `03-03` (chase failed → escalate) |
+| `engage.message.suppressed` | `03-08` (drop from cadence) |
+| `engage.address.suppressed` | `03-05` (flag the candidate record) |
+
+**Subscribes:** `platform.document.available` — for messages carrying an attachment that must be
+scanned first (offer PDF, payslip).
+
+**Jobs**
+
+| Job | Queue | Concurrency | Notes |
+|---|---|---|---|
+| Send | `messaging.send` | 20 | Rate-limited per provider; priority lanes |
+| Receipt | `messaging.receipt` | 20 | Webhook → status update |
+| Retry sweep | `messaging.retry` (5 min) | 1 | Picks up `retrying` past their backoff |
+| Stale sweep | `messaging.stale` (hourly) | 1 | `sending` older than 1h → `retrying` |
+
+**Priority lanes** matter: an OTP must not queue behind 20,000 cadence messages. Three BullMQ
+priorities — `high` (OTP, offers, links), `normal` (transactional), `bulk` (cadence).
+
+**Provider rate limiting** is a token bucket in Redis, per provider, configured from P03. WhatsApp
+BSPs impose throughput limits and exceeding them gets messages dropped, not queued.
+
+---
+
+## 9. Frontend
+
+### Delivery log — `/settings/messages` (`M5-I3`)
+
+`<DataTable/>`: channel, template, recipient, status, queued/sent/delivered times, attempts, **cost**.
+Filter by channel, status, template, recipient, date range, context. Row opens the full message
+including `rendered_body` and every provider event.
+
+*"Every message sent, whether it arrived, and what it cost"* (`M5-I3`) — the cost column is part of
+the requirement, not an extra.
+
+### Contact history — embedded (`M5-I4`)
+
+`<ContactHistory recipientType recipientId />`, embedded on the candidate record and the client
+contact record. What this person has been sent and whether they replied.
+
+### Suppressions — `/settings/messages/suppressions`
+
+List, reason, date, release action. Releasing is audited.
+
+### Consumption — `/settings/messages/costs`
+
+Messages and cost by channel, by month, by template, by client. **This is the answer to the question
+Apollo has asked** (`OI-HS-05`) and it only exists if cost is recorded from the first message sent.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | One sending path across WhatsApp, SMS, email and app push, each provider behind an interface | `M5-I8` |
+| 2 | A queued message is not sent if the recipient opted out **between enqueue and send** | `M5-I8`, §6 |
+| 3 | A transient failure retries with backoff; a hard failure suppresses immediately without retrying | `M5-I9` |
+| 4 | Delivery receipts update status, and a message with no receipt is distinguishable from a delivered one | `M5-I9` |
+| 5 | Every message records what was actually sent and which template version produced it | §5 |
+| 6 | Every message records its cost and unit | `M5-I3`, `OI-HS-05` |
+| 7 | An OTP is not delayed behind a bulk cadence run | §8 |
+| 8 | Provider rate limits are respected; exceeding them does not drop messages | §8 |
+| 9 | The same WhatsApp number and template set serve both intake follow-up and engagement — not two | `04-02` |
+| 10 | A hard-bounced address stays suppressed even if the recipient record is recreated | §5 |
+| 11 | Sending is idempotent — the same `idempotencyKey` never sends twice | `01-02 §13` |
+| 12 | Every channel adapter has a fake that can simulate delivery, failure, bounce and rate limit | `01-08 §5` |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-HS-05`** | **How many messages will the platform send per month?** WhatsApp bills per conversation, transcription per minute, voice per minute. Volume is set by the contact schedule — which is unsettled configuration. | **Running cost cannot be modelled.** If the shift pool is larger than assumed, per-conversation cost could exceed the build cost of the module that sends the messages. Apollo needs a figure from us; we need their base size and contact frequency to produce one. | **`AS-09`** — record cost per message from the first message sent, expose the consumption report in §9, and give Apollo a per-scenario model (base size × frequency × channel mix). **The platform answers the question it was asked; it does not need the answer to be built.** |
+| **`OI-HS-07`** | Who supplies WhatsApp? The BSP must also approve every template before it can be used, which takes weeks and is outside our control. | Three integrations cannot be sized against unknown APIs. **Template approval is a calendar dependency that no amount of team size removes, and it gates the whole contact schedule going live.** | Build against the port with a fake. **Submit templates for approval at the start of phase 5, not when the code is ready.** Track approval status as a first-class field on the template record (`03-08`). |
+| `OI-A-17` | Email and SMS have no structured return path — confirm they are outbound-only in R1 | A candidate replying to an SMS currently has no defined handling | **`AS-11`** — outbound only. Replies to the SMS number are logged and surfaced in `03-08`'s review queue rather than parsed. Confirm before phase 5. |
+
+---
+
+## 12. Notes for the implementer
+
+**One WhatsApp number, shared.** The plan is explicit: *"a single registered number and template set
+shared across A1 and D10 — not two."* This component owns sending on that number, `02-08` owns
+receiving on it, and both go through the same BSP adapter. Two numbers would double the cost and
+double the template approval work.
+
+**Cost recording is not optional and is not deferrable.** It cannot be backfilled — the provider's
+per-message cost is on the send response. If the first three months of messages have no cost data,
+Apollo's consumption question is unanswerable for those months.
+
+**Fallback chains belong to the template, not to the caller.** `channel: ['whatsapp','sms']` on a
+send is fine, but the default chain per template key is configuration, so changing "trial check-ins
+should fall back to SMS" does not require a release.
+

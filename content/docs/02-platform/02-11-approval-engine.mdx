@@ -1,0 +1,315 @@
+---
+title: "P11 · Approval Engine (Maker-Checker)"
+description: "The shared request-and-approve mechanism behind every change that needs a second person. Nobody can change their own pay; nobody can approve their own request."
+---
+
+**Package** `@apollo/approvals` · **Schema** `platform` · **Plan** D23 (M12-I1, M12-I6)
+**Effort** ~14pd · **Risk** Medium (SHARED) · **Build in** Phase 7 — **before B18 and B21**
+
+---
+
+## 1. Purpose
+
+The shared request-and-approve mechanism behind every change that needs a second person. Nobody can
+change their own pay; nobody can approve their own request.
+
+The plan is explicit that this is built once:
+
+> The request-and-approve pattern built here is the same one M15 uses for timesheet approvals.
+> **Build it once.**
+>
+> M12 — *"The approval engine here is reused by M15, so build it first of the two."*
+
+---
+
+## 2. Scope
+
+**In**
+- Generic request → approve/reject → apply lifecycle
+- **Maker ≠ checker enforcement**, in the service *and* as a database constraint
+- Request types added as **configuration, not a new build**
+- Approval thresholds varying by value, so a large change needs a more senior approver
+- Before/after value capture and display
+- Bulk requests — one request per subject, each individually auditable
+- Approval queue screen
+- Delegation and escalation
+
+**Out**
+- What a request *does* when applied → the requesting module supplies the apply handler
+- Salary revision, advance, hold screens → `03-18`
+- Internal timesheet approval routing → `03-21`
+- Requisition approval (M14) → `03-20`. It has its own state on the requisition rather than being a
+  generic request — see §12.
+- Client-facing approval (timesheets, shortlists) → `02-10`. Different mechanism entirely: those
+  people have no account.
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M12-I6` Request and approve engine (D23, Service, XL, 7.5pd) | §5, §6, §7 |
+| `M12-I1` Requests (D23, Screen, L, 6.5pd) | §9 |
+
+Reused by: `M15-I2` (internal timesheet approval), `M12-I2` (salary revision), `M12-I3` (advances and
+holds), `M15-I5` (credit and debit notes), `M11-I5` (onboarding gate override), `M13-I1` (reopening a
+closed pay run).
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/iam` (P01), `@apollo/audit` (P02), `@apollo/config` (P03), `@apollo/messaging` (P07)
+**Consumed by:** `03-18` workforce, `03-21` collections, `03-17` onboarding, `03-19` payroll
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE platform.approval_type (
+  key                text PRIMARY KEY,        -- 'salary_revision'|'salary_advance'|'salary_hold'|
+                                              -- 'timesheet_internal'|'credit_note'|'payroll_reopen'
+  name               text NOT NULL,
+  owner_module       text NOT NULL,
+  subject_type       text NOT NULL,           -- 'associate'|'timesheet'|'invoice'|'payroll_cycle'
+  required_permission text NOT NULL,          -- permission the APPROVER must hold
+  value_field        text,                    -- path into payload used for threshold banding
+  is_active          boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE platform.approval_threshold (
+  id             uuid PRIMARY KEY,
+  approval_type  text NOT NULL REFERENCES platform.approval_type(key),
+  min_value      numeric(14,2),
+  max_value      numeric(14,2),
+  required_permission text NOT NULL,          -- a MORE SENIOR permission above a band
+  approver_count integer NOT NULL DEFAULT 1,
+  sort_order     integer NOT NULL
+);
+
+CREATE TABLE platform.approval_request (
+  id             uuid PRIMARY KEY,
+  reference      text NOT NULL UNIQUE,        -- 'APR-2026-000317'
+  approval_type  text NOT NULL REFERENCES platform.approval_type(key),
+  subject_type   text NOT NULL,
+  subject_id     uuid NOT NULL,
+  subject_label  text NOT NULL,               -- denormalised: 'Priya Sharma — Apollo Chennai'
+  batch_id       uuid,                        -- set for bulk; one request per subject
+  before_value   jsonb,
+  after_value    jsonb NOT NULL,
+  value_amount   numeric(14,2),               -- extracted for threshold banding
+  reason         text NOT NULL,
+  status         approval_status_enum NOT NULL,
+  raised_by      uuid NOT NULL,
+  raised_at      timestamptz NOT NULL DEFAULT now(),
+  approved_by    uuid,
+  approved_at    timestamptz,
+  rejected_by    uuid,
+  rejected_at    timestamptz,
+  decision_note  text,
+  applied_at     timestamptz,
+  apply_error    text,
+  expires_at     timestamptz,
+
+  CONSTRAINT ck_approval__maker_not_checker
+    CHECK (approved_by IS NULL OR approved_by <> raised_by)
+);
+CREATE INDEX idx_approval__pending ON platform.approval_request (status, raised_at)
+  WHERE status IN ('submitted','partially_approved');
+CREATE INDEX idx_approval__subject ON platform.approval_request (subject_type, subject_id);
+CREATE INDEX idx_approval__batch   ON platform.approval_request (batch_id) WHERE batch_id IS NOT NULL;
+
+CREATE TABLE platform.approval_decision (
+  id           uuid PRIMARY KEY,
+  request_id   uuid NOT NULL REFERENCES platform.approval_request(id),
+  decision     text NOT NULL,                 -- 'approved'|'rejected'
+  decided_by   uuid NOT NULL,
+  decided_at   timestamptz NOT NULL DEFAULT now(),
+  note         text
+);
+REVOKE UPDATE, DELETE ON platform.approval_decision FROM apollo_app;
+```
+
+**`ck_approval__maker_not_checker` is the requirement made structural.** `M12-I6` says *"the raiser
+can never be the approver, enforced in the service not the screen"* — we enforce it in the service
+**and** in the database, because a service is one code path and a constraint is every code path,
+including future ones.
+
+**`batch_id` implements "a bulk revision produces one request per person, each individually
+auditable"** (`M12-I2`). A batch is a grouping, not a single approvable object — an approver can
+approve 40 of 50 and reject 10 with reasons.
+
+---
+
+## 6. State machine
+
+**ApprovalRequest**
+
+| From | To | Trigger | Rules |
+|---|---|---|---|
+| — | `draft` | Created but not submitted | Editable |
+| `draft` | `submitted` | Raiser submits | Notifies eligible approvers |
+| `submitted` | `approved` | Approver with the required permission approves | **Must not be the raiser.** Multi-approver types need `approver_count` distinct approvals. |
+| `submitted` | `partially_approved` | One of N approvals given | Only for `approver_count > 1` |
+| `partially_approved` | `approved` | Final approval, by a **different** approver | |
+| `submitted` \| `partially_approved` | `rejected` | Approver rejects **with a reason** | Terminal |
+| `approved` | `applied` | Apply handler succeeded | Terminal |
+| `approved` | `apply_failed` | Handler threw | Alarms; retryable by an admin |
+| `submitted` | `withdrawn` | Raiser withdraws | |
+| `submitted` | `expired` | Past `expires_at` | Configurable per type |
+
+*"WorkforceRequest: drafted → submitted → approved or rejected with a reason → applied"* (`00-03 §4`).
+
+**Approval and application are separate states.** A salary revision approved at 10:00 with an
+effective date of the 1st of next month is `approved` now and `applied` then. Collapsing them would
+mean either applying early or losing the approval.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const approvals = {
+  /** Register a type at boot. Configuration + an apply handler. */
+  registerType(config: {
+    key: string
+    subjectType: string
+    requiredPermission: string
+    valueField?: string
+    apply: (request: ApprovalRequest, tx: Tx) => Promise<void>
+    describe: (request: ApprovalRequest) => Promise<{ subjectLabel, summary }>
+  }): void
+
+  request(input: {
+    type, subjectId, before?, after, reason, actor, batchId?
+  }): Promise<ApprovalRequest>
+
+  /** Bulk: one request per subject, each individually auditable. */
+  requestBatch(type, items, reason, actor): Promise<{ batchId, requests }>
+
+  submit(requestId, actor): Promise<ApprovalRequest>
+  approve(requestId, actor, note?): Promise<ApprovalRequest>   // throws if actor === raiser
+  reject(requestId, actor, reason): Promise<ApprovalRequest>   // reason MANDATORY
+  withdraw(requestId, actor): Promise<ApprovalRequest>
+
+  pendingFor(actor, filter?): Promise<Page<ApprovalRequest>>
+  listFor(subjectType, subjectId): Promise<ApprovalRequest[]>
+
+  /** Which permission is needed for this value — used by the UI and by routing. */
+  resolveApprover(type, valueAmount): Promise<{ permission, approverCount }>
+}
+```
+
+### 7.2 HTTP — `/api/v1/approvals`
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/pending` | **My queue** — requests this user may approve. Excludes their own by definition. |
+| GET | `/` | All requests, filtered. Permission-gated. |
+| GET | `/:id` | Detail with before/after diff, decision trail |
+| POST | `/:id/submit` · `/approve` · `/reject` · `/withdraw` | |
+| GET | `/batches/:batchId` | The batch, with per-subject status |
+| GET | `/types` · PATCH `/types/:key/thresholds` | Admin |
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | Consumed by |
+|---|---|
+| `platform.approval.submitted` | messaging (notify eligible approvers) |
+| `platform.approval.approved` | the owning module |
+| `platform.approval.rejected` | messaging (notify raiser), owning module |
+| `platform.approval.applied` | owning module, analytics |
+| `platform.approval.apply_failed` | Ops alert |
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `approvals.apply` | On approval | Runs the registered handler in a transaction |
+| `approvals.apply-scheduled` | Daily 01:00 IST | Applies approved requests whose effective date has arrived |
+| `approvals.expire` | Daily | Expires stale requests per type |
+| `approvals.remind` | Daily 09:00 IST | Nudges approvers on requests pending beyond a threshold |
+
+---
+
+## 9. Frontend
+
+### Approval queue — `/approvals` (`M12-I1`)
+
+`<DataTable/>`: reference, type, subject, raised by, raised at, value, age. Default filter is "I can
+approve these" — **which structurally excludes the user's own requests.**
+
+Row expands to a **before/after diff**: *"the before and after values are shown so the approver sees
+what changes"* (`M12-I1`). Approve or reject inline; rejection requires a reason.
+
+Batch view groups a bulk request and allows per-row decisions.
+
+### Request history — embedded
+
+`<ApprovalHistory subjectType subjectId />` on the associate record, timesheet, invoice — every
+subject that can be the target of a request. Shows what was requested, by whom, decided by whom, when
+and why.
+
+### Approval settings — `/settings/approvals`
+
+Types, their thresholds and required permissions. Adding a *threshold band* is configuration. Adding
+a *type* requires a handler, so it is a deploy — but the type's routing, permissions and thresholds
+are all data (`M12-I6`: *"a request type is added as configuration, not as a new build"* — the
+configuration half is honoured; the apply behaviour necessarily is code).
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | A request cannot be approved by the person who raised it | `M12-I1`, `M12-I6` |
+| 2 | The rule is enforced **in the service, not the screen** — and additionally by a database constraint | `M12-I6` |
+| 3 | Every approval and rejection records who, when and why | `M12-I1` |
+| 4 | The before and after values are shown so the approver sees what changes | `M12-I1` |
+| 5 | Approval thresholds vary by value — a large revision needs a more senior approver | `M12-I6` |
+| 6 | A request type's routing, permission and thresholds are configuration | `M12-I6` |
+| 7 | A bulk request produces one request per subject, each individually auditable | `M12-I2` |
+| 8 | An approver can approve part of a batch and reject the rest with reasons | §5 |
+| 9 | The same engine is reused for internal timesheet approval in M15 | `M12-I1`, `M12-I6` |
+| 10 | Rejection without a reason is rejected | §7.1 |
+| 11 | An approved request with a future effective date applies on that date, not on approval | §6 |
+| 12 | A failed apply alarms and does not silently leave the request `approved` | §6 |
+| 13 | Attempting to approve one's own request via the API returns 403 and is audited as a security event | §1 |
+
+---
+
+## 11. Open questions
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| Approval hierarchy — is there a formal one at Apollo, or is it permission-based? | Determines whether thresholds map to roles or to named individuals | **`AS-18`** — permission-based bands. A threshold names a *permission*, and whoever holds it may approve. Simpler, and survives people changing jobs. Revisit if Apollo describes a named hierarchy. |
+| Delegation while someone is on leave | A pending request with no available approver stalls a pay run | Build a simple delegation: a user may nominate a delegate for a date range, audited. Small, and its absence is discovered at the worst moment. |
+| Threshold values | Not stated anywhere in either client document | Seeded empty — a single band requiring the type's base permission. Apollo configures real bands during UAT. **Flag on the settings screen** that no bands are configured. |
+
+---
+
+## 12. Design note: why requisition approval (M14) is not this
+
+`M14-I3` adds an approval step before a requisition goes live. It looks like a maker-checker case,
+but it is not modelled here, for two reasons:
+
+1. It is a **state on the requisition** — `created → awaiting_approval → approved → open` — and the
+   plan describes it as an extension of the M3 state table, not a separate object.
+2. Its rules are *"configurable by client, value or role"* with an **urgent bypass**, which is a
+   different shape from the two-person control this engine implements.
+
+`03-20` owns it. Sharing the queue *screen* is worth doing; sharing the model is not.
+
+The distinguishing question, worth applying to anything that arrives later: **is the point that a
+second person must check, or is the point that a record needs a gate before it becomes live?** The
+first is this engine. The second is a state.
+

@@ -1,0 +1,450 @@
+---
+title: "B08 · Engagement and Availability"
+description: "Determine which candidates to contact, on what schedule, through which channel and with which question set; deliver on that decision; capture the response on one structured schema…"
+---
+
+**Package** `@apollo/engagement` · **Schema** `engage` · **Plan** D10, D29, A3, A4, A5, A14 / M5
+**Effort** ~107.5pd · **Risk** High (EXT, SPEC, MODEL) · **Build in** Phase 5
+
+---
+
+## 1. Purpose
+
+Determine which candidates to contact, on what schedule, through which channel and with which
+question set; deliver on that decision; capture the response on **one structured schema whatever
+channel it came from**; and reset the availability confidence that otherwise decays.
+
+The plan is emphatic that this is one thing, not four:
+
+> A3, A4, A5 and A14 form a **closed loop**: the cadence engine selects on confidence, delivery goes
+> out, the response returns on a structured schema, and the confirmed response resets confidence,
+> which determines the next selection. **None of the four is independently operable. Treat them as
+> one unit for estimation and sequencing.**
+
+And why it matters commercially: Base B is contacted **every three to four days across the whole
+base**. If reply capture fails, nothing ever resets and the entire pool goes stale — which makes the
+matching engine worthless.
+
+---
+
+## 2. Scope
+
+**In** — message templates with provider approval tracking · trigger configuration · delivery status,
+retry, opt-out, preferences, per-user notification log · **contact schedule / cadence rules** ·
+**availability confidence decay (A3)** · **who-to-contact-next selection (A4)** · **outbound voice
+integration and answer extraction (A5)** · **candidate response capture on one schema (A14)** ·
+free-text review queue
+
+**Out** — the send *plumbing* → `02-07` (queue, retry, receipts, cost) · the inbound *pipeline* →
+`02-08` (this module registers the `candidate_response` type on it) · candidate record → `03-05` ·
+the app's answering screen → `03-07` · trial check-ins → `03-11` (which uses this layer to deliver)
+
+**Explicitly not built:** structured replies on SMS and email — *"we send on those channels but only
+WhatsApp and the app can receive a structured reply"* (`OI-A-17`) · step-by-step guided conversations
+over WhatsApp — *"anything guided happens in the app"* · campaign performance reporting beyond the
+send log (that is M9) · the phone-call service itself — Apollo buys it, we integrate.
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M5-I1` Message templates (D10, L, 5pd) | §5.1, §9.1 |
+| `M5-I2` Triggers (D10, Config, L, 5pd) | §5.2, §9.2 |
+| `M5-I3` Delivery log (D10, L, 5pd) | → `02-07 §9` |
+| `M5-I4` Contact history (D10, M, 3pd) | → `02-07 §9` |
+| `M5-I5` Contact schedule (D29, Config, XL, 10.5pd) | §5.3, §9.3 |
+| `M5-I6` Voice campaigns (A5, Config, L, 6pd) | §9.4 |
+| `M5-I7` Replies to review (A14, L, 8.5pd) | §9.5 |
+| `M5-I10` Freshness score (A3, Service, XL, 8pd) | §5.4, §7.2 |
+| `M5-I11` Who to contact next (A4, Service, XL, 8pd) | §7.3 |
+| `M5-I12` Voice provider (A5, Integration, XXL, 11pd) | `04-03` |
+| `M5-I13` Voice answer extraction (A5, Service, XL, 7.5pd) | §7.4 |
+| `M5-I14` Candidate reply registration (A14, Service, L, 4pd) | §7.5 |
+| `M5-I15` WhatsApp reply handling (A14, Service, XL, 7.5pd) | §7.5 |
+| `M5-I16` Write reply to candidate (A14, Service, L, 4pd) | §7.6 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `03-05` candidates, `03-07` app, `02-07` messaging, `02-08` inbound, `02-12`
+adapters, `02-13` jobs
+**Consumed by:** `03-09` matching (**freshness score**), `03-10` selection (offer delivery),
+`03-11` placements (trial check-ins), `03-17`, `03-19`, `03-21`
+
+**What breaks without it:** *"M6 ranks on the freshness score… If reply capture fails, nothing ever
+resets and the whole pool goes stale."*
+
+---
+
+## 5. Data model
+
+### 5.1 Templates (`M5-I1`)
+
+```sql
+CREATE TABLE engage.notification_template (
+  id              uuid PRIMARY KEY,
+  key             text NOT NULL,                    -- 'availability_check_base_b'
+  channel         message_channel_enum NOT NULL,
+  version         integer NOT NULL,
+  language        text NOT NULL DEFAULT 'en',
+  subject         text,
+  body            text NOT NULL,
+  variables       text[] NOT NULL DEFAULT '{}',
+  -- WhatsApp templates need PROVIDER APPROVAL before they can be used
+  provider_template_name text,
+  approval_status template_approval_enum NOT NULL DEFAULT 'not_required',
+                  -- 'not_required'|'draft'|'submitted'|'approved'|'rejected'
+  approval_submitted_at timestamptz,
+  approval_decided_at   timestamptz,
+  approval_note   text,
+  interactive_schema jsonb,                         -- buttons / list options → the answer schema
+  fallback_channels message_channel_enum[],
+  is_active       boolean NOT NULL DEFAULT true,
+  UNIQUE (key, channel, version, language)
+);
+```
+
+**`approval_status` is a first-class field because it is a calendar dependency.** WhatsApp templates
+must be approved by the BSP before they can be sent, which takes weeks and is outside our control
+(`OI-HS-07`). Tracking it as data means "which templates are blocking go-live" is a query, not a
+conversation.
+
+### 5.2 Triggers (`M5-I2`)
+
+```sql
+CREATE TABLE engage.trigger_config (
+  id            uuid PRIMARY KEY,
+  event_name    text NOT NULL,                      -- a domain event from 01-06 §4
+  template_key  text NOT NULL,
+  channels      message_channel_enum[] NOT NULL,    -- ordered fallback
+  recipient_rule jsonb NOT NULL,                    -- how to resolve the recipient from the payload
+  conditions    jsonb,                              -- only fire when...
+  delay_minutes integer NOT NULL DEFAULT 0,
+  is_active     boolean NOT NULL DEFAULT true
+);
+```
+
+*"Which event sends which message, on which channel, to whom"* — configuration, so a new
+notification does not need a release.
+
+### 5.3 Cadence (`M5-I5`)
+
+```sql
+CREATE TABLE engage.segment (
+  id          uuid PRIMARY KEY,
+  key         text NOT NULL UNIQUE,
+  name        text NOT NULL,
+  definition  jsonb NOT NULL,        -- filter over candidates: base, category, city, confidence band
+  is_active   boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE engage.cadence_rule (
+  id                uuid PRIMARY KEY,
+  segment_id        uuid NOT NULL REFERENCES engage.segment(id),
+  name              text NOT NULL,
+  -- WHO: selection
+  confidence_below  numeric(4,3),                   -- contact when confidence drops under this
+  min_days_since_contact integer NOT NULL,
+  max_days_since_contact integer,                   -- Base B: 3-4 days across the whole base
+  -- HOW
+  channels          message_channel_enum[] NOT NULL,
+  template_key      text NOT NULL,
+  question_set_key  text NOT NULL,
+  -- WHEN
+  send_window_start time NOT NULL DEFAULT '09:00',
+  send_window_end   time NOT NULL DEFAULT '20:00',
+  days_of_week      integer[] NOT NULL DEFAULT '{1,2,3,4,5,6}',
+  daily_cap         integer,                        -- COST CONTROL — see §11
+  -- ESCALATION
+  escalate_to_voice_after_attempts integer,
+  is_active         boolean NOT NULL DEFAULT true
+);
+```
+
+**`daily_cap` and the send window are cost controls, not politeness features.** WhatsApp bills per
+conversation, and an unbounded cadence run across an unexpectedly large base is a real financial
+exposure (`OI-HS-05`).
+
+### 5.4 Availability (A3, A14)
+
+```sql
+CREATE TABLE engage.availability_confidence (
+  candidate_id      uuid NOT NULL,
+  base              supply_base_enum NOT NULL,
+  confidence        numeric(4,3) NOT NULL,          -- 0.000 – 1.000
+  confirmed_at      timestamptz,
+  decay_rate_per_day numeric(6,5) NOT NULL,         -- per base, configurable
+  last_decayed_at   timestamptz NOT NULL DEFAULT now(),
+  last_contacted_at timestamptz,
+  contact_attempts_since_response integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (candidate_id, base)
+);
+CREATE INDEX idx_confidence__selection
+  ON engage.availability_confidence (base, confidence ASC, last_contacted_at ASC);
+
+CREATE TABLE engage.availability_response (
+  id              uuid PRIMARY KEY,
+  candidate_id    uuid NOT NULL,
+  base            supply_base_enum NOT NULL,
+  -- ONE SCHEMA, whatever channel it arrived on
+  is_available    boolean,
+  available_from  date,
+  available_until date,
+  preferred_locations text[],
+  notes           text,
+  -- provenance
+  source_channel  response_channel_enum NOT NULL,   -- 'whatsapp'|'app'|'voice'|'ops'
+  inbound_id      uuid,                             -- demand.inbound_record
+  voice_call_id   uuid,
+  raw_answer      jsonb NOT NULL,                   -- what actually arrived
+  parse_confidence numeric(4,3),
+  needs_review    boolean NOT NULL DEFAULT false,
+  reviewed_by     uuid, reviewed_at timestamptz, review_correction jsonb,
+  received_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_response__review ON engage.availability_response (received_at DESC)
+  WHERE needs_review;
+
+CREATE TABLE engage.voice_call (
+  id             uuid PRIMARY KEY,
+  candidate_id   uuid NOT NULL,
+  campaign_id    uuid,
+  status         voice_call_status_enum NOT NULL,
+  provider_call_id text,
+  language       text,
+  attempted_at   timestamptz, connected_at timestamptz, ended_at timestamptz,
+  duration_seconds integer,
+  cost_amount    numeric(10,4),
+  transcript     text,
+  transcript_confidence numeric(4,3),
+  adapter_call_id uuid
+);
+```
+
+**`availability_response` is the A14 schema.** WhatsApp button replies, app answers and extracted
+voice answers all produce a row of this shape. `raw_answer` keeps what actually arrived; the typed
+columns are the normalised form.
+
+---
+
+## 6. State machines
+
+**AvailabilityConfidence:** `confirmed (1.0) → decaying → stale → reselected → contacted → confirmed`
+
+Decay is applied on a schedule per base. Base B decays faster than Base A — the shift pool is
+contacted every 3–4 days and a five-day-old answer is nearly worthless; a permanent candidate's
+availability changes on a scale of weeks.
+
+**AvailabilityResponse:** `received → understood` \| `unclear → human review → confirmed`
+
+**VoiceCall:** `queued → dialling → connected → answered` \| `no_answer → retried` \| `failed`
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const EngagementService = {
+  // Templates and triggers
+  listTemplates(filter): Promise<Template[]>
+  submitForApproval(templateId, actor): Promise<Template>
+  // Cadence
+  listSegments(): Promise<Segment[]>
+  previewSelection(cadenceRuleId): Promise<{ count: number; sample: Candidate[] }>
+  runCadence(cadenceRuleId, actor): Promise<{ selected: number; queued: number }>
+  // Availability
+  getConfidence(candidateId, base): Promise<AvailabilityConfidence>
+  recordResponse(input: AvailabilityResponseInput): Promise<AvailabilityResponse>
+  reviewResponse(id, correction, actor): Promise<AvailabilityResponse>
+}
+```
+
+### 7.2 Freshness score (A3, `M5-I10`)
+
+```
+confidence(t) = max(0, confirmed_confidence − decay_rate_per_day × days_since_confirmed)
+```
+
+Reset to 1.0 on a **confirmed** response. A response that needed human review does not reset until
+the review confirms it — otherwise a misparse silently marks a nurse available.
+
+Written here, stored on the candidate record (`03-05`), read by `03-09`.
+
+### 7.3 Who to contact next (A4, `M5-I11`)
+
+```ts
+selectForCadence(rule): Promise<Candidate[]>
+```
+
+Selection order:
+1. Candidates in the segment
+2. With `confidence < confidence_below`
+3. Not contacted within `min_days_since_contact`
+4. **Not opted out** on all the rule's channels
+5. Ordered by confidence ascending, then `last_contacted_at` ascending
+6. Capped by `daily_cap`
+
+Then hand off to `02-07` for sending. **This service never sends** — it selects.
+
+### 7.4 Voice answer extraction (A5, `M5-I13`)
+
+```ts
+extractFromTranscript(transcript, questionSet): Promise<{
+  answer: Partial<AvailabilityResponseInput>
+  confidence: number
+}>
+```
+
+*"Turn a phone conversation into the same answer format the app and WhatsApp produce"*. Below the
+threshold → `needs_review`.
+
+### 7.5 Candidate reply registration (A14, `M5-I14`, `M5-I15`)
+
+```ts
+inbound.registerType({
+  type: 'candidate_response',
+  owner: 'engagement',
+  handler: (record) => EngagementService.handleInboundResponse(record),
+})
+```
+
+**This is the whole of A14's relationship to the pipeline.** The receiver, sender matching, type
+detection and retry were built once in `02-08`; this registers a second type on it and supplies a
+handler. WhatsApp button and list replies are structured; free text falls back to parsing.
+
+### 7.6 Write reply to candidate (`M5-I16`)
+
+Writes the answer onto the candidate record and **resets the freshness score** — closing the loop.
+
+### 7.7 HTTP — `/api/v1/engagement`
+
+| Method | Path | Permission |
+|---|---|---|
+| GET/POST/PATCH | `/templates` · POST `/templates/:id/submit-approval` | `engage.template.write` |
+| GET/POST/PATCH | `/triggers` | `engage.trigger.write` |
+| GET/POST/PATCH | `/segments` · `/cadence-rules` | `engage.cadence.write` |
+| POST | `/cadence-rules/:id/preview` · `/run` | `engage.cadence.run` |
+| GET/POST | `/voice-campaigns` | `engage.voice.write` |
+| GET | `/responses` · `/responses/review` | `engage.response.read` |
+| POST | `/responses/:id/review` | `engage.response.review` |
+| GET | `/candidates/:id/confidence` · `/candidates/:id/contact-history` | read |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** **`engage.availability.confirmed`** (→ `03-09`) · `.response_received` ·
+`.response_needs_review` · `engage.cadence.run_completed` · `engage.voice.completed` /
+`.no_answer` · `engage.confidence.decayed`
+
+**Subscribes:** `demand.inbound.classified` (type `candidate_response`) → handle ·
+`supply.candidate.registered` → welcome + initial confidence · any event with a configured trigger →
+send
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `engagement.decay` | Hourly | Applies decay per base. **Set-based UPDATE, not per-candidate.** |
+| `engagement.cadence-select` | Every 4h | Selects and enqueues. **Heartbeat alarm** — if this stops, the pool silently goes stale. |
+| `engagement.voice-dial` | On demand | Through the voice port. Rate-limited. |
+| `engagement.voice-extract` | On transcript | Model call; below threshold → review queue |
+| `engagement.escalate-to-voice` | Daily | Candidates unresponsive on other channels after N attempts (A5's stated purpose) |
+
+---
+
+## 9. Frontend — `/engagement`
+
+### 9.1 Message templates (`M5-I1`)
+
+Per channel and language. **Approval status is prominent**: draft → submitted → approved, with the
+submission date and how long it has been waiting. A "blocking go-live" filter, because that is the
+question during phase 5.
+
+### 9.2 Triggers (`M5-I2`)
+
+Event → template → channel → recipient rule. Test-fire against a chosen candidate.
+
+### 9.3 Contact schedule (`M5-I5`)
+
+*"Who gets contacted, how often, on which channel, with which questions."*
+
+Per segment: selection criteria, channels, template, question set, send window, days, **daily cap**,
+voice escalation.
+
+**A preview showing how many candidates this rule would select today, and the estimated cost of that
+run.** That preview is the honest answer to `OI-HS-05` at the point where someone can act on it.
+
+### 9.4 Voice campaigns (`M5-I6`)
+
+Who, what questions, when, language. Call outcomes and transcripts.
+
+### 9.5 Replies to review (`M5-I7`)
+
+*"Free-text replies the system was not sure about, queued for a person to read."*
+
+Raw reply (text or audio) beside the parsed interpretation, with the confidence shown. Confirm or
+correct. **Correcting is what resets confidence** — the misparse never silently did it.
+
+### 9.6 Contact history — embedded on the candidate record
+
+From `02-07 §9`. What this candidate has been sent and whether they replied.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | A3, A4, A5 and A14 work as one loop: decay → select → send → capture → reset | M5 module note |
+| 2 | Confidence decays on a **configurable schedule per base** | A3 |
+| 3 | Only a **confirmed** response resets confidence — a response awaiting review does not | A3, `OI-A-08` |
+| 4 | Cadence selects on confidence, respecting opt-out, send window and daily cap | A4, `M5-I11` |
+| 5 | Base B can be contacted every 3–4 days across the whole base within its window | M5 module note |
+| 6 | **A response from WhatsApp, the app and a voice call produces the same structured record** | A14, `M4-I10` |
+| 7 | A14 consumes the M3 pipeline by registering a second type — it does not rebuild it | `M5-I14`, plan CLOSED note |
+| 8 | Voice answers are extracted into the same schema, with a confidence threshold | `M5-I13` |
+| 9 | A low-confidence free-text reply goes to human review, not to the candidate record | `M5-I7`, `OI-A-08` |
+| 10 | WhatsApp template approval status is tracked and blocks sending when not approved | `M5-I1`, `OI-HS-07` |
+| 11 | Every send records its cost; a cadence run's cost is previewable before it runs | `OI-HS-05` |
+| 12 | Notification preferences and opt-outs are respected **at send time** | `M4-I9`, `02-07 §6` |
+| 13 | The decay job handles the full candidate base within its hourly window | §8 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-09`** | **Which provider makes the automated phone calls?** | **Estimate blocker, 5 items, 44pd.** Providers differ enormously in conversation handling, transcript format and **Indian language coverage**. Also affects M3: if the same provider does speech-to-text, one integration; otherwise two. | Port + fake (`04-03`). The cadence, extraction schema and review queue are all built and testable without it. **Escalate — language coverage cannot be tested against an unnamed provider, and this workforce is not English-first.** |
+| **`OI-HS-05`** | **Expected message volume per month** | **Running cost cannot be modelled.** Volume is set by the contact schedule, which is this module's configuration. | **`AS-09`** — the cadence preview (§9.3) gives Apollo a per-rule count and cost estimate. **The platform answers the question; it does not need the answer to be built.** |
+| **`OI-A-08`** | **Free-text fallback** — no accuracy threshold, confidence handling or human-review path specified for parsed responses that reset confidence | *"A misparsed response resets confidence wrongly and the candidate drops out of cadence silently."* | **`AS-30`** — threshold 0.85 for a response to auto-confirm; below it → review queue; **confidence is not reset until reviewed.** Configurable in P03. This makes the failure mode visible instead of silent. |
+| `OI-A-17` | Confirm email and SMS are outbound-only in R1 | A candidate replying to an SMS has no defined handling | **`AS-11`** — outbound only. Replies to the SMS number are logged and surfaced in the review queue, not parsed. |
+| `OI-HS-07` | WhatsApp BSP | **Template approval is a calendar dependency gating the whole contact schedule going live** | **Submit templates at the start of phase 5.** Track status as data. |
+| `OI-M3-05` | Is the STT provider the same as the voice provider? | One integration or two | One port, two adapters if needed |
+| — | Decay curve shape | Not specified | **`AS-31`** — linear, per-base rate, configurable. Base B ~0.15/day (worthless in a week), Base A ~0.03/day. Tune against real response data during UAT. |
+
+---
+
+## 12. Notes for the implementer
+
+**Build the loop end to end on one channel before adding channels.** App → response → confidence
+reset → next selection, working, then add WhatsApp, then voice. Building all four channels before the
+loop closes gives four half-features and no working mechanism.
+
+**Decay must be set-based.** An hourly job iterating 50,000 candidates individually will not finish
+in an hour. It is a single `UPDATE ... SET confidence = GREATEST(0, ...)` over the table, and the
+selection index (`§5.4`) is what makes the subsequent selection query fast.
+
+**Do not let the response schema fork.** Three channels write `availability_response`. The moment
+WhatsApp gets a column the app does not use, A14 has failed. Keep `raw_answer` for channel-specific
+detail and keep the typed columns identical.
+
+**Submit WhatsApp templates on day one of phase 5.** Not when the code is ready. Approval takes weeks,
+is outside our control, and gates go-live for the entire contact schedule.
+

@@ -1,0 +1,251 @@
+---
+title: "00-01 · Product Context"
+description: "Read first. Everything else assumes you understand this page."
+---
+
+**Read first.** Everything else assumes you understand this page.
+
+---
+
+## 1. What the business does
+
+Apollo Knowledge Services staffs hospitals with clinical people. It runs **two separate businesses**
+on the same candidate pool, and the platform has to serve both:
+
+### Flow A — Permanent placement (the "fee" business)
+
+Apollo finds a nurse/doctor/allied-health professional a permanent job at a hospital. The hospital
+employs them directly. Apollo invoices a **placement fee (5–6% of annual salary)** — but **not at
+placement**. The invoice fires only when the client confirms **at day 90** that the person is still
+there.
+
+```
+Client raises vacancy → requisition → ranked shortlist → client picks → interview
+  → offer → signed → joined → day 0/7/30/60/90 trial check-ins
+  → DAY 90 CLIENT CONFIRMS RETENTION → invoice raised
+```
+
+The day-90 confirmation is the single most important record in the platform. It is captured through
+a **tokenised link sent to the client over WhatsApp/email** — the client has no login in Release 1.
+That link answer, timestamped against a named recipient, is the legal evidence behind the invoice.
+If it is not defensible, Apollo cannot bill.
+
+### Flow B — Contractual / shift staffing (the "margin" business)
+
+Apollo employs the nurse. The nurse works shifts at the hospital. Apollo bills the hospital per
+shift and pays the nurse.
+
+```
+Client raises shift demand → shift demand lines → nurse accepts shift in the app
+  → nurse CHECKS IN ON THE APP → attendance → timesheet
+  → CLIENT APPROVES TIMESHEET (via link) → shift invoice raised
+```
+
+The mobile app is a **hard dependency of revenue** in this flow: app check-in is the *only* route by
+which attendance reaches the platform. No app, no attendance, no timesheet, no invoice.
+
+---
+
+## 2. Two supply bases
+
+The same candidate pool splits into two operating bases with different economics and different
+contact rhythms:
+
+| | Base A (permanent) | Base B (shift pool) |
+|---|---|---|
+| Relationship | Placed with the client, employed by the client | Employed by Apollo, works shifts |
+| Contact cadence | Longer cycle | **Every 3–4 days, across the whole base** |
+| Availability matters | At search time | Constantly — a stale pool is worthless |
+| Revenue | One-off fee at day 90 | Recurring per shift |
+| Ranking weights | Different weight set | Different weight set |
+
+A candidate is modelled as **one record with one credential set** and a *base assignment*, not two
+records. Whether one person can sit in both bases simultaneously is **open (`OI-HS-09`)**.
+
+---
+
+## 3. Three candidate categories
+
+Release 1 covers **nurses, doctors and allied health**. Category is a field on both the requisition
+and the candidate, and it drives a **per-category attribute set**:
+
+| Category | Attributes |
+|---|---|
+| Nurse | specialty, acuity |
+| Doctor | specialty, case-mix, grade |
+| Allied health | discipline, equipment, technique competency |
+
+These attributes are **configuration, not columns** — see `03-05-candidates.md`. They are exactly
+what the ranking engine scores on.
+
+---
+
+## 4. The availability problem (the reason this platform exists)
+
+A staffing database is only as good as the freshness of "is this person available right now".
+Apollo's answer is a closed loop, and **none of the four parts works alone**:
+
+```
+        ┌──────────────────────────────────────────────────┐
+        │                                                  │
+        ▼                                                  │
+  A3 · Confidence decays on a schedule                     │
+        │                                                  │
+        ▼                                                  │
+  A4 · Cadence engine picks who to contact (lowest first)  │
+        │                                                  │
+        ▼                                                  │
+  Outbound: WhatsApp / SMS / email / push / VOICE CALL     │
+        │                                                  │
+        ▼                                                  │
+  A14 · Response captured on ONE schema, whatever channel ─┘
+        (confirmed reply resets confidence to full)
+```
+
+Build these as one unit (`03-08-engagement-and-availability.md`). Splitting them across sprints
+produces four half-features that deliver nothing.
+
+---
+
+## 5. Demand arrives on five channels, not one
+
+Clients do not log in to raise vacancies (there is no client login until M10). Requirements arrive
+however the client already works:
+
+| Channel | Notes |
+|---|---|
+| **Email** | Free text and attachments to a monitored mailbox |
+| **Client spreadsheet** | Each client's own column layout, mapped per client |
+| **WhatsApp text** | Same registered number as all outbound messaging |
+| **WhatsApp voice note** | Transcribed to the same requisition schema |
+| **Client HRMS / ATS** | Structured payload, bypasses parsing. Count unknown (`OI-M3-03`) |
+| *Verbal capture* | A site-resident recruiter types it in — 15 of 22 recruiters are on site, so this is **not an edge case** |
+| *Client portal* | Enumerated but **switched off** until M10 |
+
+Everything normalises to **one requisition object**, with the original raw payload retained forever
+so a disputed vacancy can be traced to what the client actually sent.
+
+The same inbound pipeline is reused by the availability loop to receive candidate replies — built
+once in `02-08`, with two registered message types.
+
+---
+
+## 6. Actors
+
+### Apollo internal (Ops console — React + Vite, login required)
+
+| Role | What they do |
+|---|---|
+| **Recruiter** (22: 15 site-resident, 7 floating) | Works requisitions, searches, shortlists, interviews. Site-resident recruiters also type in verbal requirements. |
+| **Fulfilment lead** | Allocates requisitions on the daily morning call, watches the fulfilment board, runs the trial dashboard |
+| **BD / Enterprise partnerships** | Clients, contracts, rate cards, offers |
+| **Verification & quality team** | Works the verification queue, checks credentials and OCR output |
+| **Finance** | Invoices, receivables, timesheets, payroll |
+| **Platform administrator** | Users, roles, settings, channel config, templates, adapters |
+| **Leadership** (VP Fulfilment, Head of Enterprise Partnerships) | Reports, MIS pack |
+
+### Candidate (mobile app — phone + OTP, **completely separate identity system**)
+
+Registers, uploads CV, tracks applications, browses/accepts shifts, **checks in and out of shifts**,
+answers availability questions, uploads documents, reads payslips.
+
+### Client-side (no account in Release 1)
+
+Receives a **tokenised link** over WhatsApp/email, opens a page with no password, and answers one
+question. Four link types on one mechanism:
+
+| Link type | Purpose | Billing trigger? |
+|---|---|---|
+| Shortlist response | Accept / reject / request interview | No |
+| Day 30 check-in | Signal capture | No |
+| Day 60 check-in | Signal capture (client intent) | No |
+| **Day 90 check-in** | Retention confirmation | **YES** |
+| **Timesheet approval** | Approve the period | **YES** |
+
+Only day-90 and timesheet approval may trigger billing. Day 30 and day 60 must not create a second
+trigger path — this is a stated constraint, not an implementation detail.
+
+Client *login* arrives in M10 with the portal, which becomes the sixth intake channel and a
+logged-in version of the shortlist and timesheet link pages.
+
+---
+
+## 7. Surfaces to build
+
+| Surface | Tech | Auth | Spec |
+|---|---|---|---|
+| **Ops console** | React 19 + Vite SPA | Email + password, session, RBAC | `01-03`, every `03-*` |
+| **Candidate mobile app** | React Native | Phone + OTP | `03-07` |
+| **Client link pages** | React + Vite, separate small bundle | Signed token in URL, no account | `02-10`, `03-10` |
+| **Client portal** (M10) | React + Vite SPA | Email + password, client-scoped | `03-16` |
+| **WhatsApp templates** | Provider-hosted, approved in advance | — | `04-02` |
+| **Voice scripts** | Provider-hosted | — | `04-03` |
+
+All five visual surfaces draw from **one design system** (`02-05`). Designing them separately means
+doing the work five times and it looking like it.
+
+---
+
+## 8. Deemed-response windows (a business rule that touches three modules)
+
+Clients often simply never reply. The platform cannot stall revenue on that, so two waiting periods
+exist, **configurable per client with a platform-level default**:
+
+| Window | Effect when it expires |
+|---|---|
+| Retention deemed-confirmation | Day-90 record is created as *deemed confirmed*; permanent invoice may fire |
+| Timesheet deemed-approval | Timesheet treated as approved; shift invoice may fire |
+| Requisition follow-up | Chase escalates to the requisition owner |
+
+Configured in `03-02` (contracts), defaulted in `02-03` (settings), read by `03-13` (billing).
+A client onboarded without a configured window **must not stall invoicing** — the default applies.
+Apollo has not yet supplied the default values (`OI-A-05`).
+
+---
+
+## 9. Hard constraints
+
+| Constraint | Consequence |
+|---|---|
+| **AWS ap-south-1 only**, Apollo-owned account | No personal data leaves Mumbai. No Hiresense-held runtime credential after handover. |
+| **DPDP Act (India)** | Consent before verification checks, residency, retention policy, erasure |
+| **Day-90 record must survive years** | Immutable, queryable, exportable — a billing query may land long after |
+| **App check-in is the only attendance route** | The mobile app is on the revenue critical path |
+| **WhatsApp template approval takes weeks** | Calendar dependency no amount of team size removes |
+| **Platform becomes system of record** | Only after CPAL migration reconciles; legacy tool retired after parallel run |
+| **Audit trail is append-only** | Written by six modules; never edited or deleted from any surface |
+
+---
+
+## 10. Explicitly out of scope for this contract
+
+Do not build these, and push back if asked:
+
+- Payroll *calculation* — a third-party engine does it; we integrate (`03-19`)
+- Statutory *filing* (PF/ESIC returns) — we produce reports and challans, someone else files
+- Being the accounting system of record — the finance system stays the book of record
+- LMS — Apollo's internal team builds it; connects by API later; nothing here depends on it
+- Bulk campus/partner candidate loads, walk-in registration, referral tagging
+- Face recognition, biometrics, cheating detection, AI video interviews
+- Demand forecasting
+- Adapters for US / Germany / Ireland — **the interface must accept them later without core changes**, but only India is built
+
+---
+
+## 11. Where the effort sits
+
+1344 person-days total. 84% of it is M0 foundations plus the (enlarged) Release 1 list.
+
+| Phase | pd | Notes |
+|---|---|---|
+| Platform foundations (M0, M1) | 176.5 | Everything depends on it |
+| Client / contract / demand (M2, M3) | 284.5 | M3 is the largest single module |
+| Candidate / engagement (M4, M5) | 286.0 | M4 includes the mobile app |
+| Match / select / place (M6, M7, M8) | 295.0 | The revenue chain |
+| Billing & reporting (M9) | 88.5 | Two independent workstreams |
+| Release 2 (M10–M15) | 214.0 | Portal, onboarding, workforce, payroll, prioritisation, collections |
+
+**The back half is compressed and that is the main schedule risk.** Five of ten build steps begin in
+months 5–6, each needing the one before it. Any slip in months 1–4 lands entirely on Release 2,
+because that is the only thing left to cut.
+

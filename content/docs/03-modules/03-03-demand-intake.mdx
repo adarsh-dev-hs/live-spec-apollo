@@ -1,0 +1,385 @@
+---
+title: "B03 · Demand Intake Channels"
+description: "Five live channels plus verbal capture, all normalising to one requisition schema, with the source retained, completeness scored against required fields, and follow-up routed back…"
+---
+
+**Package** `@apollo/intake` · **Schema** `demand` · **Plan** A1 / M3
+**Effort** ~84pd · **Risk** High (EXT, MODEL, SPEC) · **Build in** Phase 3
+
+---
+
+## 1. Purpose
+
+Five live channels plus verbal capture, all normalising to one requisition schema, with the source
+retained, completeness scored against required fields, and follow-up routed back through the
+originating channel.
+
+Clients do not log in to raise vacancies — there is no client login until M10. Requirements arrive
+however the client already works: an email, a spreadsheet in their own format, a WhatsApp message, a
+voice note, or a push from their HR system. **All of it becomes one requisition object.**
+
+This module sits on top of the shared pipeline (`02-08`) and owns the channel-specific half:
+adapters, parsers, completeness scoring, and the recovery queues where humans fix what automation
+could not.
+
+---
+
+## 2. Scope
+
+**In** — channel adapters (email, WhatsApp text, WhatsApp voice, spreadsheet, HRMS) · channel
+configuration · **per-client spreadsheet mapping** · parser dispatch and field extraction ·
+completeness scoring against a per-category required-field set · **follow-up chase on the originating
+channel** with escalation · manual entry queue · suspected duplicates queue · verbal capture entry
+
+**Out** — the pipeline itself (receiver, sender matching, type detection, registration) → `02-08` ·
+the requisition object and lifecycle → `03-04` · candidate response handling → `03-08` (the *other*
+consumer of the same pipeline) · the client portal channel → `03-16` (enumerated here, switched on
+there)
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M3-I5` Channel settings (A1, Config, M, 3.5pd) | §5.1, §9.1 |
+| `M3-I6` Spreadsheet mapping (A1, XL, 9pd) | §5.2, §9.2 |
+| `M3-I7` Required fields (A1, Config, L, 3pd) | §5.3, §9.3 |
+| `M3-I8` Follow-up settings (A1, Config, M, 2pd) | §5.4, §9.4 |
+| `M3-I20` Parsers (A1, Service, XL, 7.5pd) | §7.1 |
+| `M3-I22` Completeness scoring and chase (A1, Service, XL, 5pd) | §7.2, §8 |
+| `M3-I23` Voice note transcription (A1, Integration, XXL, 11pd) | §7.3, `04-03` |
+| `M3-I24` WhatsApp inbound and follow-up (A1, Integration, XL, 7.5pd) | `04-02` |
+| `M3-I25` Email inbound (A1, Integration, L, 3pd) | §7.3 |
+| `M3-I26` Client HR system feed (A1, Integration, XXL, 11pd) | §7.3 |
+| `M3-I3` Manual entry queue (A1, L, 3pd) | §9.5 |
+| `M3-I4` Suspected duplicates (A1, L, 3pd) | §9.6 |
+| `M3-I1` Inbound list · `M3-I2` Unmatched senders · `M3-I17` Reclassify | → `02-08 §9` |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `02-08` inbound pipeline, `02-07` messaging (chase), `02-04` files, `02-12`
+adapters, `03-01` clients (sender identities), `03-04` requisitions (the target object), `03-05`
+candidates (category field definitions)
+**Consumed by:** `03-04` requisitions · `03-08` engagement reuses the pipeline, not this module
+
+---
+
+## 5. Data model
+
+### 5.1 Channel configuration (`M3-I5`)
+
+```sql
+CREATE TABLE demand.channel_config (
+  id             uuid PRIMARY KEY,
+  channel        inbound_channel_enum NOT NULL UNIQUE,
+  is_enabled     boolean NOT NULL DEFAULT false,
+  is_available   boolean NOT NULL DEFAULT true,   -- FALSE for 'portal' in R1: enumerated, not built
+  settings       jsonb NOT NULL DEFAULT '{}',
+  adapter_key    text,
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  updated_by     uuid NOT NULL
+);
+```
+
+`is_available = false` is how the portal channel is *"specified but not built"* (`OI-A-06`) rather
+than dropped from A1. It appears in the list, disabled, with an explanatory note.
+
+### 5.2 Spreadsheet mapping (`M3-I6`)
+
+```sql
+CREATE TABLE demand.spreadsheet_mapping (
+  id             uuid PRIMARY KEY,
+  client_id      uuid NOT NULL,
+  name           text NOT NULL,
+  header_row     integer NOT NULL DEFAULT 1,
+  sheet_name     text,
+  multi_row_mode text NOT NULL DEFAULT 'one_per_row',  -- several vacancies per file
+  column_map     jsonb NOT NULL,     -- { "Ward": "departmentName", "Nos": "positions", ... }
+  value_map      jsonb,              -- { "category": { "S/N": "nurse", "Staff Nurse": "nurse" } }
+  sample_file_id uuid,               -- the file this mapping was built and tested against
+  is_active      boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+```
+
+**One mapping per client format.** The mapping screen is built once; each client's format then needs
+its own mapping and its own sample file to test against. **The number of formats is unknown
+(`OI-M3-04`)** — this is an estimate blocker, and the data model makes the per-format work visible
+and countable rather than hidden.
+
+### 5.3 Required fields (`M3-I7`)
+
+Stored in P03 as `supply.required_fields.<category>`:
+
+```json
+{
+  "nurse":  { "required": ["clientId","locationId","roleCode","positions","specialty","acuity","startDate"],
+              "weight": { "specialty": 2, "acuity": 2 } },
+  "doctor": { "required": [] },
+  "allied": { "required": ["clientId","locationId","roleCode","positions","discipline"] }
+}
+```
+
+**`doctor` is deliberately empty.** `OI-M3-07` records that nurses and allied health sit with a named
+owner and **no doctors owner is named**. Completeness scoring for doctors cannot be configured until
+one is nominated, and an empty set scoring everything as complete is the honest behaviour — with a
+visible warning on the settings screen.
+
+### 5.4 Follow-up settings (`M3-I8`)
+
+```sql
+CREATE TABLE demand.follow_up_config (
+  id                uuid PRIMARY KEY,
+  client_id         uuid,                      -- NULL = platform default
+  first_chase_hours integer NOT NULL DEFAULT 4,
+  repeat_hours      integer NOT NULL DEFAULT 24,
+  max_chases        integer NOT NULL DEFAULT 3,
+  escalate_after_hours integer NOT NULL,       -- → clients.client_window_config.requisition_follow_up
+  escalate_to       text NOT NULL DEFAULT 'owner',
+  template_key      text NOT NULL
+);
+```
+
+### 5.5 Duplicate candidates for requisitions (`M3-I4`)
+
+```sql
+CREATE TABLE demand.suspected_duplicate (
+  id                uuid PRIMARY KEY,
+  requisition_id    uuid NOT NULL,
+  candidate_requisition_id uuid,               -- the possible duplicate, if already created
+  inbound_id        uuid,                      -- or the inbound not yet converted
+  match_score       numeric(4,3) NOT NULL,
+  match_reasons     jsonb NOT NULL,            -- which keys matched
+  status            text NOT NULL,             -- 'open'|'merged'|'not_duplicate'
+  resolved_by       uuid,
+  resolved_at       timestamptz,
+  resolution_note   text
+);
+```
+
+---
+
+## 6. State machines
+
+Intake does not own a lifecycle of its own — it advances `InboundRecord` (`02-08 §6`) and creates
+`Requisition` (`03-04 §6`).
+
+The one state it does own: **chase**.
+
+| From | To | Trigger |
+|---|---|---|
+| — | `chase_pending` | Requisition scored incomplete |
+| `chase_pending` | `chased` | First chase sent on the originating channel |
+| `chased` | `chased` | Repeat, up to `max_chases` |
+| `chased` | `escalated` | `escalate_after_hours` passed with no response |
+| any | `resolved` | Missing fields supplied, by any route |
+| any | `abandoned` | Requisition closed or withdrawn |
+
+---
+
+## 7. API surface
+
+### 7.1 Parsers (`M3-I20`)
+
+```ts
+interface RequisitionParser {
+  channel: InboundChannel
+  canHandle(record: InboundRecord): boolean
+  parse(record: InboundRecord): Promise<ParseResult>
+}
+
+type ParseResult =
+  | { kind: 'parsed'; fields: Partial<RequisitionDraft>; confidence: Record<string, number> }
+  | { kind: 'multiple'; drafts: Partial<RequisitionDraft>[] }     // one spreadsheet, several vacancies
+  | { kind: 'unparseable'; reason: string }
+```
+
+Dispatch is by channel and content type. Parsers registered:
+
+| Parser | Handles |
+|---|---|
+| `EmailParser` | Free text + attachments. LLM extraction against the requisition schema. |
+| `SpreadsheetParser` | Applies the client's `spreadsheet_mapping`. Deterministic — no model. |
+| `WhatsAppTextParser` | Short free text. LLM extraction. |
+| `VoiceNoteParser` | Transcript from `04-03`, then the text parser |
+| `HrmsParser` | Structured payload → schema mapping. **Bypasses parsing entirely.** |
+| `ManualParser` | Verbal capture — a person typed it in. Confidence 1.0. |
+
+**Per-field confidence is returned and stored**, so the requisition record can show which fields were
+read by a machine and which by a person (`03-04 §9`).
+
+### 7.2 Completeness scoring and chase (`M3-I22`)
+
+```ts
+export const IntakeService = {
+  scoreCompleteness(draft, category): Promise<{
+    score: number
+    missing: string[]
+    isComplete: boolean
+  }>
+  startChase(requisitionId): Promise<void>       // on the ORIGINATING channel
+  resolveChase(requisitionId, actor): Promise<void>
+}
+```
+
+*"Scores the parsed object against the required-field set for its category and chases what is missing
+**on the originating channel**"* (`M3-I22`). A vacancy that arrived by WhatsApp is chased on
+WhatsApp, not by email — that is the whole point of retaining the channel.
+
+### 7.3 Channel adapters
+
+Each behind a port (`02-12`), detailed in `04-*`:
+
+| Channel | Adapter | Spec | Open item |
+|---|---|---|---|
+| WhatsApp text + voice | BSP webhook | `04-02` | `OI-HS-07` |
+| Email | SES inbound → S3 → Lambda → webhook | `01-09 §7` | `OI-M3-13` |
+| Voice note transcription | Speech-to-text port | `04-03` | `OI-M3-05` |
+| Spreadsheet | Upload or email attachment | — | `OI-M3-04` |
+| Client HRMS | Per-client API key + HMAC webhook | `04-01` | **`OI-M3-03`** |
+
+### 7.4 HTTP
+
+| Method | Path | Notes |
+|---|---|---|
+| GET/PATCH | `/api/v1/intake/channels` | Channel settings (`M3-I5`) |
+| GET/POST/PATCH | `/api/v1/intake/mappings` | Spreadsheet mappings (`M3-I6`) |
+| POST | `/api/v1/intake/mappings/:id/test` | Run against the sample file, show the result |
+| POST | `/api/v1/intake/spreadsheets` | Upload → 202 + job |
+| GET/PUT | `/api/v1/intake/required-fields` | Per category (`M3-I7`) |
+| GET/PUT | `/api/v1/intake/follow-up` | Chase settings (`M3-I8`) |
+| GET | `/api/v1/intake/manual-queue` | Unparseable payloads (`M3-I3`) |
+| POST | `/api/v1/intake/manual-queue/:id/convert` | Typed in by a person |
+| GET | `/api/v1/intake/duplicates` · POST `/:id/merge` · `/:id/dismiss` | (`M3-I4`) |
+| POST | `/api/v1/hrms/:clientKey/requisitions` | Client HRMS feed |
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `demand.intake.parsed` · `demand.intake.unparseable` · `demand.intake.chase_sent` ·
+`demand.intake.chase_escalated` · `demand.intake.duplicate_suspected`
+
+**Subscribes:** `demand.inbound.classified` (type `demand`) → parse ·
+`platform.document.available` → parse spreadsheet or transcribe voice note ·
+`demand.requisition.updated` → re-score completeness, resolve chase if now complete
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `intake.parse` | On event | 10 concurrency, 3 attempts → then `unparseable`, never lost |
+| `intake.transcribe` | On event | **Per-minute billed — do not retry blindly** |
+| `intake.spreadsheet` | On upload | One job per file, one draft per row |
+| `intake.follow-up-chase` | Hourly | First chase, repeats, respecting `max_chases` |
+| `intake.follow-up-escalate` | Hourly | To the requisition owner after the window |
+| `intake.duplicate-scan` | On requisition create | Match keys per `AS-04` |
+
+---
+
+## 9. Frontend — `/intake`
+
+### 9.1 Channel settings (`M3-I5`)
+
+Each channel: enabled, adapter, configuration, health, volume this month. **The portal channel is
+listed and permanently disabled in R1**, with a note that it arrives with M10 (`OI-A-06`).
+
+### 9.2 Spreadsheet mapping (`M3-I6`)
+
+Per client: upload a sample file, see detected columns, map each to a requisition field, define value
+translations ("S/N" → nurse), set header row and multi-row mode. **Test against the sample and show
+the parsed result before saving.**
+
+*"Maps each client's own spreadsheet layout onto the requisition schema without a code change"* —
+the test-before-save step is what makes that true in practice rather than in principle.
+
+### 9.3 Required fields (`M3-I7`)
+
+Per category: which fields make a requisition complete, and their weight. **A visible warning where
+no set is configured** — currently doctors (`OI-M3-07`).
+
+### 9.4 Follow-up settings (`M3-I8`)
+
+What the chase message says, how long the client has, how many times, and who it escalates to.
+Platform default plus per-client overrides.
+
+### 9.5 Manual entry queue (`M3-I3`)
+
+Payloads the parser could not read. Each row shows the raw content — **including an audio player for
+voice notes** — alongside a requisition form. A person reads and types.
+
+*"Recovery path for payloads the parser could not read, so that a parse failure never loses a
+requirement"* (`M3-I3`). Queue depth is the operational cost of parser accuracy, and it is reported
+weekly (`OI-M3-06`).
+
+### 9.6 Suspected duplicates (`M3-I4`)
+
+The same requirement arriving on two channels, side by side, with the matched keys highlighted.
+Actions: merge (keeping both inbound records linked to one requisition), or mark not-duplicate.
+
+**No automatic merge.** The dedupe rule is unset (`OI-M3-02`), and a wrongly merged vacancy is worse
+than a queue entry.
+
+### 9.7 Verbal capture
+
+Not a separate screen — the requisition form in `03-04` with source `manual`. **15 of 22 recruiters
+are site-resident, so this is a primary path, not an edge case** (`M3-I9`), and it is documented for
+them in the user guides (`M1-I7`).
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Five live channels plus verbal capture all normalise to one requisition schema | A1 |
+| 2 | The originating channel is retained, and follow-up goes back through it | `M3-I22` |
+| 3 | The raw payload is retained forever, so a disputed requirement traces to what the client sent | `M3-I10` |
+| 4 | A parse failure lands in the manual entry queue — **a requirement is never lost** | `M3-I3` |
+| 5 | The same requirement on two channels surfaces for a human; **no automatic merge** | `M3-I4`, `OI-M3-02` |
+| 6 | A client's spreadsheet layout maps onto the schema **without a code change** | `M3-I6` |
+| 7 | A spreadsheet with several vacancies produces several drafts | `M3-I6` |
+| 8 | A spreadsheet with bad rows reports each bad row by name and still loads the good ones | `M1-I4` |
+| 9 | Completeness is scored against the per-category required-field set | `M3-I7`, `M3-I22` |
+| 10 | An incomplete requisition is chased, repeated, then escalated to the owner | `M3-I8`, `M3-I22` |
+| 11 | Supplying the missing fields by any route stops the chase | §6 |
+| 12 | The portal channel is enumerated and disabled, not absent | `OI-A-06` |
+| 13 | HRMS payloads bypass parsing entirely | `M3-I26` |
+| 14 | Per-field confidence is recorded, so a person can see what a machine read | §7.1 |
+| 15 | Every channel adapter has a fake covering success, failure and malformed input | `01-08 §5` |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-M3-03`** | **How many client HR or recruitment systems must we connect to?** | **Estimate blocker, 3 items, 22pd.** Every client system is a separate connector with its own payload shape, credentials and test data. "Two clients" and "nine clients" are completely different pieces of work. The framework can be built without the answer; **the number of connectors cannot be priced.** | Build one generic HRMS connector with per-client payload mapping (the same shape as the spreadsheet mapping). Each named system is then a bounded increment. **Report the count as a separate line item once Apollo names them.** |
+| **`OI-M3-04`** | **How many different client spreadsheet layouts must we read?** | **Estimate blocker, 2 items, 16.5pd.** The mapping *screen* is priceable; the per-client mapping work is not until the count is known. | Same structure. One screen, N mappings, each needing a sample file. **Each mapping is ~0.5pd once a sample exists** — price it per client. |
+| **`OI-M3-05`** | Speech-to-text provider — same as the A5 voice provider, or separate? | One integration or two, and whether language coverage is proven once. **Audio is captured in the field, not in a studio.** | Port-based (`04-03`). Assume one provider; if Apollo names two, it is a second adapter behind the same port. |
+| **`OI-M3-06`** | Intent classification confidence threshold and free-text fallback | **Sets manual-queue load — an operational staffing figure** | **`AS-03`** — 0.80, as a P03 setting, tuned against real volume in the first weeks. Report queue depth weekly during UAT. |
+| `OI-M3-02` | Dedupe match keys, and automatic vs human-confirmed merge | Also governs whether a channel revision updates an existing requisition | **`AS-04`** — match on (client, location, role, category, start date ±3 days) within 7 days. **Always human-confirmed.** |
+| `OI-M3-07` | Required-field set per category; **no doctors owner named** | Completeness scoring cannot be configured for doctors | Nurses and allied configured; **doctors empty with a visible warning.** Nominate an owner before kick-off. |
+| `OI-M3-08` | Follow-up window per client or platform-wide? | | Built client-overridable, which satisfies both |
+| `OI-M3-13` | One email address with sender routing, or per client? | | **`AS-10`** — one address with routing; per-client aliases as configuration |
+| `OI-M3-14` | Latency targets for ingestion and queue surfacing | No performance acceptance test without them | **`AS-14`** — visible within 60s |
+
+---
+
+## 12. Notes for the implementer
+
+**This is the largest single module in the plan (84pd) and the one with the most open items.** Build
+it in the order: pipeline consumption → requisition creation from a clean structured payload → HRMS →
+email → WhatsApp text → spreadsheet → voice notes. Each channel added is independently valuable, and
+the hardest two (spreadsheet formats, voice) are also the two blocked on unanswered counts.
+
+**Parsing is a job, never a request.** A model call taking eight seconds must not hold an HTTP
+connection, and a provider outage must not lose a vacancy.
+
+**The manual queue is a feature, not a failure.** Design it to be pleasant to work — raw content and
+form side by side, keyboard-first — because at a 0.80 threshold a real fraction of inbound will land
+there, and its depth is the number that tells Apollo whether the threshold is right.
+

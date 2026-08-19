@@ -1,0 +1,241 @@
+---
+title: "01-08 · Testing and Quality"
+description: "353 person-days of QA sit against this build, back-loaded into months 4–6. The point of this document is to make sure that effort finds real defects rather than re-testing the…"
+---
+
+353 person-days of QA sit against this build, back-loaded into months 4–6. The point of this
+document is to make sure that effort finds real defects rather than re-testing the same happy paths
+by hand.
+
+---
+
+## 1. The pyramid
+
+| Level | Tool | Count (target) | Runs in |
+|---|---|---|---|
+| **Unit** | Vitest | Most | Every commit, &lt; 30s |
+| **Integration** | Vitest + Testcontainers (real Postgres + Redis) | Many | Every commit, &lt; 5 min |
+| **Contract** | Vitest against fake adapters + recorded fixtures | One per external | Every commit |
+| **E2E** | Playwright against a seeded stack | ~25 flows | Every PR, nightly full |
+| **Manual / exploratory** | Human | The rest | Per milestone, UAT |
+
+**Integration tests use a real database.** Not sqlite, not a mock. Half the behaviour in this
+platform is temporal lookups, append-only grants, unique constraints and transaction semantics —
+none of which a mock reproduces, and all of which are exactly where the expensive bugs live.
+
+---
+
+## 2. What to test at each level
+
+### Unit — pure logic, no I/O
+- State machine transition tables — **every** transition in the spec, and that nothing else is legal
+- Age clock arithmetic including hold/resume (resumes from where it stopped, not zero)
+- Completeness scoring against a required-field set
+- Confidence decay curves
+- Ranking score computation and rationale generation
+- Money arithmetic, proration, rounding on a placement fee
+- Temporal `asAt` resolution
+- Deemed-window calculation
+
+### Integration — a service against a real DB
+- Every service method, happy path and every documented failure
+- Transaction rollback leaves no partial state and **no outbox row**
+- Append-only tables reject UPDATE and DELETE (assert the grant, not the convention)
+- Unique constraints hold under concurrency (two invoices from one trigger)
+- Optimistic locking returns 409 on stale version
+- Row-level scoping filters correctly for each scope kind
+- Every event is emitted with the right payload, inside the transaction
+
+### Contract — one per external system
+- Fake adapter satisfies the port interface
+- Recorded real responses (sanitised) parse without error
+- Malformed, empty, and timeout responses degrade to the documented fallback
+- Retry and backoff behave
+- **Manual fallback engages** where the port defines one
+
+### E2E — user journeys, not screens
+
+---
+
+## 3. The E2E flows that must exist
+
+These are the ones where a regression costs money or credibility.
+
+| # | Flow | Covers |
+|---|---|---|
+| 1 | Sign in, role-scoped nav, sign out, session expiry mid-form | P01 |
+| 2 | Invite user → activate → assign role and sites → deactivate → still visible on old records | P01 |
+| 3 | Create client → locations → departments → contacts → sender identities | B01 |
+| 4 | Create contract → version it → rate resolves *as at* an old date, not today's | B02 |
+| 5 | Email arrives → requisition created → incomplete → chased → completed | P08, B03, B04 |
+| 6 | WhatsApp text arrives → same requisition schema as email | B03 |
+| 7 | Unknown sender → unmatched queue → mapped to client → reprocessed, nothing lost | B03 |
+| 8 | Unparseable payload → manual entry queue → typed in, requirement not lost | B03 |
+| 9 | Same requirement on two channels → suspected duplicate → human decides | B03 |
+| 10 | Requisition hold → age clock pauses → release → resumes from where it stopped | B04 |
+| 11 | Requisition close requires a reason from the configured list | B04 |
+| 12 | Candidate signs up by phone + OTP → uploads CV → corrects parsed fields | B07 |
+| 13 | Verification queue → document reviewed → credential green/amber/red → pendency tracked | B06 |
+| 14 | Duplicate candidates detected → merged → neither record deleted | B05 |
+| 15 | Confidence decays → cadence selects → WhatsApp sent → reply captured → confidence resets | B08 |
+| 16 | Same availability answer from app and from WhatsApp produces one identical schema | B08 |
+| 17 | Opt-out is respected on every subsequent send | B08 |
+| 18 | Ranked set generated with rationale and unmet criteria per candidate | B09 |
+| 19 | Recruiter override moves a candidate, with a reason, recorded | B09 |
+| 20 | Shortlist → client opens link with no login → accepts → recorded against that recipient | P10, B10 |
+| 21 | Interview → structured feedback → rejection with reason → **reason reaches ranking** | B10, B09 |
+| 22 | Offer created → sent → e-signed → mapped to contract | B10 |
+| 23 | **Joining → day 0/7/30/60/90 fire → day-90 answered → permanent invoice raised with evidence** | B11, B13 |
+| 24 | **Day-90 never answered → deemed window expires → invoice still raised, marked deemed** | B11, B13 |
+| 25 | Shift accepted → app check-in/out → timesheet built → client approves → shift invoice raised | B07, B12, B13 |
+| 26 | Timesheet never approved → deemed window → invoice raised | B12, B13 |
+| 27 | Day 30 and day 60 answers do **not** create a billing trigger | P10, B13 |
+| 28 | Client portal user cannot see another client's data on any endpoint | B16 |
+
+Flows 23–27 are the revenue chain. They run on every PR, not just nightly.
+
+---
+
+## 4. Test data
+
+```ts
+// packages/shared/testing/factories
+const client = await aClient().withLocations(3).build()
+const req    = await aRequisition().for(client).category('nurse').positions(4).build()
+const cand   = await aCandidate().nurse().baseB().verified().build()
+```
+
+| Rule | |
+|---|---|
+| Builders, not fixtures files | A test states only what it cares about; the builder fills the rest |
+| Deterministic seeds | Same input, same IDs, same output. No `Math.random()` in tests. |
+| Every test creates its own data | No shared mutable state between tests |
+| Integration tests run in a transaction rolled back at the end | Except those testing commit behaviour |
+| Time is injected, never `new Date()` | Decay, ageing, deeming and trial timing are all time-dependent |
+
+Time control is not optional here. A platform whose revenue depends on "90 days after joining" and
+"7 days after the timesheet was sent" cannot be tested without moving the clock.
+
+```ts
+await withClock('2026-11-15T06:00:00Z', async () => {
+  await scheduler.run('placements.retention-deem')
+  expect(await getInvoice(placementId)).toMatchObject({ status: 'raised', triggerKind: 'deemed' })
+})
+```
+
+---
+
+## 5. External systems in tests
+
+**Never call a real external in a test.** Half of them have no named supplier yet, and the ones that
+exist bill per call.
+
+| Level | Approach |
+|---|---|
+| Unit / integration | Fake adapter from `@apollo/adapters` |
+| Contract | Fake adapter + recorded real responses (sanitised, checked in) |
+| E2E | Fake adapter, with `pnpm test:e2e --record` available to refresh fixtures against a sandbox |
+| Manual | Provider sandbox, in `qa` only |
+
+Every fake must implement **failure** as well as success: timeout, 500, malformed body, rate limit,
+and the manual-fallback path. A fake that only succeeds tests nothing useful.
+
+---
+
+## 6. CI gates
+
+Every PR:
+
+| Gate | Fails on |
+|---|---|
+| Lint | Any error |
+| Typecheck | Any error, all packages |
+| **Boundaries** | Cross-package deep import, `internal/` import, module cycle |
+| Unit | Any failure |
+| Integration | Any failure |
+| Migration forward | Fails on empty DB, or on a restored copy of the previous env |
+| **Event completeness** | Projections cannot be rebuilt from `event_store` alone |
+| Build | Any package fails |
+| Bundle size | Over budget (`01-03 §11`) |
+| `axe` accessibility | Any violation on a covered flow |
+| `gitleaks` | Any committed secret |
+| E2E (revenue chain) | Flows 23–27 fail |
+
+Nightly, additionally: full E2E, dependency audit, container scan, load test against `qa`.
+
+**No coverage percentage gate.** It optimises for tests that execute lines rather than tests that
+assert behaviour. The gate is the acceptance-criteria checklist in the PR (§8).
+
+---
+
+## 7. Performance testing
+
+From phase 3, run against `qa` weekly:
+
+| Scenario | Target (`AS-14`, pending `OI-M3-14`) |
+|---|---|
+| Fulfilment board, 5000 open requisitions | p95 &lt; 2s |
+| Candidate search, 50k candidates | p95 &lt; 1s |
+| Inbound → visible in queue | &lt; 60s |
+| Cadence run across the whole Base B pool | Completes inside its window |
+| Ranking a requisition against 10k candidates | &lt; 30s |
+| Monthly MIS pack | &lt; 5 min |
+| Migration, 100k records | Documented throughput, resumable |
+
+Latency and load targets are **not stated by the client (`OI-M3-14`)**. These are working
+assumptions. Without agreed targets there is no performance acceptance test and no basis for
+infrastructure sizing — flag this at kick-off, not in month five.
+
+---
+
+## 8. Definition of done
+
+A component is done when **all** of these are true. This is the PR checklist, and it is not
+negotiable per-PR:
+
+- [ ] Every acceptance criterion in the spec has a test, named after it
+- [ ] Every state transition in the spec's table is tested, and illegal ones are rejected
+- [ ] Every documented event is emitted, with the right payload, in the transaction
+- [ ] Every mutating action writes an audit entry with actor and before/after
+- [ ] Every list endpoint is paginated, scoped and indexed
+- [ ] Every screen has loading, empty, error, no-permission and partial-failure states
+- [ ] RBAC tested by calling each mutating endpoint as the wrong role
+- [ ] Data scope tested for each scope kind
+- [ ] Every external call is behind a port, with a fake and a failure test
+- [ ] Migrations run forward on empty and on a restored copy
+- [ ] Open items touching this component are re-checked and the assumption is still valid
+- [ ] Runbook entry written for each new failure mode
+- [ ] Spec updated if implementation diverged — **the doc is the source of truth, so fix the doc**
+
+---
+
+## 9. UAT
+
+`M1-I8` makes UAT support a contract deliverable, not a by-product.
+
+| | |
+|---|---|
+| Environment | `uat`, refreshed from a sanitised `prod`-shaped dataset |
+| Entry criteria | Module's DoD complete, E2E green, user guide written (`M1-I7`) |
+| **Sign-off criteria agreed per module before UAT starts** | Not negotiated during it (`M1-I8`) |
+| Defect severity | Agreed definitions, agreed before the first defect is raised |
+| Blocker turnaround | Within the agreed window |
+| Retest | Every fixed defect is retested and the retest is evidenced |
+| Exit | All blockers and criticals closed, majors triaged and accepted |
+
+---
+
+## 10. Go-live quality gates
+
+`M1-I9` — the switch to system of record:
+
+- [ ] CPAL migration reconciles: extracted, mapped, loaded, exception and rejected counts reconcile
+      to the source total
+- [ ] A re-run of a completed batch produces **no duplicate records**
+- [ ] Parallel-run period completed and signed off
+- [ ] Rollback point exists up to the agreed cutover commit
+- [ ] Restore rehearsal passed against agreed RPO/RTO (`OI-HS-12`)
+- [ ] Hypercare coverage defined and staffed
+- [ ] Legacy CPAL retired **only after** reconciliation passes and the parallel run closes
+- [ ] Runbooks cover every failure mode in the integration register (`04-01`)
+

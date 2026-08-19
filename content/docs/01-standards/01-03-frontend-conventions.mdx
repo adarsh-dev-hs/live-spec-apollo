@@ -1,0 +1,262 @@
+---
+title: "01-03 · Frontend Conventions"
+description: "React 19 · Vite · TypeScript · TanStack Query · React Router · React Hook Form + Zod · Tailwind"
+---
+
+React 19 · Vite · TypeScript · TanStack Query · React Router · React Hook Form + Zod · Tailwind
+
+---
+
+## 1. Stack and why
+
+| Choice | Reason |
+|---|---|
+| **Vite** | Fast dev, simple config, three independent builds from one repo |
+| **TanStack Query** | Server state is the only meaningful state in this app. Caching, invalidation and background refetch come free. |
+| **React Router (data router)** | Nested layouts, route-level code splitting, loaders where useful. No SSR needed — every surface is behind auth or a token. |
+| **React Hook Form + Zod** | Same zod schemas as the backend contracts. One definition of a valid requisition. |
+| **Tailwind + `@apollo/ui`** | Tokens in Tailwind config, components in the design system. No ad-hoc CSS. |
+| **No Redux / Zustand / Jotai by default** | There is very little client state. Adding a store before there is a problem creates one. |
+
+---
+
+## 2. State: four kinds, four homes
+
+| Kind | Home | Example |
+|---|---|---|
+| **Server state** | TanStack Query | Requisition list, candidate record, ranked set |
+| **URL state** | Search params | Filters, sort, page, selected tab, open record id |
+| **Form state** | React Hook Form | Everything inside a form, until submit |
+| **Ephemeral UI state** | `useState` | Dropdown open, dialog visible |
+
+**Filters live in the URL, not in a store.** A recruiter must be able to send a colleague a link to
+exactly the board they are looking at. This also gives back/forward navigation for free and is what
+makes the "switching modules preserves filter state within a session" requirement (`M1-I1`) work
+without any bespoke machinery.
+
+---
+
+## 3. Data access
+
+One `api/` folder per feature. Nothing calls `fetch` directly.
+
+```ts
+// features/requisitions/api/keys.ts
+export const requisitionKeys = {
+  all:    ['requisitions'] as const,
+  list:   (f: ListFilter) => [...requisitionKeys.all, 'list', f] as const,
+  detail: (id: string)    => [...requisitionKeys.all, 'detail', id] as const,
+}
+```
+
+```ts
+// features/requisitions/api/queries.ts
+export function useRequisitions(filter: ListFilter) {
+  return useQuery({
+    queryKey: requisitionKeys.list(filter),
+    queryFn:  () => api.requisitions.list(filter),
+    placeholderData: keepPreviousData,     // no flash to empty when paging
+  })
+}
+```
+
+```ts
+// features/requisitions/api/mutations.ts
+export function useHoldRequisition() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.requisitions.hold,
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: requisitionKeys.detail(vars.id) })
+      qc.invalidateQueries({ queryKey: requisitionKeys.all })
+      toast.success('Requisition placed on hold')
+    },
+  })
+}
+```
+
+| Rule | |
+|---|---|
+| `api` is `@apollo/api-client`, generated from the OpenAPI spec | Types come from the backend contract. A breaking API change fails the frontend typecheck. |
+| Query keys are always built by a `keys` factory | Never inline arrays — invalidation gets missed |
+| Mutations invalidate; they do not hand-patch the cache | Optimistic updates only where a spec calls for them |
+| No cross-feature imports of queries | If two features need the same data, the query moves to `shared/api/` |
+
+---
+
+## 4. Feature folder
+
+```
+features/requisitions/
+├── api/          keys.ts · queries.ts · mutations.ts
+├── components/   RequisitionStatusBadge.tsx · HoldDialog.tsx · AgeCell.tsx
+├── pages/        RequisitionListPage.tsx · RequisitionDetailPage.tsx · FulfilmentBoardPage.tsx
+├── hooks/        useRequisitionFilters.ts
+└── routes.tsx
+```
+
+```tsx
+// features/requisitions/routes.tsx
+export const requisitionRoutes: RouteObject[] = [
+  { path: 'requisitions',       lazy: () => import('./pages/RequisitionListPage') },
+  { path: 'requisitions/:id',   lazy: () => import('./pages/RequisitionDetailPage') },
+  { path: 'fulfilment',         lazy: () => import('./pages/FulfilmentBoardPage') },
+]
+```
+
+**Every feature is lazy-loaded.** The Ops console has ~60 screens; nobody should download the payroll
+module to look at a requisition.
+
+---
+
+## 5. Screen states — all five, every time
+
+`@apollo/ui` provides all of them. A screen missing one is incomplete, not "polish later".
+
+| State | Component | When |
+|---|---|---|
+| Loading | `<PageSkeleton/>` / `<TableSkeleton/>` | First load |
+| Empty | `<EmptyState/>` | Query succeeded, zero rows — with a primary action where one exists |
+| Error | `<ErrorState onRetry/>` | Query failed — retry, and the request id for support |
+| **No permission** | `<PermissionDenied/>` | 403 — *not* an error screen, and not a blank page |
+| Partial failure | `<PartialResult/>` | Bulk import: "412 of 500 rows loaded, 88 failed" with the failures listed |
+
+The last two matter more here than usual. `M0-I3` requires that a user with no role "can sign in but
+reaches nothing, rather than seeing an error on every page". And several specs require row-level
+errors on bulk operations (`M0-I2` user import, `M1-I4`, `M12-I4` attendance upload) — a spreadsheet
+with bad rows must report each bad row **by name** and still load the good ones.
+
+---
+
+## 6. Permissions in the UI
+
+```tsx
+const { can } = usePermissions()
+
+{can('demand.requisition.hold') && <Button onClick={hold}>Place on hold</Button>}
+```
+
+```tsx
+<RequirePermission permission="bill.invoice.read">
+  <InvoiceListPage />
+</RequirePermission>
+```
+
+| Rule | |
+|---|---|
+| The UI **hides** what a user cannot do | Better than showing a button that 403s |
+| The UI is **never** the enforcement | Every endpoint checks server-side (`01-07`). The frontend check is UX. |
+| Navigation is filtered by permission | `M1-I1`: "a user sees only the navigation entries their role permits" |
+| A permission change takes effect on the next request | Not the next login. The client refetches its permission set on 403 and on window focus. |
+
+---
+
+## 7. Forms
+
+```tsx
+const form = useForm<HoldRequisitionBody>({
+  resolver: zodResolver(holdRequisitionBody),   // the SAME schema the API validates with
+  defaultValues: { reasonCode: '', note: '' },
+})
+```
+
+| Rule | |
+|---|---|
+| Schema imported from `@apollo/contracts` | Shared with the backend. One definition. |
+| Server-side field errors map back onto fields | The 422 body carries `details[].path` (`01-04`) |
+| Reason/category dropdowns load from the settings API | Never a hardcoded array in a component |
+| Destructive actions confirm, and say what will happen | "This will return 3 open positions to the fulfilment board" |
+| Unsaved changes warn on navigate away | `M1-I1`: session expiry must not lose unsaved form state |
+
+---
+
+## 8. Lists
+
+**Every list screen uses `<DataTable/>` from `@apollo/list`.** ~20 of the screens in this plan are
+lists; building filtering and paging separately in each is the same work twenty times.
+
+```tsx
+<DataTable
+  columns={requisitionColumns}
+  query={useRequisitions}
+  filters={requisitionFilters}
+  savedViewsKey="requisitions"
+  exportKey="requisitions"
+/>
+```
+
+Provided once, inherited everywhere: filtering, sorting, server pagination, column chooser, saved
+views, export, empty/loading/error states, row selection, URL sync.
+
+A bespoke `<table>` in a feature folder is a review rejection.
+
+---
+
+## 9. The three apps
+
+### `apps/ops` — Apollo console
+Full SPA. Login required. Code-split per feature. The console shell (`M1-I1`) is the layout: left
+nav filtered by permission, header with global search, user menu, session expiry handling.
+
+### `apps/links` — client link pages
+**Keep this bundle small and treat that as a hard requirement.** It is opened by a hospital
+administrator, on a phone, from a WhatsApp message, possibly on a bad connection, and the day-90
+answer is a billing trigger. If the page does not load, Apollo does not get paid.
+
+| Constraint | |
+|---|---|
+| No auth provider, no permission system, no nav shell | The token in the URL is the entire auth model |
+| Import only what it needs from `@apollo/ui` | Tree-shaken; no barrel imports |
+| Budget: **&lt; 150 KB gzipped** including React | Enforced in CI |
+| One question per page, large touch targets, works at 320px | |
+| Expired/used/invalid token each get a distinct, plain-language page | Not a generic error |
+
+### `apps/portal` — client portal (M10)
+Separate auth (client users, not Apollo users), client-scoped everything. Reuses `@apollo/ui` and
+`@apollo/list`. **Every query is scoped server-side** — one mistake leaks another hospital's data
+(`M10-I8`).
+
+---
+
+## 10. Accessibility
+
+The design system carries the baseline (`02-05`) so screens inherit it:
+
+- Every interactive element reachable and operable by keyboard
+- Visible focus indicators; focus trapped in dialogs and returned on close
+- Form inputs have labels; errors are announced, not only coloured
+- Colour is never the sole carrier of meaning — status badges have text and a shape
+- Contrast meets WCAG AA
+- Tables have proper headers and scope
+
+`axe` runs in Playwright on every E2E flow. Violations fail CI.
+
+---
+
+## 11. Performance budgets
+
+| Surface | Budget |
+|---|---|
+| `apps/links` initial bundle | &lt; 150 KB gz |
+| `apps/ops` initial bundle (shell + login) | &lt; 300 KB gz |
+| Any lazy feature chunk | &lt; 200 KB gz |
+| Time to interactive, Ops, mid-tier laptop | &lt; 3s |
+| Fulfilment board render, 500 rows | &lt; 1s (virtualised) |
+
+Checked in CI with `size-limit`. Exceeding a budget fails the build; raising a budget is a
+deliberate PR, not a silent bump.
+
+---
+
+## 12. Testing
+
+| Level | Tool | Covers |
+|---|---|---|
+| Component | Vitest + Testing Library | Logic-carrying components, all five screen states |
+| Integration | Vitest + MSW | A feature against a mocked API, including error and 403 paths |
+| E2E | Playwright | The flows in `01-08` against a seeded stack |
+| Visual | Playwright screenshots on `@apollo/ui` | Design system only, not every screen |
+
+Query by role and label, not by test id, except where there is genuinely no accessible name — which
+is usually a sign the component needs one anyway.
+

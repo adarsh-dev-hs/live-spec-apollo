@@ -1,0 +1,358 @@
+---
+title: "P12 · External Adapter Framework"
+description: "Every external system sits behind an interface owned by us. A port defines what we need; an adapter implements it against a specific supplier; a fake implements it for tests and…"
+---
+
+**Package** `@apollo/adapters` · **Schema** `platform` · **Plan** A12 (M1-I3, M1-I13)
+**Effort** ~12pd · **Risk** High (SPEC) · **Build in** Phase 0
+
+---
+
+## 1. Purpose
+
+Every external system sits behind an interface owned by us. A port defines what we need; an adapter
+implements it against a specific supplier; a fake implements it for tests and local development.
+
+This matters more on this project than on most, because **half the suppliers have not been named
+yet.** WhatsApp BSP, voice provider, speech-to-text, OCR, e-signature, verification aggregator,
+payroll engine, finance system — all unselected at the time of writing. The port lets us build, test,
+demo and estimate the module against a fake, and drop the adapter in when Apollo decides, **without
+reopening the module**.
+
+The plan also sets a longer-range requirement: the interface must accept **US, Germany and Ireland
+later without change to core domain logic**, even though only India is built.
+
+---
+
+## 2. Scope
+
+**In**
+- Port definition pattern and registry
+- Adapter registration, selection by configuration, and hot-swap without a code change
+- **Call logging** — every request, response, latency and outcome
+- Retry, timeout, circuit breaker, rate limiting per provider
+- **Manual fallback** — the path taken when a registry has no API at all
+- Fake adapters, with configurable failure modes
+- Registry/market configuration screen
+- Health and cost surfacing per provider
+
+**Out**
+- The adapters themselves → `04-*` and the module that owns them
+- Business logic on top of an adapter result → the calling module
+- Message sending → `02-07` (which uses this framework)
+- File virus scanning → `02-04` (which uses this framework)
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M1-I13` Registry interfaces (A12, Service, XL, 5pd) | §5.1, §7.1 |
+| `M1-I3` Registry settings (A12, Config, L, 6pd) | §5.2, §9 |
+| `M1-I14` India registry adapters (A12, Integration, XXL) | Implemented in `03-06` / `04-05`, using this |
+| `M1-I15` Verification supplier (A12, Integration, XL) | Implemented in `04-05`, using this |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** nothing. Phase 0, alongside P05 and P13.
+**Consumed by:** `02-04` files (virus scan), `02-07` messaging (four channels), `03-03` intake
+(transcription, HRMS), `03-06` credentials (registries, OCR, identity), `03-08` engagement (voice),
+`03-10` selection (e-signature), `03-13` billing (finance export), `03-19` payroll (engine).
+
+---
+
+## 5. Data model
+
+### 5.1 Port and adapter registration
+
+Ports are code, not data. Registration is data.
+
+```sql
+CREATE TABLE platform.adapter_config (
+  id             uuid PRIMARY KEY,
+  port_key       text NOT NULL,               -- 'identity_verification'|'certification_registry'|
+                                              -- 'qualification_registry'|'whatsapp'|'sms'|'email'|
+                                              -- 'push'|'speech_to_text'|'voice'|'ocr'|'esignature'|
+                                              -- 'virus_scan'|'payroll_engine'|'finance_export'
+  adapter_key    text NOT NULL,               -- 'idfy'|'authbridge'|'manual'|'fake'|...
+  market         text,                        -- 'IN'|'US'|'DE'|'IE' — NULL = market-agnostic
+  scope_key      text,                        -- e.g. council code, for registry adapters
+  is_active      boolean NOT NULL DEFAULT true,
+  is_fallback    boolean NOT NULL DEFAULT false,
+  priority       integer NOT NULL DEFAULT 100,
+  endpoint       text,
+  secret_ref     text,                        -- Secrets Manager ARN. NEVER the secret itself.
+  settings       jsonb NOT NULL DEFAULT '{}',
+  rate_limit     jsonb,                       -- { perSecond, perMinute, burst }
+  timeout_ms     integer NOT NULL DEFAULT 15000,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_by     uuid NOT NULL
+);
+CREATE INDEX idx_adapter_config__lookup
+  ON platform.adapter_config (port_key, market, scope_key, priority) WHERE is_active;
+```
+
+`secret_ref` holds an ARN. **No credential is ever stored in Postgres** — the settings screen shows
+which secret is referenced, never its value.
+
+### 5.2 Call log
+
+```sql
+CREATE TABLE platform.adapter_call (
+  id             uuid PRIMARY KEY,
+  port_key       text NOT NULL,
+  adapter_key    text NOT NULL,
+  operation      text NOT NULL,
+  request_payload  jsonb,                     -- REDACTED per the port's redaction rules
+  response_payload jsonb,
+  status         adapter_call_status_enum NOT NULL,
+  http_status    integer,
+  error_code     text,
+  error_message  text,
+  latency_ms     integer,
+  attempt        integer NOT NULL DEFAULT 1,
+  cost_amount    numeric(10,4),
+  cost_currency  text,
+  context_type   text,                        -- 'candidate'|'requisition'|'placement'|...
+  context_id     uuid,
+  requested_at   timestamptz NOT NULL DEFAULT now(),
+  responded_at   timestamptz
+) PARTITION BY RANGE (requested_at);
+CREATE INDEX idx_adapter_call__port_time ON platform.adapter_call (port_key, requested_at DESC);
+CREATE INDEX idx_adapter_call__context   ON platform.adapter_call (context_type, context_id);
+CREATE INDEX idx_adapter_call__failures  ON platform.adapter_call (port_key, requested_at DESC)
+  WHERE status IN ('failed','timeout');
+REVOKE UPDATE, DELETE ON platform.adapter_call FROM apollo_app;
+```
+
+**Append-only, and it matters.** When a supplier misbehaves at 2am, or a client disputes what a
+registry returned about a candidate's licence, this table is the evidence. Monthly partitions,
+2-year retention.
+
+Request and response payloads are redacted per port — an identity verification request contains an
+Aadhaar number, which must not be logged (`01-02 §12`).
+
+---
+
+## 6. State machine
+
+**AdapterCall**
+
+| From | To | Trigger |
+|---|---|---|
+| — | `requested` | Call initiated |
+| `requested` | `responded` | Provider answered — outcome `green` \| `amber` \| `red` |
+| `requested` | `failed` | Error response |
+| `requested` | `timeout` | Timeout elapsed |
+| `failed` \| `timeout` | `retrying` | Retry policy permits |
+| `retrying` | `responded` \| `failed` | |
+| `failed` | `manual_fallback` | **The port defines a manual path and it was taken** |
+| any | `circuit_open` | Breaker open — call not attempted |
+
+*"AdapterCall: requested → responded, giving green, amber or red. Or failed → retried. Or falls back
+to a person checking it by hand"* (`00-03 §4`).
+
+**Green / amber / red is the verification outcome vocabulary**, used across credential checks
+(`03-06`). It is part of the port contract, not each adapter's invention.
+
+---
+
+## 7. API surface
+
+### 7.1 Defining a port
+
+```ts
+export const IdentityVerificationPort = definePort({
+  key: 'identity_verification',
+  operations: {
+    verifyIdentity: {
+      input:  z.object({ documentType, documentNumber, name, dateOfBirth }),
+      output: z.object({
+        outcome: z.enum(['green','amber','red']),
+        matchedName: z.string().optional(),
+        reference: z.string(),
+        rawReference: z.string().optional(),
+      }),
+      redact: ['documentNumber'],           // never written to adapter_call
+      timeout: 15_000,
+      retryable: true,
+    },
+  },
+  /** REQUIRED. Several Indian registries have no API at all. */
+  manualFallback: {
+    supported: true,
+    createTask: (input) => ({ kind: 'manual_verification', payload: input }),
+  },
+})
+```
+
+Every port **must** declare whether a manual fallback exists and what it creates. This is not
+optional decoration — the plan states that several registries *"have no API and resolve to document
+plus manual verification behind the same interface"* (`M1-I3`, `M1-I14`).
+
+### 7.2 Implementing an adapter
+
+```ts
+export const IdfyAdapter = defineAdapter(IdentityVerificationPort, {
+  key: 'idfy',
+  markets: ['IN'],
+  async verifyIdentity(input, ctx) {
+    const res = await ctx.http.post('/v3/tasks/sync/verify_with_source/ind_pan', {...})
+    return { outcome: mapOutcome(res.data.status), matchedName: res.data.name, reference: res.data.requestId }
+  },
+})
+```
+
+`ctx.http` is provided by the framework, carrying timeout, retry, circuit breaker, rate limit, call
+logging and redaction. An adapter author writes the mapping and nothing else.
+
+### 7.3 Calling
+
+```ts
+const result = await adapters.call('identity_verification', 'verifyIdentity', input, {
+  market: 'IN',
+  context: { type: 'candidate', id: candidateId },
+})
+
+if (result.kind === 'manual_fallback') {
+  await VerificationService.queueForManualCheck(candidateId, result.task)
+}
+```
+
+Selection is by `port_key` + `market` + `scope_key`, ordered by priority, skipping inactive and
+circuit-open adapters, falling through to `is_fallback` and finally to the manual path.
+
+### 7.4 Fakes
+
+```ts
+export const FakeIdentityVerification = defineFake(IdentityVerificationPort, {
+  verifyIdentity: async (input) => {
+    if (input.documentNumber.startsWith('FAIL')) throw new AdapterError('provider_error', 500)
+    if (input.documentNumber.startsWith('SLOW')) await delay(30_000)      // exercises timeout
+    if (input.documentNumber.startsWith('AMBER')) return { outcome: 'amber', ... }
+    return { outcome: 'green', ... }
+  },
+})
+```
+
+**Every fake must implement failure as well as success** — timeout, 500, malformed body, rate limit,
+and the manual-fallback path. A fake that only succeeds tests nothing useful (`01-08 §5`).
+
+### 7.5 HTTP — `/api/v1/adapters` (permission `platform.adapter.manage`)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/ports` | Every port, its operations, and whether a manual fallback exists |
+| GET | `/configs` · POST · PATCH | Registry configuration (`M1-I3`) |
+| POST | `/configs/:id/test` | Fires a health-check call, returns the outcome |
+| POST | `/configs/:id/activate` · `/deactivate` | Deactivating **routes to the manual fallback, not to failure** |
+| GET | `/calls` | Call log. Filter by port, adapter, status, context, date. |
+| GET | `/health` | Per-adapter: success rate, p95 latency, circuit state |
+| GET | `/costs?from=&to=` | Per-provider consumption and cost |
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | Consumed by |
+|---|---|
+| `platform.adapter.call_failed` | Ops alert |
+| `platform.adapter.circuit_opened` / `.closed` | Ops alert; owning module may degrade |
+| `platform.adapter.manual_fallback` | The owning module — creates a human task |
+
+**Jobs**
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `adapters.health-check` | Every 5 min | Lightweight probe per active adapter |
+| `adapters.prune-calls` | Monthly | Partition maintenance, 2-year retention |
+
+**Circuit breaker:** opens after 5 consecutive failures or a 50% failure rate over 20 calls; half-open
+after 60s. State in Redis, shared across tasks — six ECS tasks must not each independently hammer a
+failing provider.
+
+---
+
+## 9. Frontend — `/settings/integrations`
+
+### Registry configuration (`M1-I3`)
+
+`<DataTable/>` of adapter configs: port, adapter, market, scope, active, priority, fallback, health.
+Actions: activate/deactivate, edit endpoint and settings, **test connection**, view recent calls.
+
+Adding a market registers adapters **as configuration rather than a code change** (`M1-I3`) — for any
+port whose adapter already exists. A genuinely new supplier still needs an adapter implementation;
+what is configuration is *which* adapter serves *which* market and scope.
+
+A registry with no API is configured with `adapter_key = 'manual'`, which routes every call straight
+to the manual fallback behind the same interface.
+
+**Only the platform administrator can change adapter configuration** (`M1-I3`).
+
+### Call log
+
+Every call: port, adapter, operation, status, latency, cost, context. Row shows the redacted request
+and response. Linked from the verification detail screen (`03-06`), so a verification team member can
+see exactly what a registry returned.
+
+### Health dashboard
+
+Per adapter: success rate, p95 latency, circuit state, last failure, calls and cost this month.
+This is the screen that answers "is it us or is it them".
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Three interfaces — identity, certification, qualification — that any country's registries fit behind | `M1-I13` |
+| 2 | The interface accepts US, Germany and Ireland later **without change to core domain logic** | A12 |
+| 3 | Adding a new market registers adapters as configuration rather than a code change | `M1-I3` |
+| 4 | **A registry with no API resolves to document plus manual verification behind the same interface** | `M1-I3`, `M1-I14` |
+| 5 | Disabling an adapter routes checks to the manual fallback rather than failing them | `M1-I3` |
+| 6 | Only the platform administrator can change adapter configuration | `M1-I3` |
+| 7 | Every call is logged with request, response, latency and outcome — append-only | §5.2 |
+| 8 | Sensitive fields are redacted from the call log per the port's rules | `01-02 §12` |
+| 9 | No credential is stored in the database — only a Secrets Manager reference | §5.1 |
+| 10 | A failing provider opens a circuit shared across all tasks, not per-task | §8 |
+| 11 | Every port has a fake implementing success **and** timeout, error, malformed and fallback | `01-08 §5` |
+| 12 | The whole platform runs locally with zero real external credentials | §12 |
+| 13 | Adapter cost is recorded and reportable per provider per month | §9 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-A-01`** | **A12 market coverage** — which interface contracts must be *proven* against US, Germany and Ireland in Release 1? | **Determines whether the adapter layer is a real abstraction or an India implementation with an interface drawn over it.** | **`AS-19`** — define the three ports against *capabilities* (identity, certification, qualification) rather than Indian data shapes, and prove them by implementing a second market as a **fake** with a deliberately different response shape. That is cheap and catches India-specific leakage. Confirm which real markets, if any, must be proven. |
+| `OI-HS-06` | Verification aggregator — IDfy or AuthBridge — and per-check pricing | The two differ in registry coverage and response schema. **Selecting late means rework in the adapter layer.** | Aggregator-first is the right shape. Build the port against the *union* of what both need; the adapter absorbs the difference. Selection is then a config row. |
+| `OI-HS-07` | OCR, e-signature and WhatsApp suppliers | Three integrations cannot be sized against unknown APIs | Ports defined, fakes built, modules complete and demoable. Each real adapter is a bounded, separately-estimated piece of work once the supplier is named. |
+| `OI-A-09` | Voice provider | Cannot be sized against an unknown API; language coverage untestable | Same approach. Note the coupling to `OI-M3-05`: if the same provider does speech-to-text, it is one adapter, not two. |
+| `OI-A-14` | Finance system | Not named | Port with two adapters ready: HTTP push and file export. `03-13` builds the invoice object addressable by both regardless (`M9-I16`). |
+
+---
+
+## 12. Notes for the implementer
+
+**Build this in phase 0.** Eight of the fourteen external systems have no named supplier; without the
+port pattern in place from the beginning, each module will grow its own HTTP client and its own
+retry logic, and swapping a supplier in month five will mean touching six modules.
+
+**The whole platform must run locally with no real credentials.** That is a hard requirement, not a
+nicety — it is what lets phases 3–7 proceed while procurement is still deciding.
+
+**Design ports around what we need, not around what a supplier offers.** A port shaped like IDfy's
+API is not an abstraction, it is a rename. The test is `OI-A-01`: could a German registry with a
+completely different model implement this interface? If not, the port is leaking.
+
+**Manual fallback is a first-class path, not an error handler.** Several Indian councils have no API
+at all and never will. Their "adapter" is a queue entry for the verification team, behind the same
+interface, returning the same green/amber/red vocabulary once a person resolves it.
+

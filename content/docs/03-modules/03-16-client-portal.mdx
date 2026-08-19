@@ -1,0 +1,273 @@
+---
+title: "B16 · Client Portal"
+description: "A logged-in website for clients: raise vacancies, track them, review shortlists, approve timesheets, download invoices. The first client login the platform has ever had."
+---
+
+**Package** `@apollo/portal` + `apps/portal` · **Schema** `platform` · **Plan** D12 / M10 (Release 2)
+**Effort** ~44pd · **Risk** High (COMP) · **Build in** Phase 7
+
+> **No client specification received.** D12 is named as deferred throughout Part A. Everything in
+> this spec is Hiresense analysis built from the capability name, and **every item carries Low
+> confidence.**
+
+---
+
+## 1. Purpose
+
+A logged-in website for clients: raise vacancies, track them, review shortlists, approve timesheets,
+download invoices. **The first client login the platform has ever had.**
+
+It also becomes the **sixth A1 intake channel** — the one `03-03` enumerates and leaves switched off.
+
+The tokenised links from M7 do not go away. Clients who never sign in keep using them, and the portal
+is the logged-in version of the same decisions with a richer view.
+
+---
+
+## 2. Scope
+
+**In** — client user accounts, invitation and sign-in · client-side user management within limits
+Apollo sets · raise a requisition · track own requisitions · review shortlists · approve timesheets ·
+download invoices and signed documents · **portal data scoping**
+
+**Out** — clients editing their own rate card or contract terms — *"those stay with Apollo"* ·
+clients seeing candidate personal data beyond what the shortlist already shows · Apollo staff identity
+→ `02-01` · the link mechanism → `02-10`, which continues in parallel
+
+---
+
+## 3. Plan traceability
+
+| Item | Covers |
+|---|---|
+| `M10-I1` Client sign in (D12, L, 6pd) | §5.1, §9.1 |
+| `M10-I2` Portal users (D12, M, 4pd) | §9.2 |
+| `M10-I3` Portal: raise requisition (D12, L, 6pd) | §9.3 |
+| `M10-I4` Portal: my requisitions (D12, M, 3.5pd) | §9.4 |
+| `M10-I5` Portal: shortlists (D12, L, 6pd) | §9.5 |
+| `M10-I6` Portal: timesheets (D12, M, 3.5pd) | §9.6 |
+| `M10-I7` Portal: invoices (D12, M, 3.5pd) | §9.7 |
+| `M10-I8` Portal data scoping (D12, Service, XL, 7.5pd) | §7.2 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `02-01` iam (**the permission model extended to outside users**), `03-01` clients,
+`03-04` requisitions, `03-09` matching, `03-10` selection, `03-12` attendance, `03-13` billing
+**Consumed by:** nothing — it is a leaf.
+
+**What it changes:** *"M3 gains a sixth intake channel. The one-off links from M7 stay in place for
+clients who never sign in."*
+
+---
+
+## 5. Data model
+
+```sql
+CREATE TABLE platform.client_user (
+  id             uuid PRIMARY KEY,
+  client_id      uuid NOT NULL,
+  client_contact_id uuid,                      -- links to the existing contact record
+  email          citext NOT NULL UNIQUE,
+  full_name      text NOT NULL,
+  password_hash  text,
+  status         client_user_status_enum NOT NULL DEFAULT 'invited',
+  is_client_admin boolean NOT NULL DEFAULT false,
+  last_login_at  timestamptz,
+  failed_attempts integer NOT NULL DEFAULT 0,
+  locked_until   timestamptz,
+  invited_by     uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE platform.client_user_permission (
+  client_user_id uuid NOT NULL REFERENCES platform.client_user(id),
+  permission_key text NOT NULL,               -- 'portal.requisition.create', 'portal.timesheet.approve', ...
+  PRIMARY KEY (client_user_id, permission_key)
+);
+
+CREATE TABLE platform.client_user_location (
+  client_user_id uuid NOT NULL REFERENCES platform.client_user(id),
+  location_id    uuid NOT NULL,               -- SCOPE: which sites this person may see
+  PRIMARY KEY (client_user_id, location_id)
+);
+
+CREATE TABLE platform.portal_session_log (
+  id             uuid PRIMARY KEY,
+  client_user_id uuid NOT NULL,
+  action         text NOT NULL,               -- 'login'|'logout'|'failed_login'|'access_denied'
+  ip_address     inet,
+  user_agent     text,
+  occurred_at    timestamptz NOT NULL DEFAULT now()
+);
+```
+
+**A completely separate table from `app_user`.** Separate password storage, separate session cookie
+name, separate session store, separate middleware, separate route namespace (`01-07 §1`). There is no
+code path by which a client user can reach an Ops endpoint.
+
+---
+
+## 6. State machines
+
+**ClientUser:** `invited → registered → active → suspended`
+
+| Transition | Rules |
+|---|---|
+| `invited → registered` | Sets a password from a single-use invite link, 7-day expiry |
+| `active → suspended` | By Apollo BD or the client admin. **All sessions revoked immediately.** |
+| any → suspended | Automatic when the client is suspended or closed (`03-01`) |
+
+---
+
+## 7. API surface
+
+### 7.1 HTTP — `/api/v1/portal` (all behind `requireClientUser()`)
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/auth/login` · `/logout` · `/accept-invite` · `/forgot-password` | Separate cookie and store |
+| GET | `/me` | Client user, permissions, locations |
+| GET/POST | `/users` · PATCH `/users/:id` | Client-admin only, **within limits Apollo sets** |
+| GET/POST | `/requisitions` · GET `/:id` | The sixth intake channel |
+| GET | `/shortlists` · `/:id` · POST `/:id/respond` | Logged-in version of the M7 link |
+| GET | `/timesheets` · `/:id` · POST `/:id/approve` · `/query` | Logged-in version of the M8 link |
+| GET | `/invoices` · `/:id` · `/:id/download` | |
+| GET | `/documents` | Signed offers and contracts for this client |
+
+### 7.2 Portal data scoping (`M10-I8`)
+
+> *"Every portal query must be limited to the signed-in user's client and sites. **One mistake here
+> leaks another hospital's data.**"*
+
+This is a **security boundary, not a filter**, and it is built accordingly (`01-07 §7`):
+
+| Control | |
+|---|---|
+| Scope applied in the repository | Never in a controller |
+| Scope **re-asserted on returned rows** before serialisation | Belt and braces — a defence-in-depth check that every returned row belongs to the caller's client |
+| Cross-client access → **403, logged as a security event, alarmed** | Not a 404 here; we want to see attempts |
+| A dedicated test suite whose entire purpose is attempting cross-client access on **every** portal endpoint | `01-08` |
+| Portal endpoints live under `/api/v1/portal/*` only | A shared endpoint is a shared risk |
+
+**Do not reuse Ops endpoints with a scope parameter.** Separate routes, separate controllers, separate
+serialisers that expose only portal-appropriate fields. The duplication is the point.
+
+---
+
+## 8. Events and jobs
+
+**Emits:** `portal.user.invited` / `.activated` / `.suspended` · `portal.requisition.created`
+(→ `03-04`, tagged `source_channel = 'portal'`) · `portal.shortlist.responded` (→ `03-10`) ·
+`portal.timesheet.approved` (→ `03-12`) · **`portal.access_denied`** (security alarm)
+
+**Subscribes:** `clients.client.suspended` / `.closed` → suspend all client users
+
+**Jobs:** `portal.expire-invites` (daily) · `portal.session-cleanup` (hourly)
+
+---
+
+## 9. Frontend — `apps/portal`
+
+Separate Vite build. Reuses `@apollo/ui` and `@apollo/list`; shares no bundle and no auth code with
+`apps/ops`.
+
+### 9.1 Client sign in (`M10-I1`)
+
+Invite → set password → sign in. Standard lockout and reset. Every login and failed login logged.
+
+### 9.2 Portal users (`M10-I2`)
+
+*"Someone at the client adds and removes their own colleagues, **within limits Apollo sets**."*
+
+A client admin invites colleagues, assigns permissions from the set Apollo has enabled for that
+client, and restricts them to specific sites. They cannot grant themselves capabilities Apollo has not
+enabled — the available set is a client-level configuration held by Apollo BD.
+
+### 9.3 Raise requisition (`M10-I3`)
+
+*"The sixth intake channel. M3 already lists it and leaves it switched off; **this switches it on**."*
+
+A structured form producing a requisition directly — no parsing, like the HRMS feed. Category
+attributes rendered from `03-05`'s definitions. Completeness enforced at submit, so a portal
+requisition never enters the chase loop.
+
+Enabling this flips `channel_config.is_available` for `portal` in `03-03`.
+
+### 9.4 My requisitions (`M10-I4`)
+
+*"Clients see how their own vacancies are going without phoning a recruiter."*
+Status, positions filled, age, current stage. **No candidate detail beyond what a shortlist shows.**
+
+### 9.5 Shortlists (`M10-I5`)
+
+*"The logged-in version of the shortlist link from M7. Same decisions, richer view."*
+Accept, reject or request an interview per candidate — the same actions as the link page, with
+history and the ability to revisit past shortlists.
+
+### 9.6 Timesheets (`M10-I6`)
+
+The logged-in version of the timesheet approval link. Same approve/query actions, plus history and
+the deemed-approval countdown.
+
+### 9.7 Invoices (`M10-I7`)
+
+*"Clients download their own invoices and signed documents instead of asking finance."*
+List, PDF download, and the evidence summary for a placement fee — which is likely to reduce billing
+queries rather than create them.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Client users are a **completely separate identity system** from Apollo staff | `01-07 §1` |
+| 2 | **Every portal query is limited to the signed-in user's client and sites** | `M10-I8` |
+| 3 | Scope is applied in the repository **and re-asserted on returned rows** | `M10-I8` |
+| 4 | A cross-client access attempt returns 403, is logged as a security event, and alarms | `M10-I8` |
+| 5 | A dedicated test suite attempts cross-client access on every portal endpoint and fails the build if any succeeds | `01-08` |
+| 6 | A portal requisition creates a requisition tagged `source_channel = 'portal'` | `M10-I3` |
+| 7 | Enabling the portal switches on the sixth channel in `03-03` | `M10-I3`, `OI-A-06` |
+| 8 | A client admin can manage colleagues **only within limits Apollo sets** | `M10-I2` |
+| 9 | Clients cannot edit rate cards or contract terms | Scope boundary |
+| 10 | Clients see no candidate personal data beyond what the shortlist shows | Scope boundary |
+| 11 | **The M7 tokenised links continue to work** for clients who never sign in | Plan note |
+| 12 | Suspending a client suspends every one of its portal users immediately | §6 |
+
+---
+
+## 11. Open questions
+
+Every item in M10 carries **Low confidence** — there is no client specification. These are the
+decisions that need Apollo input before build.
+
+| Question | Impact | Working assumption |
+|---|---|---|
+| **Does the portal replace the links, or run alongside them?** | Affects whether M7/M8 link issuance becomes conditional | **`AS-45`** — **alongside**. The plan says the links *"stay in place for clients who never sign in"*. Links remain the default; the portal is an alternative. A client with active portal users still receives links, because the person who signs in is often not the person who approves. |
+| **Which capabilities may a client admin grant?** | Determines the permission set | **`AS-46`** — Apollo enables a per-client capability set; the client admin distributes from within it. Conservative default: view requisitions and shortlists only, with raise/approve/download granted explicitly. |
+| **Can a portal user approve a timesheet a link already deemed approved?** | Two paths to one decision | **`AS-47`** — no. Once approved or deemed, it is terminal. The portal shows the outcome and how it was reached. |
+| **Multi-client users** — one person at a hospital group covering several client entities | | **`AS-48`** — not supported in R2. One client user belongs to one client. Supporting it later means a join table, not a redesign. |
+| **SSO for large clients** | Enterprise hospitals may ask | Not built. The auth layer is structured so OIDC could sit behind the same session mechanism. |
+| `OI-A-04` | Confirm R1 provisioning is Apollo-only | Closes the scope question that this module reopens | Confirmed by construction — client identity begins here, not in `02-01` |
+
+---
+
+## 12. Notes for the implementer
+
+**Data scoping is the whole risk in this module.** `M10-I8` is 7.5pd of the 44 and it is where the
+only genuinely dangerous defect lives. One hospital seeing another's vacancies, candidates or invoices
+is a commercial and legal incident, not a bug.
+
+Build it in this order: the scoping mechanism and its adversarial test suite first, then one
+read-only screen, then everything else. Do not build seven screens and then add scoping.
+
+**Do not share endpoints with the Ops API.** It looks like duplication and it is the correct
+duplication. A single `GET /requisitions` serving both Ops and portal callers with a scope parameter
+is one forgotten parameter away from a leak, and it will eventually leak a field the portal should
+never have shown.
+
+**Keep the links working.** Clients who never sign in are not an edge case — they are most clients, at
+least at first. The portal is additive.
+

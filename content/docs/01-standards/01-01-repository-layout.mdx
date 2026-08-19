@@ -1,0 +1,295 @@
+---
+title: "01-01 · Repository Layout"
+description: "One repository. Backend, frontends and infrastructure together, because the API contract is shared and a split would mean versioning it across repos for no benefit at this team…"
+---
+
+---
+
+## 1. Monorepo, pnpm workspaces + Turborepo
+
+One repository. Backend, frontends and infrastructure together, because the API contract is shared
+and a split would mean versioning it across repos for no benefit at this team size.
+
+```
+apollo-gwd/
+├── apps/
+│   ├── api/                     Express HTTP entrypoint
+│   ├── worker/                  BullMQ consumers + schedulers entrypoint
+│   ├── ops/                     React + Vite — Apollo Ops console
+│   ├── links/                   React + Vite — tokenised client pages (tiny bundle)
+│   ├── portal/                  React + Vite — client portal (M10)
+│   └── mobile/                  React Native — candidate app (M4)
+│
+├── packages/
+│   ├── platform/                shared components (02-platform/*)
+│   │   ├── iam/
+│   │   ├── audit/
+│   │   ├── config/
+│   │   ├── files/
+│   │   ├── ui/                  design system (frontend)
+│   │   ├── list/                list engine (frontend + backend query helper)
+│   │   ├── messaging/
+│   │   ├── inbound/
+│   │   ├── events/
+│   │   ├── links/
+│   │   ├── approvals/
+│   │   ├── adapters/
+│   │   └── jobs/
+│   │
+│   ├── modules/                 business modules (03-modules/*)
+│   │   ├── clients/
+│   │   ├── contracts/
+│   │   ├── intake/
+│   │   ├── requisitions/
+│   │   ├── candidates/
+│   │   ├── credentials/
+│   │   ├── candidate-app/
+│   │   ├── engagement/
+│   │   ├── matching/
+│   │   ├── selection/
+│   │   ├── placements/
+│   │   ├── attendance/
+│   │   ├── billing/
+│   │   ├── analytics/
+│   │   ├── migration/
+│   │   ├── portal/
+│   │   ├── onboarding/
+│   │   ├── workforce/
+│   │   ├── payroll/
+│   │   ├── demand-ops/
+│   │   └── collections/
+│   │
+│   └── shared/                  no business logic, no module may be imported here
+│       ├── db/                  Drizzle client, migration runner, tx helper
+│       ├── http/                Express factory, middleware, error mapper
+│       ├── core/                Result, AppError, ids, dates, money, pagination
+│       ├── contracts/           zod schemas shared API ⇄ frontends
+│       ├── api-client/          generated typed client (from OpenAPI)
+│       ├── testing/             fixtures, factories, test containers
+│       └── config-env/          env parsing + validation (zod)
+│
+├── infra/
+│   ├── terraform/               modules + one folder per environment
+│   └── docker/                  Dockerfile.api, Dockerfile.worker, compose
+│
+├── docs/                        this documentation
+├── .github/workflows/
+├── package.json
+├── pnpm-workspace.yaml
+├── turbo.json
+└── tsconfig.base.json
+```
+
+---
+
+## 2. Backend module anatomy
+
+**Every module has the same nine folders.** Not "roughly the same" — identical, so any engineer can
+open any module and know where things are.
+
+```
+packages/modules/requisitions/
+├── src/
+│   ├── index.ts                 THE ONLY PUBLIC SURFACE (see §3)
+│   ├── routes.ts                Express router — paths and middleware only
+│   ├── permissions.ts           permissions this module defines
+│   │
+│   ├── controllers/             HTTP in / HTTP out. No business logic.
+│   │   └── requisition.controller.ts
+│   ├── services/                business logic + transaction boundary
+│   │   ├── requisition.service.ts
+│   │   └── fulfilment.service.ts
+│   ├── repositories/            the ONLY layer that touches the database
+│   │   └── requisition.repository.ts
+│   ├── schema/                  Drizzle table definitions (this module's tables only)
+│   │   └── requisition.schema.ts
+│   ├── contracts/               zod request/response schemas + inferred types
+│   │   └── requisition.contract.ts
+│   ├── events/                  emitted event names + payload schemas
+│   │   └── index.ts
+│   ├── subscribers/             reactions to OTHER modules' events
+│   │   └── on-placement-created.ts
+│   ├── jobs/                    queue consumers and schedulers
+│   │   └── age-requisitions.job.ts
+│   └── internal/                helpers. OFF-LIMITS to every other package.
+│
+├── migrations/                  SQL migrations for this module's tables only
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── package.json
+└── README.md                    → links to docs/03-modules/03-04-requisitions.md
+```
+
+Platform packages use the same layout, minus folders they do not need.
+
+---
+
+## 3. The public surface
+
+`src/index.ts` is the **only** file another package may import from. Everything else is private.
+
+```ts
+// packages/modules/requisitions/src/index.ts
+export { router } from './routes'
+export { RequisitionService } from './services/requisition.service'   // the interface others call
+export { events } from './events'
+export { subscribers } from './subscribers'
+export { jobs } from './jobs'
+export { permissions } from './permissions'
+export type { Requisition, RequisitionStatus } from './contracts/requisition.contract'
+```
+
+Enforced in `package.json`:
+
+```json
+{
+  "name": "@apollo/requisitions",
+  "exports": { ".": "./src/index.ts" }
+}
+```
+
+and by lint:
+
+```js
+// eslint.config.js
+'no-restricted-imports': ['error', {
+  patterns: [
+    { group: ['@apollo/*/src/*'],  message: 'Import from the package root only.' },
+    { group: ['**/internal/**'],   message: 'internal/ is private to its package.' },
+  ],
+}]
+```
+
+**Both rules fail CI.** They are the entire basis of the decoupling claim in `00-02`.
+
+---
+
+## 4. Dependency direction
+
+```
+apps/api ─────┐
+apps/worker ──┼──▶ packages/modules/* ──▶ packages/platform/* ──▶ packages/shared/*
+              │             │                       │
+              └─────────────┴───────────────────────┘
+```
+
+| Rule | |
+|---|---|
+| `shared` imports nothing from `platform` or `modules` | ✅ enforced |
+| `platform` imports `shared` only (and other `platform` packages, acyclically) | ✅ enforced |
+| `modules` import `shared`, `platform`, and other `modules` **via their package root** | ✅ enforced |
+| **No cycles between modules** | ✅ enforced by `eslint-plugin-import/no-cycle` + `madge` in CI |
+| `apps/*` import modules to compose the application; contain no business logic | ✅ by review |
+
+If module A needs to react to module B, and B must not know about A: A subscribes to B's event.
+That is the only escape hatch, and it is the correct one.
+
+---
+
+## 5. Frontend app layout
+
+```
+apps/ops/src/
+├── main.tsx
+├── app/
+│   ├── router.tsx               route tree, lazy-loaded per feature
+│   ├── providers.tsx            QueryClient, auth, theme, error boundary, toasts
+│   └── layout/                  console shell: nav, header, user menu (M1-I1)
+│
+├── features/                    ONE FOLDER PER BACKEND MODULE
+│   └── requisitions/
+│       ├── api/                 queries.ts, mutations.ts, keys.ts
+│       ├── components/          feature-specific components
+│       ├── pages/               route-level components
+│       ├── hooks/
+│       └── routes.tsx
+│
+└── shared/
+    ├── components/              app-level, not design-system-level
+    ├── hooks/
+    └── lib/
+```
+
+**A feature folder never imports from another feature folder.** If two features need the same thing,
+it moves to `shared/` or to `@apollo/ui`. This is the frontend mirror of the module rule and it is
+enforced the same way.
+
+---
+
+## 6. Naming
+
+| Thing | Convention | Example |
+|---|---|---|
+| Package | `@apollo/<kebab-case>` | `@apollo/candidate-app` |
+| Backend file | `<subject>.<layer>.ts` | `requisition.service.ts` |
+| Drizzle schema file | `<entity>.schema.ts` | `requisition.schema.ts` |
+| Migration | `<timestamp>_<verb>_<subject>.sql` | `20260901120000_create_requisition.sql` |
+| React component file | `PascalCase.tsx` | `FulfilmentBoard.tsx` |
+| Hook file | `use<Thing>.ts` | `useRequisition.ts` |
+| Test file | `<subject>.test.ts` | `requisition.service.test.ts` |
+| E2E spec | `<flow>.spec.ts` | `raise-requisition.spec.ts` |
+
+---
+
+## 7. Local development
+
+```bash
+pnpm install
+pnpm db:up          # docker compose: postgres 16, redis 7, localstack (s3, ses), mailpit
+pnpm db:migrate
+pnpm db:seed        # deterministic demo dataset — see below
+pnpm dev            # turbo: api + worker + ops, all with HMR
+```
+
+`docker-compose.yml` provides everything external. **No developer needs an AWS account to run the
+platform**, and no developer needs a real WhatsApp number, voice provider or OCR key — every adapter
+has a fake (`02-12`).
+
+### Seed data
+
+`packages/shared/testing/seed/` builds a deterministic dataset, layered so you can seed only as far
+as the module you are working on:
+
+| Layer | Contents |
+|---|---|
+| `00-platform` | Roles, permissions, users (one per role), settings, all nine lists |
+| `10-commercial` | 3 clients, 8 locations, 20 departments, rate cards, contracts with windows |
+| `20-supply` | 200 candidates across 3 categories and 2 bases, credentials, documents |
+| `30-demand` | 40 requisitions across all states, inbound records on every channel |
+| `40-flow` | 10 complete journeys: shortlist → offer → placement → day-90 → invoice |
+
+Seeded IDs are stable UUIDs so tests and screenshots can reference them.
+
+---
+
+## 8. Scripts
+
+| Command | Does |
+|---|---|
+| `pnpm dev` | api + worker + ops with HMR |
+| `pnpm dev:links` / `pnpm dev:portal` | the other frontends |
+| `pnpm build` | Turbo build, all packages |
+| `pnpm test` | unit + integration |
+| `pnpm test:e2e` | Playwright against a seeded stack |
+| `pnpm lint` / `pnpm typecheck` | must both pass before commit |
+| `pnpm db:migrate` / `db:migrate:new` / `db:reset` | migrations |
+| `pnpm api:openapi` | regenerate OpenAPI spec + typed client |
+| `pnpm deps:graph` | `madge` cycle check across modules |
+
+---
+
+## 9. Git
+
+| | |
+|---|---|
+| Branches | `main` (protected) · `feat/<component-id>-<slug>` · `fix/<slug>` |
+| Branch example | `feat/b04-requisition-state-machine` |
+| Commits | Conventional Commits, scope = component id: `feat(b04): add hold/release age clock` |
+| PR | Must name the spec file it implements and tick its acceptance criteria |
+| Merge | Squash. Linear history. |
+| Required checks | lint · typecheck · unit · integration · build · boundaries · migration-forward |
+
+**One PR implements one spec section, never more than one component.** A PR touching two module
+folders is a review flag — it usually means a boundary was crossed that should have been an event.
+

@@ -1,0 +1,250 @@
+---
+title: "04-02 · WhatsApp Business API"
+description: "Used by 03-03, 03-08, 03-10, 03-11, 02-10, 02-07, 02-08, 03-19"
+---
+
+**Ports** `whatsapp_inbound`, `whatsapp_outbound` · **Supplier** not named (`OI-HS-07`) · **Risk** High
+**Used by** `03-03`, `03-08`, `03-10`, `03-11`, `02-10`, `02-07`, `02-08`, `03-19`
+
+---
+
+## 1. Why this is the most important integration
+
+WhatsApp is how Apollo already talks to both sides of its business. It carries:
+
+| Direction | Traffic |
+|---|---|
+| **Inbound** | Client vacancies as text · client vacancies as **voice notes** · candidate availability replies |
+| **Outbound** | Missing-field follow-up · the whole availability cadence (**every 3–4 days across the shift pool**) · offer delivery · **client link delivery — shortlist, day 30/60/90, timesheet approval** · trial check-in prompts · payslips |
+
+Two consequences:
+
+1. **It is on the revenue path twice.** The day-90 retention link and the timesheet approval link both
+   travel over WhatsApp. If it stops, invoices stop.
+2. **It is the dominant running cost.** Billed per conversation, and the volume is set by the cadence
+   configuration (`OI-HS-05`).
+
+---
+
+## 2. One number, one template set
+
+> **A single registered number and template set shared across A1 and D10 — not two.** — plan
+> integration register
+
+`02-07` owns sending on that number. `02-08` owns receiving on it. Both go through the same BSP
+adapter. Two numbers would double the cost, double the template approval work, and confuse every
+recipient.
+
+The consequence is that **inbound must distinguish a client sending a vacancy from a candidate
+answering an availability question** on the same number — which is exactly what `02-08 §7.2`'s
+message-type detection does.
+
+---
+
+## 3. The template approval problem
+
+> The WhatsApp Business Solution Provider **carries every message the platform sends** and also has to
+> **approve each message template before it can be used — which takes weeks and is outside our
+> control.** — `OI-HS-07`
+
+> This is worse than an estimate problem: **template approval is a calendar dependency that no amount
+> of team size removes, and it gates the whole contact schedule going live in M5.**
+
+**How the platform handles it:**
+
+- `approval_status` is a first-class field on the template record (`03-08 §5.1`):
+  `not_required → draft → submitted → approved | rejected`
+- Sending against an unapproved template **fails with a clear error**, not a silent drop
+- The template screen has a "blocking go-live" filter
+- Submission date and waiting time are visible, so "which templates are we waiting on" is a query
+
+**What the team must do:** submit every WhatsApp template **at the start of phase 5**, not when the
+code that uses it is ready. Draft them from the message catalogue below in phase 3.
+
+---
+
+## 4. Template catalogue
+
+Every WhatsApp message the platform sends. Draft early, submit early.
+
+| Key | Purpose | Type | Module |
+|---|---|---|---|
+| `demand_followup_missing_fields` | Chase a client for incomplete requisition fields | Text + variables | `03-03` |
+| `availability_check_base_b` | The core cadence question | **Interactive — buttons** | `03-08` |
+| `availability_check_base_a` | Longer-cycle version | Interactive | `03-08` |
+| `availability_reminder` | Follow-up when unanswered | Interactive | `03-08` |
+| `shift_available` | New shifts matching a candidate | Text + link to app | `03-07` |
+| `offer_delivery` | The offer document | **Document** | `03-10` |
+| `offer_reminder` | Before expiry | Text | `03-10` |
+| `link_shortlist_response` | Client shortlist link | Text + link | `02-10` |
+| `link_trial_checkin_30` / `_60` | Client check-in links | Text + link | `02-10` |
+| **`link_trial_checkin_90`** | **The retention confirmation link** | Text + link | `02-10` |
+| **`link_timesheet_approval`** | **The timesheet approval link** | Text + link | `02-10` |
+| `link_reminder` | Unanswered link nudge | Text + link | `02-10` |
+| `trial_checkin_candidate` | Day 0/7/30/60/90 candidate questions | **Interactive** | `03-11` |
+| `credential_expiring` | Registration about to expire | Text | `03-06` |
+| `document_required` | Missing onboarding document | Text | `03-17` |
+| `payslip_available` | Payslip ready | Text + link | `03-19` |
+| `invoice_reminder_1` / `_2` / `escalation` / `formal_notice` | Dunning | Text | `03-21` |
+
+**Interactive templates carry the answer schema.** A button reply is structured and unambiguous —
+which is why `03-08` prefers them and why free-text fallback is the exception, not the norm
+(`OI-A-08`).
+
+---
+
+## 5. Port definition
+
+```ts
+export const WhatsAppOutboundPort = definePort({
+  key: 'whatsapp_outbound',
+  operations: {
+    sendTemplate: {
+      input: z.object({
+        to: z.string(),                    // E.164
+        templateName: z.string(),
+        languageCode: z.string(),
+        variables: z.record(z.string()),
+        buttons: z.array(z.object({ id: z.string(), title: z.string() })).optional(),
+        mediaUrl: z.string().optional(),   // presigned, short expiry
+      }),
+      output: z.object({
+        providerMessageId: z.string(),
+        conversationId: z.string().optional(),   // billing unit
+        cost: z.object({ amount: z.number(), currency: z.string() }).optional(),
+      }),
+      redact: ['to'],
+      timeout: 15_000,
+      retryable: true,
+    },
+    getMediaUrl: { input: z.object({ mediaId: z.string() }), output: z.object({ url: z.string() }) },
+    getTemplateStatus: { input: z.object({ templateName: z.string() }),
+                         output: z.object({ status: z.enum(['pending','approved','rejected']) }) },
+  },
+  manualFallback: { supported: false },      // no manual path — this IS the channel
+})
+```
+
+**`cost` on the send response is why cost recording works.** It cannot be reconstructed later
+(`02-07 §12`).
+
+---
+
+## 6. Inbound webhook
+
+`POST /api/v1/webhooks/whatsapp`
+
+Handles four payload kinds:
+
+| Kind | Handling |
+|---|---|
+| **Text message** | → `inbound.receive()` (`02-08`) → sender match → type detection |
+| **Voice note** | Media downloaded, stored via `02-04`, → `inbound.receive()` → transcription (`04-03`) |
+| **Interactive reply** (button / list) | → `inbound.receive()`, classified `candidate_response` with confidence 1.0 |
+| **Status update** | → `messaging.receipt` queue (`02-07`) |
+
+Every one of them, without exception (`01-04 §12`):
+
+1. **Verify the signature before parsing the body**
+2. Dedupe on the provider's message id
+3. **Persist the raw payload immediately**
+4. Return 200 fast — enqueue, never process inline
+5. Zod-parse before trusting the shape
+
+---
+
+## 7. The 24-hour session window
+
+WhatsApp permits free-form replies only within 24 hours of a user-initiated message; outside it, only
+approved templates may be sent.
+
+**What this means for the platform:**
+
+- Every proactive message uses an approved template. There is no "just send a quick note" path.
+- A candidate's reply opens a 24-hour window — useful for a follow-up question in a trial check-in
+  conversation, but never relied upon.
+- **The cadence engine cannot assume a window is open.** Every cadence send is a template send, which
+  is also why every cadence send is a billable conversation (`OI-HS-05`).
+
+Encode this in the adapter: attempting a free-form send outside a window is an error, not a
+best-effort attempt.
+
+---
+
+## 8. Cost model
+
+| Element | Note |
+|---|---|
+| Billing unit | **Per conversation** (a 24-hour window), not per message |
+| Category | Utility / authentication / marketing rates differ — every template is classified at submission |
+| Recorded | `engage.message.cost_amount`, `cost_unit = 'conversation'` (`02-07 §5`) |
+| Reported | `02-07 §9` consumption report, `03-08 §9.3` cadence preview |
+
+**The dominant variable is cadence frequency × base size.** A shift pool of 5,000 contacted every
+3.5 days is roughly 43,000 conversations a month before any other traffic. That number, multiplied by
+the per-conversation rate, is the figure Apollo is asking for — and it is why `OI-HS-05` notes that
+*"per-conversation cost could exceed the build cost of the module that sends the messages."*
+
+---
+
+## 9. Rate limits and throughput
+
+BSPs impose throughput tiers based on quality rating and phone-number status. Exceeding them gets
+messages **dropped, not queued**.
+
+Handled in `02-07 §8`: a token-bucket rate limiter in Redis, per provider, configured from P03, shared
+across all worker tasks. Cadence runs also carry a `daily_cap` (`03-08 §5.3`) as a second control.
+
+**Quality rating matters commercially.** A number marked low-quality by users blocking or reporting it
+gets throttled. Respecting opt-out at send time (`02-07 §6`) is not only a compliance requirement —
+it protects the channel Apollo's whole contact model depends on.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion |
+|---|---|
+| 1 | **One registered number and one template set** serve both intake and engagement |
+| 2 | Inbound distinguishes client demand from candidate responses on that shared number |
+| 3 | Voice notes are stored and remain playable from the intake queue |
+| 4 | Interactive button replies produce a structured answer with confidence 1.0 |
+| 5 | Sending against an unapproved template fails with a clear, actionable error |
+| 6 | Template approval status is visible and filterable |
+| 7 | Every send records its conversation id and cost |
+| 8 | Webhook signature is verified **before** the body is parsed |
+| 9 | The raw payload is persisted before any interpretation |
+| 10 | Duplicate provider messages produce one inbound record |
+| 11 | Provider rate limits are respected across all worker tasks, not per task |
+| 12 | Opt-out is honoured at send time, not enqueue time |
+| 13 | The fake adapter simulates: success, delivery, read, failure, rate limit, unapproved template, and an inbound of each kind |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Working assumption |
+|---|---|---|
+| **`OI-HS-07`** | **Which BSP?** | Port + fake. **Number registration and BSP onboarding start month 2; template submission starts phase 5 day one.** Both are calendar items, not build items. |
+| **`OI-HS-05`** | Expected monthly volume | **`AS-09`** — the platform records cost from message one and provides the cadence preview. Apollo gets a per-scenario model rather than a single guess. |
+| `OI-A-17` | Are SMS and email outbound-only? | **`AS-11`** — yes. Only WhatsApp and the app receive structured replies. |
+| `OI-M3-05` | Does the same provider do speech-to-text? | One port either way (`04-03`) |
+| — | Multiple numbers per region or per client | **Not built.** One number is the plan's explicit instruction. |
+
+---
+
+## 12. Notes for the implementer
+
+**Build the fake first and build it well.** It carries eight modules through development and the whole
+of phases 3–6. It must simulate inbound text, inbound voice, inbound button replies, delivery
+receipts, read receipts, rate limiting and an unapproved template — because every one of those is a
+code path that must work before a supplier exists.
+
+**Persist before you interpret.** The webhook's only job is to get the raw payload into Postgres and
+return 200. Everything else is a job. A BSP retrying because we were slow to acknowledge produces
+duplicate messages you then have to dedupe.
+
+**Treat the template list as a deliverable with a lead time.** Write it in phase 3, get the wording
+agreed with Apollo, submit in phase 5. Discovering in month five that eleven templates are pending
+approval is the single most avoidable schedule failure in this project.
+

@@ -1,0 +1,366 @@
+---
+title: "P08 · Inbound Message Pipeline"
+description: "Everything that arrives at the platform from outside, on any channel, in any shape, lands here first. Receives on every channel, writes the InboundRecord, resolves the sender to a…"
+---
+
+**Package** `@apollo/inbound` · **Schema** `demand` · **Plan** A1 shared stack (M3-I18, M3-I21, M3-I29)
+**Effort** ~20pd · **Risk** High (SHARED, MODEL) · **Build in** Phase 3
+
+---
+
+## 1. Purpose
+
+Everything that arrives at the platform from outside, on any channel, in any shape, lands here first.
+Receives on every channel, writes the `InboundRecord`, resolves the sender to a client, classifies
+what kind of message it is, and dispatches it to whichever module registered for that type.
+
+The plan settles the ownership question explicitly:
+
+> **CLOSED — Ownership of the shared inbound pipeline.** The channel receiver, queue, sender identity
+> resolution, parser dispatch, intent classification, unparseable-message handling and retry are
+> **built once under A1 in M3**. A14 consumes that stack with a candidate-response intent schema.
+
+So: **built once here, two message types registered.** Demand (a client sending a vacancy) and
+candidate response (a nurse answering an availability question) arrive on the same WhatsApp number
+and must be told apart.
+
+---
+
+## 2. Scope
+
+**In**
+- Channel receivers: WhatsApp, email, HRMS webhook, spreadsheet upload, manual entry
+- `InboundRecord` — one row per incoming message or file, **raw payload retained forever**
+- Sender identity resolution → exactly one client, location, department
+- Unmatched sender handling — nothing is ever discarded
+- **Message type detection** — demand vs candidate response, with a confidence threshold and fallback
+- Message type registration contract — how a module subscribes to a type
+- Parser dispatch by channel and content type
+- Unparseable handling → manual entry queue
+- Reclassification — correcting a wrongly typed record without re-ingestion
+- Retry and dead-lettering
+
+**Out**
+- Channel *integrations* — the WhatsApp/email/HRMS adapters themselves → `03-03` and `04-*`
+- Requisition *parsing* — extracting fields to the requisition schema → `03-03` (`M3-I20`)
+- Candidate response parsing → `03-08` (`M5-I15`)
+- The requisition object → `03-04`
+- Outbound messages → `02-07`
+
+The split is: **this component decides what a message is and who should have it. The consuming
+module decides what it means.**
+
+---
+
+## 3. Plan traceability
+
+| Item | Covered by |
+|---|---|
+| `M3-I18` Inbound receiver (A1, Service, XL, 5pd) | §5.1, §7.1, §8 |
+| `M3-I21` Message type detection (A1, Service, XL, 5pd) | §5.2, §7.2 |
+| `M3-I29` Second message type registration (A1, Service, L, 3pd) | §7.3 |
+| `M3-I19` Sender matching (A1, Service, L, 3pd) | §5.3, §7.1 |
+| `M3-I2` Unmatched senders (screen) | §9.1 |
+| `M3-I17` Reclassify a message (screen) | §9.2 |
+
+---
+
+## 4. Dependencies
+
+**Needs first:** `@apollo/files` (P04, for attachments and voice notes), `@apollo/adapters` (P12),
+`@apollo/jobs` (P13), `03-01` clients (**sender identities**)
+**Consumed by:** `03-03` demand intake, `03-08` engagement (candidate responses)
+
+**The dependency on `03-01` is real and ordering-relevant.** Sender resolution needs the client
+sender-identity list to exist. Build client management before the pipeline.
+
+---
+
+## 5. Data model
+
+### 5.1 Inbound record
+
+```sql
+CREATE TABLE demand.inbound_record (
+  id                uuid PRIMARY KEY,
+  reference         text NOT NULL UNIQUE,            -- 'IN-2026-004821'
+  channel           inbound_channel_enum NOT NULL,   -- 'whatsapp_text'|'whatsapp_voice'|'email'|
+                                                     -- 'spreadsheet'|'hrms'|'manual'|'portal'
+  direction         text NOT NULL DEFAULT 'inbound',
+  provider_message_id text,                          -- for dedupe
+  sender_address    text NOT NULL,                   -- email / phone / hrms tenant key
+  sender_display    text,
+  received_at       timestamptz NOT NULL,
+  raw_payload       jsonb NOT NULL,                  -- KEPT FOREVER
+  raw_body_text     text,
+  attachment_ids    uuid[],                          -- platform.document ids
+  status            inbound_status_enum NOT NULL,
+  client_id         uuid,                            -- resolved
+  location_id       uuid,
+  department_id     uuid,
+  sender_identity_id uuid,
+  message_type      text,                            -- 'demand' | 'candidate_response'
+  type_confidence   numeric(4,3),
+  consumed_by       text,                            -- module that took it
+  consumed_entity_id uuid,                           -- requisition id / response id
+  consumed_at       timestamptz,
+  failure_reason    text,
+  attempt_count     integer NOT NULL DEFAULT 0,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_inbound__provider_msg
+  ON demand.inbound_record (channel, provider_message_id) WHERE provider_message_id IS NOT NULL;
+CREATE INDEX idx_inbound__unmatched
+  ON demand.inbound_record (received_at DESC) WHERE status = 'unmatched';
+CREATE INDEX idx_inbound__unparseable
+  ON demand.inbound_record (received_at DESC) WHERE status = 'unparseable';
+CREATE INDEX idx_inbound__list
+  ON demand.inbound_record (status, received_at DESC);
+```
+
+**`raw_payload` is kept forever, including after the requisition is created**, so a disputed vacancy
+can be traced back to what the client actually sent (`M3-I10`). This is not a debugging convenience;
+it is the evidence trail for a commercial disagreement.
+
+### 5.2 Type detection log
+
+```sql
+CREATE TABLE demand.inbound_classification (
+  id              uuid PRIMARY KEY,
+  inbound_id      uuid NOT NULL REFERENCES demand.inbound_record(id),
+  classified_type text NOT NULL,
+  confidence      numeric(4,3) NOT NULL,
+  method          text NOT NULL,          -- 'sender_rule'|'keyword'|'model'|'manual'
+  model_version   text,
+  reasoning       jsonb,
+  classified_at   timestamptz NOT NULL DEFAULT now(),
+  classified_by   uuid                    -- set when a human reclassified
+);
+```
+
+Kept so classification accuracy is measurable, and so a reclassification has a before-and-after.
+Accuracy here directly sets manual-queue load, which is an operational staffing number, not just a
+technical one (`OI-M3-06`).
+
+### 5.3 Sender identity (owned by `03-01`, read here)
+
+```sql
+-- clients.sender_identity
+--   id, client_id, location_id?, department_id?, kind ('email'|'whatsapp'|'hrms'),
+--   address (normalised), is_active
+```
+
+Resolution is an exact match on a normalised address. **Fuzzy matching is deliberately not used** —
+a wrong client on a requisition is worse than a row in the unmatched queue.
+
+---
+
+## 6. State machines
+
+**InboundRecord**
+
+| From | To | Trigger |
+|---|---|---|
+| — | `received` | Receiver wrote the record |
+| `received` | `identified` | Sender resolved to exactly one client |
+| `received` | `unmatched` | Sender resolved to **zero or more than one** client |
+| `unmatched` | `identified` | A human mapped the sender (and it is reprocessed) |
+| `identified` | `classified` | Message type determined above threshold |
+| `identified` | `needs_classification` | Below threshold → human decides |
+| `needs_classification` | `classified` | Human classified |
+| `classified` | `parsed` | Consuming module extracted a payload |
+| `classified` | `unparseable` | Parser failed → manual entry queue |
+| `unparseable` | `parsed` | Human typed it in |
+| `parsed` | `consumed` | A requisition or response was created from it |
+| any | `discarded` | Explicitly marked not-relevant, **with a reason**. Never deleted. |
+
+*"InboundRecord: received → identified (we know the client) or unmatched (we do not). Then parsed, or
+unparseable. Then consumed once a requisition is made from it"* (`00-03 §4`).
+
+**Nothing is ever discarded silently.** Every terminal state that is not `consumed` sits on a screen
+where a person can act on it. `M3-I2` states the principle: *"so that no payload is ever discarded"*.
+
+---
+
+## 7. API surface
+
+### 7.1 Exported service
+
+```ts
+export const inbound = {
+  /** Called by every channel receiver. Idempotent on (channel, providerMessageId). */
+  receive(input: {
+    channel: InboundChannel
+    providerMessageId?: string
+    senderAddress: string
+    senderDisplay?: string
+    receivedAt: Date
+    rawPayload: unknown
+    bodyText?: string
+    attachments?: Array<{ fileName, contentType, buffer }>
+  }): Promise<InboundRecord>
+
+  get(id): Promise<InboundRecord>
+  list(request, scope): Promise<Page<InboundRecord>>
+
+  resolveSender(channel, address): Promise<SenderMatch>   // 0 | 1 | many
+  assignSender(inboundId, senderIdentityId, actor): Promise<InboundRecord>   // reprocesses
+
+  classify(inboundId, type, actor?): Promise<InboundRecord>
+  reclassify(inboundId, newType, actor, reason): Promise<InboundRecord>      // no re-ingestion
+
+  markParsed(inboundId, module, payload): Promise<void>
+  markUnparseable(inboundId, reason): Promise<void>
+  markConsumed(inboundId, module, entityId): Promise<void>
+  discard(inboundId, actor, reason): Promise<void>
+}
+```
+
+### 7.2 Message type detection
+
+```ts
+interface TypeDetector {
+  detect(record: InboundRecord): Promise<{ type: string; confidence: number; method: string }>
+}
+```
+
+Detection runs in order, stopping at the first confident answer:
+
+1. **Sender rule** — the address is a registered *client* sender → `demand`. The address is a known
+   *candidate* phone → `candidate_response`. Confidence 1.0. This resolves the large majority.
+2. **Conversation context** — a reply within N hours to an outbound message we sent → that message's
+   type. Confidence 0.95.
+3. **Keyword/structure** — template button payloads and structured HRMS bodies are unambiguous.
+4. **Model** — free text, via the classification port (`04-01`).
+
+Below the configured threshold → `needs_classification`, surfaced to a human.
+
+### 7.3 Message type registration (`M3-I29`)
+
+The contract that lets `03-08` consume this stack without rebuilding it inside M5:
+
+```ts
+inbound.registerType({
+  type: 'candidate_response',
+  owner: 'engagement',
+  detector: candidateResponseDetector,     // optional extra signals
+  handler: async (record) => {
+    return EngagementService.handleInboundResponse(record)
+  },
+})
+```
+
+Two types registered in Release 1: `demand` (owned by `03-03`) and `candidate_response` (owned by
+`03-08`). A third — client portal submissions — is enumerated for M10.
+
+### 7.4 HTTP
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/inbound` | Inbound list (`M3-I1`), all channels, all states |
+| GET | `/api/v1/inbound/:id` | Detail, raw payload, classification trail |
+| GET | `/api/v1/inbound/unmatched` | Unmatched senders queue (`M3-I2`) |
+| POST | `/api/v1/inbound/:id/assign-sender` | Map to a client, then reprocess |
+| POST | `/api/v1/inbound/:id/reclassify` | Correct the type without re-ingestion (`M3-I17`) |
+| POST | `/api/v1/inbound/:id/discard` | Requires a reason |
+| POST | `/api/v1/webhooks/whatsapp` · `/email` · `/hrms/:clientKey` | Receivers (`01-04 §12`) |
+
+---
+
+## 8. Events and jobs
+
+**Emits**
+
+| Event | Consumed by |
+|---|---|
+| `demand.inbound.received` | analytics |
+| `demand.inbound.unmatched` | notification to the BD/recruiter queue |
+| `demand.inbound.classified` | the registered type owner |
+| `demand.inbound.unparseable` | `03-03` (manual entry queue) |
+| `demand.inbound.reclassified` | previous and new owner |
+| `demand.inbound.consumed` | analytics (channel performance, `M9-I9`) |
+
+**Jobs**
+
+| Job | Queue | Notes |
+|---|---|---|
+| Receive | `inbound.receive` | 20 concurrency. Webhook → record. Must be fast. |
+| Resolve + classify | `inbound.classify` | 10 concurrency, 3 attempts |
+| Dispatch to owner | `inbound.dispatch` | 10 concurrency, 3 attempts, then `unparseable` |
+| Reprocess | `inbound.reprocess` | After a sender is mapped or a type corrected |
+
+---
+
+## 9. Frontend
+
+### 9.1 Inbound list (`M3-I1`) — `/intake`
+
+`<DataTable/>`: reference, channel, sender, received, status, type, resolved client, what it became.
+Filter by channel, status, type, client, date. **Single view of every inbound message or file across
+all live channels, in whatever state it has reached.**
+
+Row opens a detail panel with the raw content — including an **audio player for voice notes**
+(`M0-I6`) — the classification trail, and the resulting entity if consumed.
+
+### 9.2 Unmatched senders (`M3-I2`) — `/intake/unmatched`
+
+Inbounds whose sender resolves to zero clients or to more than one. Actions: map this address to a
+client (creating a `SenderIdentity`), map just this record, or discard with a reason.
+
+Mapping an address offers to reprocess every other unmatched record from the same sender — a new
+client emailing for the first time typically produces several before anyone notices.
+
+### 9.3 Reclassify (`M3-I17`)
+
+An action on the inbound detail: "This is actually a candidate response" / "…actually a vacancy".
+Requires a reason, is audited, routes to the correct module, and **does not re-ingest** — the record,
+its reference and its raw payload are unchanged.
+
+---
+
+## 10. Acceptance criteria
+
+| # | Criterion | Source |
+|---|---|---|
+| 1 | Receives on every channel, writes the `InboundRecord` and enqueues for parsing | `M3-I18` |
+| 2 | Built once and consumed by A14 without rebuilding it inside M5 | `M3-I18`, `M3-I29` |
+| 3 | The raw payload is retained forever, including after a requisition is created | `M3-I10` |
+| 4 | An inbound whose sender resolves to zero or many clients lands in the unmatched queue — **no payload is ever discarded** | `M3-I2` |
+| 5 | Sender matching resolves an address to exactly one client, location and department | `M3-I19` |
+| 6 | Demand and candidate-response intents are separated on the shared stack, with a confidence threshold and fallback | `M3-I21` |
+| 7 | A record below the confidence threshold reaches a human rather than being guessed | `M3-I21` |
+| 8 | A record classified as demand that is actually a candidate response can be corrected **without re-ingestion** | `M3-I17` |
+| 9 | The same provider message delivered twice creates one record | `01-02 §13` |
+| 10 | A voice note is stored and stays playable from the queue | `M0-I6` |
+| 11 | Mapping a previously unknown sender reprocesses that sender's other unmatched records | §9.2 |
+| 12 | An inbound is visible in the queue within 60 seconds of receipt | `AS-14` |
+| 13 | Classification accuracy is measurable from `inbound_classification` | §5.2 |
+
+---
+
+## 11. Open questions
+
+| ID | Question | Impact | Working assumption |
+|---|---|---|---|
+| **`OI-M3-06`** | Intent classification confidence threshold and free-text fallback behaviour, agreed **once** across A1 and A14 | **Sets the rate at which items land in the manual-entry queue — an operational staffing figure as much as a technical one** | **`AS-03`** — threshold 0.80. Below it → human. Make it a P03 setting so it can be tuned against real volume in the first weeks rather than guessed now. Report queue load weekly during UAT. |
+| `OI-M3-02` | Dedupe rule for the same requirement arriving on two channels — match keys, and whether merge is automatic or human-confirmed | Governs whether a channel revision updates an existing requisition | **`AS-04`** — surface as a suspected duplicate for a human (`M3-I4`). No automatic merge. This is the conservative choice and matches the plan's own default. |
+| `OI-M3-13` | Email ingestion model — one monitored address with sender routing, or one address per client | Per-client addresses shift operational setup onto Apollo for every new client | **`AS-10`** — one address with sender routing; per-client aliases supported as configuration. The receiver handles both. |
+| `OI-M3-05` | Speech-to-text provider — same as the A5 outbound voice provider, or separate | One integration or two, and whether language coverage is proven once | Port-based. `03-03` owns the transcription call; this component only stores the media and dispatches. |
+| `OI-M3-14` | Latency targets for ingestion and unmatched-queue surfacing | No performance acceptance test without them | **`AS-14`** — visible within 60s |
+
+---
+
+## 12. Notes for the implementer
+
+**This is the highest-leverage component in phase 3.** Two modules consume it, five channels feed it,
+and the plan's own analysis returns *three* estimate lines for it: the pipeline once, A1 schema and
+routing, A14 schema and routing. Build the pipeline generically and resist letting requisition
+concepts leak into it — this component knows about *messages*, not about vacancies.
+
+**Persist before you interpret.** The receiver's only job is to get the raw payload into Postgres and
+return 200. Everything else is a job. A provider retrying because we were slow to acknowledge is a
+duplicate-message problem you do not want.
+
+**Sender matching is exact, not fuzzy.** Attaching a vacancy to the wrong hospital is a worse
+outcome than a queue entry, and the unmatched queue exists precisely so that being strict is safe.
+

@@ -1,0 +1,14 @@
+{
+  "title": "Integrations",
+  "pages": [
+    "index",
+    "04-01-integration-register",
+    "04-02-whatsapp",
+    "04-03-voice-and-transcription",
+    "04-04-document-ocr-and-esignature",
+    "04-05-identity-and-registry-verification",
+    "04-06-payroll-and-finance"
+  ],
+  "icon": "Cable",
+  "description": "Every external system the platform touches."
+}
