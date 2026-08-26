@@ -1,0 +1,127 @@
+---
+title: "04-01 WhatsApp Business Platform"
+description: "WhatsApp carries more of this platform's traffic than every other channel combined: inbound requisitions as text and voice notes, the missing-field follow-up, cadence availability…"
+---
+
+**Package** `@apollo/integration-whatsapp` · **Schema** `inbound`, `messaging` · **Plan** A1, D10, D20, A13, A6, D24 · **Effort** ~20.0pd · **Risk** High `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+WhatsApp carries more of this platform's traffic than every other channel combined: inbound requisitions
+as text and voice notes, the missing-field follow-up, cadence availability questions and their replies,
+offer delivery, tokenised client links, trial check-ins and payslips.
+
+**One registered number and one template set across all of it — not two.** The Business Solution
+Provider must also approve every template before it can be used, which takes weeks and is outside
+Apollo's control.
+
+## 2. Scope
+
+**In scope:** webhook receipt of text, voice notes, button and list replies; sender number resolution
+handoff; template send with variable substitution; template approval state tracking; delivery and read
+receipts; media download into `02-04`; the 24-hour conversation window; conversation counting for cost.
+
+**Explicitly out of scope:** what a message means (`02-08` classifies, `03-02` and `03-06` interpret);
+template authoring (`02-09`); voice **calls**, which are `04-04`.
+
+**Explicitly not built:** two registered numbers; guided multi-step conversations (those live in the
+app); WhatsApp as a support channel; interactive flows beyond templates with fixed buttons and lists.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I24` | A1 | WhatsApp inbound and follow-up | XL | 5.0 |
+| `M5-I15` | A14 | WhatsApp reply handling | XL | 5.0 |
+| `M7-I14` | D20 | Offer delivery | L | 3.0 |
+
+Also carries A13 link delivery (`02-14`), trial check-ins (`03-09`) and payslips (`03-17`) as sends
+through `02-09`.
+
+## 4. Dependencies
+
+**Must exist first:** `02-08` (receiver), `02-09` (sender and templates), `02-04` (voice notes and
+attachments), `02-10`.
+
+**Consumed by:** `03-02`, `03-06`, `03-08`, `02-14`, `03-09`, `03-17`.
+
+**External:** `X01` — Meta business verification, a registered number, and **template approval per
+template**. Start week one; **it gates cadence go-live in Phase 4** whatever the build does.
+
+## 5. Data model
+
+No tables of its own. `inbound.inbound_record` carries `provider_message_id` for deduplication;
+`messaging.template.provider_template_name` and `approval_state` carry the BSP state;
+`messaging.message.cost_units` counts conversations.
+
+```ts
+// integrations/whatsapp/src/contract.ts
+interface WhatsAppProvider {
+  sendTemplate(i: { to: string; templateName: string; variables: Record<string,string>;
+                    mediaDocumentId?: string }): Promise<{ providerMessageId: string; conversationId: string }>
+  downloadMedia(mediaId: string): Promise<{ buffer: Buffer; contentType: string }>
+  verifyWebhook(headers: Headers, body: Buffer): boolean
+  submitTemplate(t: TemplateDefinition): Promise<{ providerTemplateName: string; state: ApprovalState }>
+  getTemplateState(name: string): Promise<ApprovalState>
+}
+```
+
+## 6. State machines
+
+**Template approval:** `draft → submitted → approved | rejected`. An unapproved template **cannot be
+sent** — enforced in the sender.
+
+**Conversation window:** a session opens on an inbound message and closes 24 hours later. Outside it,
+only an approved template may be sent; a reply arriving outside the window is **handled rather than
+lost**.
+
+**Message:** as `02-09`, with `delivered` and `read` from BSP receipts correcting an optimistic `sent`.
+
+## 7. API surface
+
+| Direction | Endpoint | Purpose |
+|---|---|---|
+| Inbound | `POST /hooks/whatsapp` (via `edge-webhook`) | Signature verified, deduped on message id, raw payload written, enqueued |
+| Outbound | in-process `whatsapp.sendTemplate()` | Called only by `02-09`; nothing else touches the provider |
+| Media | in-process `whatsapp.downloadMedia()` | Voice notes and documents into `02-04` |
+
+## 8. Events and jobs
+
+**Jobs:** `whatsapp.send` (`provider` class, rate-limited), `whatsapp.download-media`,
+`whatsapp.sync-template-states` (hourly — approval lead time must be visible).
+
+**Events:** emitted through `02-09` (`messaging.message.*`) and `02-08`
+(`inbound.record.received`).
+
+## 9. Frontend
+
+**N/A** — configuration lives in `02-09`'s template screens and `03-02`'s channel settings, which
+**warn if a second registered number is attempted**.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Inbound text and voice notes are received and written to `InboundRecord` | `M3-I24` |
+| AC2 | Follow-up is sent **on the same number the requisition arrived on** | `M3-I24` |
+| AC3 | **One registered number and template set is used across A1 and D10, not two** | `M3-I24`, `M5-I1` |
+| AC4 | Conversation volume is logged so consumption cost is measurable | `M3-I24`, `OI-HS-05` |
+| AC5 | Delivery failure is retried and surfaced in the delivery log | `M3-I24`, `M3-I30` |
+| AC6 | An interactive template reply returns a **structured payload requiring no parsing** | `M5-I15` |
+| AC7 | A free-text reply falls back to parsing with the confidence threshold applied | `M5-I15`, `OI-A-08` |
+| AC8 | Sender resolution maps a WhatsApp number to exactly one candidate; **ambiguity queues for review** | `M5-I15` |
+| AC9 | **The 24-hour conversation window is respected so replies outside it are handled rather than lost** | `M5-I15` |
+| AC10 | An offer is delivered over WhatsApp with email fallback | `M7-I14` |
+| AC11 | Delivery and view are tracked **separately** | `M7-I14` |
+| AC12 | The document link expires and is not indefinitely public | `M7-I14` |
+| AC13 | An unapproved template cannot be sent | `M5-I1` |
+| AC14 | A redelivered webhook does not create a second `InboundRecord` | `M3-I18` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-07` | **Which BSP?** Neither client document names one | Behind the interface above with a stub. **Template approval is a calendar dependency no team size removes, and it gates the whole contact schedule going live in Phase 4.** Estimate blocker. | `M3-I24`, `M5-I1`, `M7-I14` |
+| `OI-HS-05` | Conversation volume, and therefore cost | Counted per conversation and attributed to a cause; projection in `03-06` | Estimate blocker |
+| `X01` | Meta business verification and number registration | **Week one.** Pure waiting on someone else's timetable. | Phase 3 |
+| `OI-HS-50` **[raised here]** | Template language coverage — candidates are contacted in several Indian languages, and each language variant is a separate template needing separate approval | Templates are keyed by `(code, channel, locale)` from day one, so adding a language is data plus an approval cycle rather than a rebuild. The **approval lead time multiplies by language**, which affects the go-live date. | `M5-I1` |

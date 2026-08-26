@@ -1,0 +1,167 @@
+---
+title: "06-20 M13 — Payroll"
+description: "Paying the shift workers. This connects the platform to a third-party payroll engine — we do not build a payroll calculator ourselves. It sends the inputs the engine needs, configures…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M13 · D24 · Months 6–6*
+
+`Release 2` · `5 items` · `19 conditions` · `35.0pd` · `2 high risk` · `Ops/Admin, Candidate App, WhatsApp`
+
+Paying the shift workers. This connects the platform to a third-party payroll engine — we do not build a payroll calculator ourselves. It sends the inputs the engine needs, configures the pay cycle, produces the PF and ESIC reports and challans, and delivers payslips to the candidate in the app and over WhatsApp. Until this exists, payroll is done by hand, which puts a hard ceiling on how many shift workers Apollo can take on.
+
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 12** — Payroll sits at step ten of ten; until it is live, staff are paid by hand and the approved timesheet is the only clean handoff point.
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+Payslip delivery reuses the messaging layer from M5. The payroll engine sits behind an interface so it can be swapped later, the same pattern as the registry adapters in M1.
+
+### Records this milestone owns
+
+- PayrollCycle — a pay period and its state.
+- PayrollInput — what goes to the engine for one person for one cycle: hours, rate, adjustments.
+- PayrollOutput — what comes back: net pay, deductions, and the payslip document.
+- StatutoryReport — PF and ESIC reports and challans.
+
+### How records move
+
+- PayrollCycle: open → inputs locked → sent to engine → results received → payslips issued → closed
+- PayrollInput: draft → validated → sent. Or rejected by the engine with a reason.
+
+### Not in this milestone
+
+- Calculating pay ourselves. A third-party engine does that. Hirecraft and PayBooks are the candidates.
+- Submitting statutory filings. We produce the reports and challans; someone else files them.
+
+### Needs to exist first
+
+- M8 and M15 for approved timesheets. M11 for statutory forms. M12 for approved salary changes, advances and holds.
+
+### What breaks without it
+
+- Nothing inside the platform. This is the end of the pay side.
+
+### Items — 5 to build · design 6.0pd, build 20.0pd, QA 9.0pd
+
+#### M13-I1 — Pay run
+
+`D24` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `EXT` · `Low`
+
+**Who uses it: Finance.** Running a pay period: open it, lock the inputs, send it, get the results back, close it.
+
+##### Screens to build
+
+1. **Pay run**
+  - Lists pay periods and their state
+  - Locks the inputs, sends them to the payroll engine and takes the results back
+  - Lists associates blocked from the run and why
+
+##### Conditions it must satisfy
+
+- A cycle cannot be locked while associates are blocked on incomplete onboarding (M11-I5)
+- Inputs are frozen at lock so the figures sent match the figures recorded
+- A rejected input from the engine is shown with its reason and can be corrected and resent
+- A closed cycle cannot be reopened without an audited override
+
+Index **M13-I1** · Client ref **D24** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M11-I5, M13-I5**
+
+#### M13-I2 — Payroll settings
+
+`D24` · `Config` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Finance, Platform administrator.** How often people are paid, what counts as an input, and which deductions apply.
+
+##### Screens to build
+
+1. **Payroll settings**
+  - Sets how often people are paid and the cut-off dates
+  - Maps the platform's fields to the payroll engine's fields
+
+##### Conditions it must satisfy
+
+- Cycle frequency and cut-off are configuration, not code
+- Input mapping can change when the engine changes, without touching the platform
+- Statutory deduction rates come from configuration so they can be updated without a release
+
+Index **M13-I2** · Client ref **D24** · Band **L** · Design **1.0pd** · Build **3.0pd** · QA **1.5pd** · Total **5.5pd** · Confidence **Low** · Open items **-** · Linked items **M0-I5**
+
+#### M13-I3 — Statutory reports
+
+`D24` · `Screen` · `L · 3.0pd` · `AI Medium` · `Medium` · `COMP` · `Low`
+
+**Who uses it: Finance.** Producing the PF and ESIC reports and challans Apollo needs. Filing them is somebody else's job.
+
+##### Screens to build
+
+1. **Statutory reports**
+  - Produces the PF and ESIC reports and challans for a period
+  - Downloads them
+
+##### Conditions it must satisfy
+
+- Reports reconcile to the pay run they were generated from
+- Filing with the authorities is explicitly not in scope
+- Generation is audited
+
+Index **M13-I3** · Client ref **D24** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M13-I5**
+
+#### M13-I4 — App: payslips
+
+`D24` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Associate.** Payslips in the mobile app and over WhatsApp, which is how most of this workforce will read them.
+
+##### Screens to build
+
+1. **App: payslips**
+  - Lists the associate's payslips by period
+  - Opens and downloads one
+
+##### Conditions it must satisfy
+
+- A payslip is available in the app and delivered over WhatsApp (Part A D24)
+- Payslip delivery reuses the messaging layer from M5, not a separate sender
+- A payslip document is retained and downloadable for past periods
+- A query routes to finance without changing the payslip
+
+Index **M13-I4** · Client ref **D24** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M4-D3, M5-I8**
+
+#### M13-I5 — Payroll engine
+
+`D24` · `Integration` · `XXL · 8.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Connecting to a third-party payroll engine. We send inputs and receive results; we do not calculate pay.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends hours, rates and adjustments to the third-party payroll engine
+  - Takes back net pay, deductions and the payslip document
+  - Reports anyone the engine rejected
+
+##### Conditions it must satisfy
+
+- Inputs are assembled from approved timesheets, approved salary revisions, advances and holds
+- The engine sits behind an interface so it can be replaced without changing the platform
+- Every person sent is accounted for in the results, or reported as an exception
+- We do not build a payroll calculator — Hirecraft and PayBooks are the candidate engines
+- Engine selection is not yet confirmed
+
+Index **M13-I5** · Client ref **D24** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **-** · Linked items **M15-I6, M12-I6, M3-I26**

@@ -1,0 +1,320 @@
+---
+title: "03-08 Selection and offers"
+description: "Interviews, the decision, and the offer. Propose slots to a candidate and a client neither of whom has a login, handle reschedules and cancellations, capture structured feedback,…"
+---
+
+**Package** `@apollo/selection` · **Schema** `selection` · **Plan** D6, D20 · **Effort** ~63.5pd · **Risk** High `EXT` · **Build in** Phase 4–5
+
+## 1. Purpose
+
+Interviews, the decision, and the offer. Propose slots to a candidate and a client neither of whom has
+a login, handle reschedules and cancellations, capture structured feedback, then accept, hold or reject
+with a **mandatory reason from a configured taxonomy** — which is what feeds back into ranking. If
+accepted, generate the offer from a template selected by state, role and skill, deliver it over
+WhatsApp, track it to expiry, get it signed, and map it to the contract version whose terms `03-11`
+will read at day 90.
+
+Without offer management there is **no offer acceptance, no joining event**, and D7, A6, the A13
+retention link and A7 invoicing all stall.
+
+## 2. Scope
+
+### In scope
+
+- Interview slot proposal to both sides, confirmation, reschedule, cancellation with a reason
+- Interview list showing what is awaiting feedback, so the pipeline does not stall silently
+- Structured interview feedback that can feed the A8 write-back
+- Accept / hold / reject with a mandatory structured reason and a full selection audit trail
+- Offer templates by state, role and skill
+- Offer generation, preview, delivery, tracking, expiry, reminders, decline with a reason
+- Offer-to-contract mapping, capturing the placement fee `03-11` will read
+
+### Explicitly out of scope
+
+- The tokenised link mechanism and the client-facing shortlist page — `02-14`.
+- Ranking and shortlist assembly — `03-07`.
+- Offer delivery transport (`M7-I14`) — `04-01`; electronic signature (`M7-I15`) — `04-11`.
+- Joining confirmation and the placement — `03-09`.
+
+### Explicitly not built
+
+- Any client login. The portal is Phase 6.
+- AI video interviews. Later phase.
+- Integration with interviewers' external calendars. Slots are proposed and confirmed **inside the
+  platform**.
+- Background checks at offer stage. Verification happens earlier, in `03-04`.
+- A fifth link type for client-side interview feedback (`OI-HS-11`).
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M7-I1` | D6 | Propose interview | L | 3.0 |
+| `M7-I2` | D6 | Interview list, reschedule and cancel | L | 4.0 |
+| `M7-I3` | D6 | Interview feedback | L | 3.0 |
+| `M7-I4` | D6 | Selection decision and history | L | 4.0 |
+| `M7-I5` | D20 | Offer templates | L | 3.0 |
+| `M7-I6` | D20 | Create offer | XL | 5.0 |
+| `M7-I7` | D20 | Offer tracking | L | 3.0 |
+| `M7-I16` | D20 | Offer to contract link | L | 3.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-07` (the shortlist), `03-01` (**the contract to map the offer to, and the
+waiting periods**), `02-14` (client responses arrive by link), `02-09` (delivery), `02-03` (the
+rejection taxonomy — **agreed jointly with `03-07` before either is built**), `02-04`.
+
+**Consumed by:** `03-09` needs the accepted offer to create a joining event; `03-11` reads the mapped
+contract version and placement fee; `03-07` gets the outcome signals back.
+
+**External:** `04-11` electronic signature (**provider not named**, `OI-HS-07`), `04-01` WhatsApp
+delivery.
+
+## 5. Data model
+
+```sql
+CREATE TABLE selection.interview (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,
+    candidate_id uuid NOT NULL,
+    shortlist_entry_id uuid,
+    state text NOT NULL DEFAULT 'proposed' CHECK (state IN
+      ('proposed','confirmed','held','feedback_recorded','rescheduled','cancelled','expired')),
+    format text CHECK (format IN ('in_person','video','phone')),
+    panel jsonb NOT NULL DEFAULT '[]'::jsonb,
+    candidate_confirmed_at timestamptz,
+    client_confirmed_at timestamptz,
+    scheduled_start timestamptz, scheduled_end timestamptz,
+    cancellation_reason_code text,
+    reschedule_count integer NOT NULL DEFAULT 0,   -- repeated rescheduling is a risk signal
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE selection.interview_slot (      -- proposals, retained after confirmation
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    interview_id uuid NOT NULL REFERENCES selection.interview(id),
+    starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+    proposed_at timestamptz NOT NULL DEFAULT now(),
+    is_selected boolean NOT NULL DEFAULT false,
+    superseded_by uuid REFERENCES selection.interview_slot(id)   -- reschedule keeps the original
+);
+
+CREATE TABLE selection.interview_feedback (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    interview_id uuid NOT NULL REFERENCES selection.interview(id),
+    source text NOT NULL CHECK (source IN ('apollo','client_link')),
+    interviewer_id uuid, client_link_id uuid,
+    ratings jsonb NOT NULL,                  -- structured: dimensions differ by category
+    comments text,
+    submitted_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE selection.selection_decision (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,
+    candidate_id uuid NOT NULL,
+    decision text NOT NULL CHECK (decision IN ('accepted','held','rejected')),
+    reason_code text REFERENCES settings.list_entry(code),   -- MANDATORY on reject
+    reason_text text,
+    hold_expires_at timestamptz,             -- hold retains them on the shortlist with an expiry
+    decided_by uuid NOT NULL, decided_at timestamptz NOT NULL DEFAULT now(),
+    interview_feedback_id uuid REFERENCES selection.interview_feedback(id),
+    CONSTRAINT reject_needs_reason CHECK (decision <> 'rejected' OR reason_code IS NOT NULL)
+);
+CREATE INDEX ON selection.selection_decision (candidate_id, requisition_id, decided_at);
+REVOKE UPDATE, DELETE ON selection.selection_decision FROM PUBLIC;   -- append-only trail
+
+CREATE TABLE selection.offer_template (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    state_code text NOT NULL,                -- Indian state; drives state-specific clauses
+    role_code text NOT NULL, skill_code text,
+    version integer NOT NULL, effective_from date NOT NULL,
+    body text NOT NULL, variables jsonb NOT NULL,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE selection.offer (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL, candidate_id uuid NOT NULL,
+    selection_decision_id uuid NOT NULL REFERENCES selection.selection_decision(id),
+    current_version integer NOT NULL DEFAULT 1,
+    state text NOT NULL DEFAULT 'draft' CHECK (state IN
+      ('draft','generated','sent','opened','signed','expired','declined','withdrawn')),
+    expires_at timestamptz,
+    declined_reason_code text,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE selection.offer_version (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    offer_id uuid NOT NULL REFERENCES selection.offer(id),
+    version integer NOT NULL,
+    offer_template_id uuid NOT NULL REFERENCES selection.offer_template(id),
+    variables jsonb NOT NULL,                -- resolved from candidate, requisition and contract
+    manual_adjustment jsonb,                 -- requires approval, audited
+    approved_by uuid,
+    document_id uuid,                        -- rendered offer in files.document
+    signed_document_id uuid,
+    esign_envelope_id text,
+    sent_at timestamptz, opened_at timestamptz, signed_at timestamptz,
+    UNIQUE (offer_id, version)
+);
+
+CREATE TABLE selection.offer_contract_mapping (
+    offer_id uuid PRIMARY KEY REFERENCES selection.offer(id),
+    contract_id uuid NOT NULL,
+    contract_version_id uuid NOT NULL,       -- the version in force AT SIGNATURE
+    placement_fee_pct numeric(5,2) NOT NULL, -- fixed here so M9 reads a settled figure at day 90
+    ctc numeric(14,2), currency text NOT NULL DEFAULT 'INR',
+    mapped_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+## 6. State machines
+
+### `Interview` (`M7-I1`, `M7-I2`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | slots proposed to both sides | `proposed` | Candidate via app/WhatsApp; client via a **tokenised link, no login** |
+| `proposed` | **both** sides confirm | `confirmed` | Confirmation from both is required |
+| `proposed` | nobody answers by the deadline | `expired` | **Returns to the recruiter for reissue; does not silently disappear** |
+| `confirmed` | takes place | `held` | |
+| `held` | feedback captured | `feedback_recorded` | |
+| `proposed`/`confirmed` | rescheduled | `rescheduled` → `proposed` | **Original slot preserved in history**; both parties notified |
+| any | cancelled | `cancelled` | **Reason from the taxonomy required**; candidate returns to the shortlist, not removed. Cancellation does **not** stop the requisition aging clock — only hold does. |
+
+### `Offer` (`M7-I6`, `M7-I7`)
+
+`draft → generated → sent → opened → signed`, or `expired` / `declined` / `withdrawn`.
+
+- **Cannot be generated where the client has no active contract** or no mapping exists.
+- Delivery is WhatsApp with email as an alternative; **viewed-but-unsigned is distinguishable from
+  undelivered**.
+- An expired offer is **reissued as a new version**, never reopened.
+- A decline captures a reason feeding the A8 write-back.
+- On signature the mapping fixes the contract version and placement fee, producing the joining event
+  `03-09` consumes.
+
+### `SelectionDecision` (`M7-I4`)
+
+`pending → accepted | held | rejected`. Reject **requires** a structured reason — free text alone is
+rejected. Accept moves the candidate to offer. Hold retains them on the shortlist with an expiry. Every
+decision writes an append-only trail entry and triggers the asynchronous A8 write-back **without gating
+the offer stage**.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/interviews` | `interview:manage` | Propose slots to both sides |
+| `GET` | `/v1/interviews?state=&recruiterId=&date=` | `interview:read` | List; **awaiting-feedback flag**; filter by recruiter for the morning call |
+| `POST` | `/v1/interviews/:id/reschedule` · `/cancel` | `interview:manage` | Cancel requires a reason |
+| `POST` | `/v1/interviews/:id/feedback` | `interview:manage` | Structured ratings plus comments |
+| `POST` | `/v1/requisitions/:rid/candidates/:cid/decision` | `selection:decide` | Accept / hold / reject; **reason mandatory on reject** |
+| `GET` | `/v1/requisitions/:rid/candidates/:cid/selection-history` | `selection:read` | Every decision with actor, timestamp and reason |
+| `GET` | `/v1/selection-history/export?requisitionId=` | `selection:read` | Supports a client or regulatory query |
+| `GET`/`POST`/`PATCH` | `/v1/offer-templates` | `template:manage` | By state, role and skill; preview with representative data |
+| `POST` | `/v1/offers` | `offer:manage` | Template auto-selected; returns a preview |
+| `POST` | `/v1/offers/:id/send` | `offer:manage` | Delivery via `04-01` |
+| `POST` | `/v1/offers/:id/adjust` | `offer:approve` | Manual adjustment — **requires approval, audited** |
+| `POST` | `/v1/offers/:id/decline` | `offer:manage` | Reason captured |
+| `POST` | `/v1/offers/:id/reissue` | `offer:manage` | New version |
+| `GET` | `/v1/offers?state=&expiringWithin=` | `offer:read` | Tracking |
+| `GET` | `/v1/offers/:id/contract-mapping` | `offer:read` | Contract version and fixed placement fee |
+
+## 8. Events and jobs
+
+**Events emitted:** `selection.interview.proposed` · `.confirmed` · `.rescheduled` · `.cancelled` ·
+`selection.feedback.recorded` · `selection.decision.recorded` · `selection.offer.generated` · `.sent` ·
+`.opened` · `.signed` · `.expired` · `.declined` · `selection.offer.contract_mapped`.
+
+**Events subscribed:** `links.link.answered` (shortlist type) → write the client response into the
+selection record; `matching.shortlist.submitted` → open the selection stage.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `selection.expire-proposals` | hourly | Returns an unanswered slot proposal to the recruiter |
+| `selection.offer-reminders` | daily | Chases sent-but-unsigned offers **to closure** |
+| `selection.expire-offers` | hourly | Moves past-expiry offers to `expired` |
+| `selection.map-contract` | on signature | Fixes contract version and placement fee |
+| `selection.write-back-outcome` | on decision, decline and client rejection | Asynchronous into `03-07` |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Propose interview — offer times to candidate and client, record what both confirmed, expire unanswered | `/interviews/new` | `M7-I1` |
+| Interview list — by date with candidate, client and state; **awaiting-feedback marked**; filter by recruiter | `/interviews` | `M7-I2` |
+| Change interview — reschedule keeping the original, cancel with a reason | dialog | `M7-I2` |
+| Interview feedback — structured ratings by category, free-text comments, outstanding indicator | `/interviews/:id/feedback` | `M7-I3` |
+| Decision — accept / hold / reject with **reason from the configured list** | `/requisitions/:rid/candidates/:cid` | `M7-I4` |
+| Selection history — every decision, who, when, why; links to the feedback that informed it and to M6 overrides | drawer | `M7-I4` |
+| Offer templates | `/admin/offer-templates` | `M7-I5` |
+| Create offer — template auto-selected, variables filled, **preview before sending** | `/offers/new` | `M7-I6` |
+| Offer tracking — sent, opened, signed, expiring; decline with a reason | `/offers` | `M7-I7` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A slot is proposed to both candidate and client through their respective channels | `M7-I1` |
+| AC2 | The candidate confirms through the app or WhatsApp; the client through a **tokenised link with no login** | `M7-I1` |
+| AC3 | An expired proposal **returns to the recruiter for reissue** rather than silently disappearing | `M7-I1` |
+| AC4 | Confirmation from **both** sides is required before the interview moves to confirmed | `M7-I1` |
+| AC5 | Panel availability is not integrated with external calendars in Release 1 | `M7-I1` |
+| AC6 | Interviews awaiting feedback are visible so the pipeline does not stall silently | `M7-I2` |
+| AC7 | Filtering by recruiter supports the daily morning call workflow | `M7-I2` |
+| AC8 | A cancelled interview **returns the candidate to the shortlist rather than removing them** | `M7-I2` |
+| AC9 | Rescheduling preserves the original slot in history rather than overwriting it | `M7-I2` |
+| AC10 | Cancellation requires a reason from the configurable taxonomy | `M7-I2` |
+| AC11 | Both parties are notified on any change through their existing channels | `M7-I2` |
+| AC12 | Repeated rescheduling is visible as a pattern, since it is a fulfilment risk signal | `M7-I2` |
+| AC13 | **Cancellation does not stop the requisition aging clock — only hold does** | `M7-I2`, `M3-I15` |
+| AC14 | Feedback is captured in a structured form that can feed the A8 write-back, **not only as free text** | `M7-I3` |
+| AC15 | Client-side feedback arrives through a tokenised link with no login | `M7-I3`, `OI-HS-11` |
+| AC16 | Rating dimensions differ by candidate category where the taxonomy defines it | `M7-I3` |
+| AC17 | Incomplete feedback blocks the decision or is flagged, per the configured rule | `M7-I3` |
+| AC18 | Feedback is retained against the selection audit trail | `M7-I3` → `M0-I4` |
+| AC19 | **A rejection requires a structured reason from the configurable taxonomy; free text alone is rejected** | `M7-I4` |
+| AC20 | The reason taxonomy schema is agreed with the M6 feature schema **before either is built** | `M7-I4`, Part A coupling 1 |
+| AC21 | Accept moves the candidate to offer; hold retains them on the shortlist with an expiry | `M7-I4` |
+| AC22 | Every decision writes a selection audit trail entry with acting user and timestamp | `M7-I4` |
+| AC23 | The decision triggers the asynchronous A8 write-back **without gating the offer stage** | `M7-I4`, `M6-I9` |
+| AC24 | Every selection decision is retrievable with actor, timestamp and structured reason | `M7-I4` |
+| AC25 | The trail links to the interview feedback that informed the decision | `M7-I4` |
+| AC26 | M6 recruiter overrides appear in the same trail | `M7-I4`, `M6-I3` |
+| AC27 | The trail is **append-only and cannot be edited from any surface** | `M7-I4` |
+| AC28 | Export supports a client or regulatory query | `M7-I4` |
+| AC29 | An offer is generated from a template selected by **state, role and skill** | `M7-I5`, `M7-I6` |
+| AC30 | State-specific clauses are handled by template selection, **not by manual editing per offer** | `M7-I5` |
+| AC31 | A template change does not alter offers already generated | `M7-I5` |
+| AC32 | Preview renders with representative data before the template is activated | `M7-I5` |
+| AC33 | The template is auto-selected and the recruiter **previews before sending** | `M7-I6` |
+| AC34 | Variables populate from the candidate record, the requisition and the contract terms | `M7-I6` |
+| AC35 | A manual adjustment to a generated offer **requires approval and is audited** | `M7-I6` |
+| AC36 | Delivery goes over WhatsApp, with email as an alternative | `M7-I6`, `M7-I14` |
+| AC37 | **An offer cannot be generated where the contract has no mapping** | `M7-I6`, `M7-I16` |
+| AC38 | Expiry and reminders run to closure | `M7-I7` |
+| AC39 | A **viewed-but-unsigned offer is distinguishable from an undelivered one** | `M7-I7` |
+| AC40 | An expired offer can be reissued as a new version rather than reopened | `M7-I7` |
+| AC41 | A decline captures a reason feeding the A8 write-back | `M7-I7` |
+| AC42 | **Without D20 there is no offer acceptance, no joining event**, and D7, A6, A13 retention and A7 invoicing all stall | `M7-I7` |
+| AC43 | A signed offer is mapped to the **contract version in force at signature** | `M7-I16` |
+| AC44 | The placement fee term is captured on the offer so M9 reads a **fixed figure at day 90** | `M7-I16` |
+| AC45 | An offer cannot be generated where the client has no active contract | `M7-I16` |
+| AC46 | The mapping produces the joining event available downstream in M8 | `M7-I16` |
+| AC47 | Terms resolution uses the M2 service rather than reading contract records directly | `M7-I16`, `M2-I12` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-11` | Is client-side interview feedback in scope as a fifth A13 link type? Part A names four and feedback is not among them | **Not built as a link type.** Client feedback is Apollo-entered on the client's behalf. Either that is confirmed, or a fifth type is added as configuration in `02-14` — a decision, not an assumption. | `M7-I3`, `M7-I8` |
+| `OI-HS-07` | Who supplies **electronic signature**? Not named in either client document | Behind an interface with a stub adapter; **the integration cannot be sized against an unknown API**. Without it an accepted offer produces no signed document and the permanent chain has no joining event. **Estimate blocker.** | `M7-I15`, `X26` |
+| `OI-A-11` | The rejection taxonomy and the ranking feature schema are one design | Joint session scheduled **ahead of both `03-07` and `03-08` build**. A8 is not an additive layer on a ranking model with no slot for outcome data. | `M7-I4`, `M6-I9` |
+| `OI-A-13` | Guarantee period — if longer than 90 days, a replacement obligation attaches to a signed offer | The mapping captures `guarantee_period_days` from the contract version at signature, so a later answer does not require re-mapping historic offers | `M7-I16`, `M9-I12` |
+| `OI-HS-33` **[raised here]** | Offer expiry default, and whether it varies by client or role | 7 calendar days, held in `02-03`, per-client overridable. Nothing in the client documents states it. | `M7-I7` |

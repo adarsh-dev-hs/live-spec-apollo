@@ -1,0 +1,79 @@
+---
+title: "04-02 SMS (DLT-registered)"
+description: "The fallback channel and the primary OTP route. SMS reaches a candidate who has not installed the app and has not replied on WhatsApp."
+---
+
+**Package** `@apollo/integration-sms` · **Schema** `messaging` · **Plan** D10 · **Effort** ~2.0pd (within `M5-I8`) · **Risk** Medium `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+The fallback channel and the primary OTP route. SMS reaches a candidate who has not installed the app
+and has not replied on WhatsApp. In India every commercial SMS requires **DLT registration** of the
+sender header and each template with the telecom regulator — a lead time, not a build.
+
+## 2. Scope
+
+**In scope:** sending through an aggregator behind the `02-09` channel interface; DLT template id
+carried on each send; delivery receipts; suppression of invalid numbers.
+
+**Explicitly out of scope:** template authoring (`02-09`); OTP generation and rate limiting (`02-01`);
+**inbound SMS**, which is out of scope entirely in Release 1 (`OI-A-17`).
+
+**Explicitly not built:** two-way SMS conversations; SMS as an availability response channel; long-code
+inbound handling.
+
+## 3. Plan traceability
+
+No item of its own. SMS is one of the four channels inside `M5-I8` (message sender) and `M5-I9` (retry
+and receipts), and the delivery route for candidate OTP in `M4-I22`.
+
+## 4. Dependencies
+
+**Must exist first:** `02-09`, `02-01` (OTP).
+
+**Consumed by:** `02-01` OTP, `02-09` channel fallback, `03-06` cadence where a segment prefers SMS.
+
+**External:** `X02` — **DLT registration with the Indian telecom regulator.** Start week one; no amount
+of delivery capacity shortens it.
+
+## 5. Data model
+
+No tables. `messaging.template` carries the DLT template id in `provider_template_name`;
+`messaging.message.cost_units` counts segments.
+
+## 6. State machines
+
+As `02-09`'s `Message`. One SMS-specific rule: **a DLT-rejected template is a permanent failure**, not
+a transient one — it falls to the next channel in the trigger's order rather than retrying.
+
+## 7. API surface
+
+In-process `sms.send()` only, called by `02-09`. No inbound endpoint in Release 1.
+
+## 8. Events and jobs
+
+`sms.send` on the `provider` queue class. Receipts reconcile through `02-09`'s
+`messaging.retry-and-receipts` job.
+
+## 9. Frontend
+
+**N/A** — templates and channel order are `02-09`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A send carries its DLT template id and sender header | `X02` |
+| AC2 | A DLT rejection is treated as permanent and falls back to the next channel | `M5-I2`, `M5-I9` |
+| AC3 | OTP delivery works over SMS **with WhatsApp fallback** | `M4-I22` |
+| AC4 | An invalid number is suppressed and flagged on the candidate record rather than retried indefinitely | `M5-I9` |
+| AC5 | Segment counts are recorded for cost attribution | `OI-HS-05` |
+| AC6 | An inbound SMS reply is recorded and routed to manual entry rather than parsed | `OI-A-17` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `X02` | DLT registration — sender header and per-template registration | **Week one.** Regulator lead time. | OTP and cadence fallback in Phase 3 |
+| `OI-A-17` | Confirm SMS is outbound-only in Release 1 | Yes. A candidate replying to an SMS currently has **no defined handling** other than manual entry. | `M5-D10` |
+| `OI-HS-51` **[raised here]** | Which SMS aggregator, and is it the same account as the WhatsApp BSP? | Not named anywhere. Many Indian BSPs sell both, which would halve the contracting effort — worth asking as one question rather than two. | `X01`, `X02` |

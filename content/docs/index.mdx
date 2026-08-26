@@ -1,186 +1,284 @@
 ---
-title: "Apollo Knowledge GWD — Engineering Documentation"
-description: "AI-native healthcare talent platform for Apollo Knowledge Services. Engineering translation of Apollo_Delivery_Plan_6Month_v0.3.html (v0.3, 16 milestones, 204 items)."
+title: "Apollo Knowledge GWD — engineering documentation"
+description: "The AI-native healthcare talent platform Hiresense is building for Apollo Knowledge Services: permanent placement and contractual shift staffing for nurses, doctors and allied…"
 ---
 
-AI-native healthcare talent platform for Apollo Knowledge Services.
-Engineering translation of `Apollo_Delivery_Plan_6Month_v0.3.html` (v0.3, 16 milestones, 204 items).
+The AI-native healthcare talent platform Hiresense is building for Apollo Knowledge Services: permanent
+placement and contractual shift staffing for nurses, doctors and allied health professionals across
+hospital and home healthcare settings, in India.
 
----
-
-## What this documentation is
-
-The delivery plan is a **commercial and scope document**: milestones, effort bands, risk, open
-decisions. It is organised by *when work is sold and scheduled*.
-
-This documentation is the **engineering translation**: it is organised by *what gets built and
-deployed*. Each spec below is a self-contained, independently implementable unit with its own
-data model, API surface, jobs, screens and acceptance criteria.
-
-**One spec = one implementation session.** Hand a single file to an engineer (or to Claude) and it
-contains everything needed to build that component without reading the other 50 files — beyond the
-shared standards in `01-standards/`, which are read once.
+**71 specifications. 208 buildable items. 1,062 conditions. 96 open decisions. 6 months.**
 
 ---
 
-## Stack
+## 1. What this is, and how it differs from the requirement doc
 
-| Layer | Choice |
+`requirement_doc/Apollo_Delivery_Plan_6Month_v0.4.html` is the commercial document: sixteen milestones,
+208 items, effort, risk and open items, organised by **when work is sold and scheduled**.
+
+This is the **engineering translation**, organised by **what gets built and deployed**.
+
+| | Requirement doc | `docs/` |
+|---|---|---|
+| Organised by | Milestone (M0–M15) | Component (platform, module, integration) |
+| Unit | A buildable item with an effort band | A spec that is one implementation session |
+| Audience | Client PM, UX team, commercial review | Engineers, and Claude |
+| Answers | What are we selling, when, for how much | What exists, what it does, what it depends on, how to know it works |
+
+The two are reconciled item by item in [00-04](/docs/00-foundation/00-04-component-map) §6: all 208 items
+map to exactly one component, and every component traces back to at least one item.
+
+The commercial document itself is reproduced verbatim in [`06-source-plan/`](06-source-plan/) so both
+sides of that reconciliation can be read without leaving this docs set. It is a **read-only copy** —
+converted, never rewritten, and never the place to record a decision. Sections 1–5 remain the source of
+truth; when they disagree with `06-source-plan/`, the disagreement is a decision to register in
+[05-03](/docs/05-delivery/05-03-open-decisions), not an error to silently correct in either direction.
+
+**Nothing here is invented scope.** Where a component exists that the source does not name, it is marked
+**[engineering addition]** with a justification — there is exactly one, `02-10`. Where the source is
+silent or contradictory, it is recorded as an open decision with an explicit working assumption carried
+forward consistently, never filled in with a quiet guess.
+
+---
+
+## 2. The stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Backend | **Fastify 5 · Node 22 · TypeScript** | Schema-first routes generating the OpenAPI document |
+| Persistence | **PostgreSQL 16, hand-written SQL, no ORM** | Client directive. `pg` + a thin query layer; forward-only plain-SQL migrations |
+| Cache / queue | Redis (ElastiCache) + BullMQ | Job runtime, rate limiters, idempotency keys |
+| Web | **React 19 · Vite · TypeScript · TanStack Query · shadcn/ui · Tailwind** | Three apps: console, public link pages, client portal |
+| Mobile | **React Native · Expo · EAS** | The only route by which shift attendance reaches the platform |
+| Monorepo | **Nx + npm workspaces** | Project graph enforces module boundaries |
+| Containers | **Docker** | api, worker and four Lambda handlers, all built as images |
+| CI/CD | **GitHub Actions** | OIDC to AWS, one artefact promoted through four environments |
+| Compute | **EC2 (Docker, ASG behind an ALB)** for api and worker; **Lambda** for webhook, email, S3 and cron edges | Long-lived pools on EC2; bursty, externally-triggered work on Lambda |
+| Infrastructure | Terraform, AWS **`ap-south-1` (Mumbai)**, Apollo-owned account | No personal data leaves the region, backups included |
+| Objects | S3, SSE-KMS, versioned | |
+
+Undecided pieces are carried as explicit assumptions, not silent choices — see
+[05-03](/docs/05-delivery/05-03-open-decisions) §6.
+
+---
+
+## 3. First time on this project — read these five, in order
+
+1. **[00-01 Product context](/docs/00-foundation/00-01-product-context)** — the business, the two ways
+   money reaches Apollo, and the actors. *Nothing else makes sense without it.*
+2. **[00-02 System architecture](/docs/00-foundation/00-02-system-architecture)** — the shape of the
+   system and why it is that shape.
+3. **[00-04 Component map](/docs/00-foundation/00-04-component-map)** — what exists and what depends on
+   what.
+4. **[01-standards/](#5-directory-map)** — all ten. Read once, obeyed always.
+5. **[05-02 Implementation playbook](/docs/05-delivery/05-02-implementation-playbook)** — how to take one
+   spec to a merged PR.
+
+Then read the one spec you are building. **One spec is one implementation session**: it contains
+everything needed for that component beyond the shared standards.
+
+---
+
+## 4. The eleven-section convention
+
+Every spec in `02-platform/` and `03-modules/` — and, adapted, in `04-integrations/` and `05-delivery/`
+— has the same eleven sections, in the same order:
+
+| § | Section | Contains |
+|---|---|---|
+| 1 | **Purpose** | One paragraph: what it is for |
+| 2 | **Scope** | In scope · explicitly out of scope · explicitly not built |
+| 3 | **Plan traceability** | Which requirement items this covers, with effort bands |
+| 4 | **Dependencies** | What must exist first · what consumes this · external |
+| 5 | **Data model** | Tables, columns, types, indexes |
+| 6 | **State machines** | Every lifecycle, as a transition table |
+| 7 | **API surface** | Endpoints, shapes, permissions, errors |
+| 8 | **Events and jobs** | Emitted · subscribed · scheduled |
+| 9 | **Frontend** | Screens, routes, components |
+| 10 | **Acceptance criteria** | Testable statements, each traced to a requirement condition |
+| 11 | **Open questions** | Decisions blocking this component, each with a working assumption |
+
+**A section that does not apply says N/A. It is never omitted** — a reader must always be able to tell
+"nothing here" from "not written yet".
+
+Each spec opens with a metadata line:
+
+```
+**Package** `@apollo/name` · **Schema** `name` · **Plan** <refs> · **Effort** ~Npd · **Risk** <level> · **Build in** Phase N
+```
+
+---
+
+## 5. Directory map
+
+### `00-foundation/` — context, read once
+
+| File | What it covers |
 |---|---|
-| Backend | Node.js 22 LTS · TypeScript · **Express 5** (modular monolith + separate worker process) |
-| Frontend | **React 19 + Vite** · TypeScript · TanStack Query · React Router · Tailwind |
-| Database | **PostgreSQL 16** (Amazon RDS, ap-south-1) |
-| Cache / queue | **Redis 7** (Amazon ElastiCache) · BullMQ |
-| Object store | **Amazon S3** (ap-south-1, versioned, KMS-encrypted) |
-| Hosting | **AWS ap-south-1 (Mumbai) only**, Apollo-owned account, ECS Fargate behind ALB |
-| Mobile | React Native (candidate app) — consumes the same API, specified in `03-07` |
+| [00-01](/docs/00-foundation/00-01-product-context) | The business, the two value flows end to end, actors, surfaces, and the operating facts that change design |
+| [00-02](/docs/00-foundation/00-02-system-architecture) | Modular monolith plus worker, stack decisions and their reasons, request/job/inbound paths, deployment topology, the boundaries that must not be crossed |
+| [00-03](/docs/00-foundation/00-03-domain-model) | Every entity in one place with its owner, the relationship map, the three lifecycles that cross components, and contested ownership |
+| [00-04](/docs/00-foundation/00-04-component-map) | The component register, the dependency graph, and the requirement-item → component index for all 208 items |
+| [00-05](/docs/00-foundation/00-05-delivery-roadmap) | Seven build phases, eight gates, the three assumptions the gates exist to settle, the critical path and what compresses |
+| [00-06](/docs/00-foundation/00-06-glossary) | Business, plan and technical terms used precisely |
 
-All personal data stays in `ap-south-1`. This is a DPDP requirement, not a preference.
+### `01-standards/` — house rules, read once, obeyed always
 
----
-
-## Reading order
-
-**First time on the project — read these five, in order:**
-
-1. [`00-foundation/00-01-product-context.md`](/docs/00-foundation/00-01-product-context) — what the business actually does
-2. [`00-foundation/00-02-system-architecture.md`](/docs/00-foundation/00-02-system-architecture) — how the system is shaped
-3. [`00-foundation/00-03-domain-model.md`](/docs/00-foundation/00-03-domain-model) — every entity, in one place
-4. [`00-foundation/00-04-component-map.md`](/docs/00-foundation/00-04-component-map) — the component list and what depends on what
-5. [`01-standards/`](/docs/01-standards) — all ten. These are the house rules; every spec assumes them.
-
-**Then** pick the component you are building from `02-platform/` or `03-modules/` and read only that file.
-
----
-
-## Directory map
-
-### `00-foundation/` — context (read once)
-
-| File | Contents |
+| File | What it covers |
 |---|---|
-| [00-01-product-context.md](/docs/00-foundation/00-01-product-context) | Business, actors, the two revenue flows, surfaces |
-| [00-02-system-architecture.md](/docs/00-foundation/00-02-system-architecture) | Modular monolith, processes, request/job/event paths, AWS topology |
-| [00-03-domain-model.md](/docs/00-foundation/00-03-domain-model) | All ~70 entities, ownership, relationships, state machines |
-| [00-04-component-map.md](/docs/00-foundation/00-04-component-map) | Component register, dependency graph, milestone → component mapping |
-| [00-05-delivery-roadmap.md](/docs/00-foundation/00-05-delivery-roadmap) | Six-month build order in eight phases |
-| [00-06-glossary.md](/docs/00-foundation/00-06-glossary) | Domain terms, plan identifiers, abbreviations |
+| [01-01](/docs/01-standards/01-01-repository-layout) | Nx monorepo tree, module package shape, enforced boundary rules, naming, commands |
+| [01-02](/docs/01-standards/01-02-backend-conventions) | The four layers, route and service patterns, transactions, what replaces an ORM, the error taxonomy |
+| [01-03](/docs/01-standards/01-03-frontend-conventions) | Feature folders, the five states every screen must have, data fetching, forms, accessibility, link pages, the app, performance budgets |
+| [01-04](/docs/01-standards/01-04-api-contract) | REST shape, envelopes, RFC 9457 errors, listing conventions, idempotency, auth realms, versioning, generated artefacts |
+| [01-05](/docs/01-standards/01-05-database-conventions) | Schema per module with a role per schema, table conventions, append-only tables, indexing, forward-only migrations, isolation |
+| [01-06](/docs/01-standards/01-06-events-and-jobs) | The event spine that cannot be retrofitted, the outbox, the queue classes, every scheduled job in the platform, cost instrumentation |
+| [01-07](/docs/01-standards/01-07-auth-and-rbac) | Four realms, the principal, roles and permissions, the unresolved data-scoping decision, link authorisation, what is always audited |
+| [01-08](/docs/01-standards/01-08-testing-and-quality) | The condition-to-test rule, test layers, the fourteen non-negotiable suites, coverage gates, definition of done, UAT |
+| [01-09](/docs/01-standards/01-09-infrastructure-and-deployment) | Four environments, EC2 and Lambda topology, Docker, GitHub Actions pipelines, observability, backup and recovery |
+| [01-10](/docs/01-standards/01-10-security-and-data-protection) | Data classes, consent, residency, retention and its two unresolved conflicts, application security, the link surface, incident response |
 
-### `01-standards/` — house rules (read once, obey always)
+### `02-platform/` — depended on by two or more modules, built once
 
-| File | Contents |
-|---|---|
-| [01-01-repository-layout.md](/docs/01-standards/01-01-repository-layout) | pnpm monorepo, folder-per-module, file naming |
-| [01-02-backend-conventions.md](/docs/01-standards/01-02-backend-conventions) | Module anatomy, layering, dependency rules, DI |
-| [01-03-frontend-conventions.md](/docs/01-standards/01-03-frontend-conventions) | Feature folders, data fetching, forms, state |
-| [01-04-api-contract.md](/docs/01-standards/01-04-api-contract) | REST shape, envelopes, pagination, errors, idempotency |
-| [01-05-database-conventions.md](/docs/01-standards/01-05-database-conventions) | Naming, migrations, soft delete, versioning, temporal lookups |
-| [01-06-events-and-jobs.md](/docs/01-standards/01-06-events-and-jobs) | Outbox, event catalogue, BullMQ queues, schedulers |
-| [01-07-auth-and-rbac.md](/docs/01-standards/01-07-auth-and-rbac) | Three identity types, permission model, data scoping |
-| [01-08-testing-and-quality.md](/docs/01-standards/01-08-testing-and-quality) | Test pyramid, fixtures, CI gates, definition of done |
-| [01-09-infrastructure-and-deployment.md](/docs/01-standards/01-09-infrastructure-and-deployment) | AWS topology, four environments, pipeline, IaC |
-| [01-10-security-and-data-protection.md](/docs/01-standards/01-10-security-and-data-protection) | DPDP, consent, retention, encryption, secrets |
+| File | What it covers | Plan |
+|---|---|---|
+| [02-01](/docs/02-platform/02-01-identity-and-access) | Three identity realms, roles and permissions, portal data scoping | F01–F03, D3, D12 |
+| [02-02](/docs/02-platform/02-02-audit-trail) | The append-only record of who did what, and the shared timeline | F04 |
+| [02-03](/docs/02-platform/02-03-settings-and-reference-data) | The nine configurable lists and windows; categories and care settings as data | F05 |
+| [02-04](/docs/02-platform/02-04-file-storage) | Every uploaded file: versions, virus scanning, expiring links, Mumbai residency | F06 |
+| [02-05](/docs/02-platform/02-05-design-system) | Tokens and components for five surfaces, and the standard states | F12 |
+| [02-06](/docs/02-platform/02-06-console-shell) | The frame every Ops screen sits inside | D11 |
+| [02-07](/docs/02-platform/02-07-list-engine) | The shared table twenty screens use: filter, sort, page, saved views, export | F08 |
+| [02-08](/docs/02-platform/02-08-inbound-pipeline) | Receive, resolve sender, classify intent, retry — built once, consumed by A14 | A1 |
+| [02-09](/docs/02-platform/02-09-outbound-messaging) | Templates, triggers, one sender across four channels, retry, receipts, preferences | F07, D10 |
+| [02-10](/docs/02-platform/02-10-job-runtime) | Queues, retries, dead letters and schedules — **[engineering addition]** | — |
+| [02-11](/docs/02-platform/02-11-event-spine) | The one prerequisite that cannot be added afterwards | F14 |
+| [02-12](/docs/02-platform/02-12-data-protection) | Consent, residency, retention, erasure | F13 |
+| [02-13](/docs/02-platform/02-13-market-adapter-layer) | Three interfaces any country's registries fit behind | A12 |
+| [02-14](/docs/02-platform/02-14-client-link-surfaces) | The entire client relationship in Release 1: one mechanism, four link types | A13 |
+| [02-15](/docs/02-platform/02-15-environments-and-observability) | Four environments, the pipeline, monitoring, backup and a rehearsed restore | F10, D11 |
 
-### `02-platform/` — shared components (built once, used everywhere)
+### `03-modules/` — one spec per implementable unit
 
-Everything here is a dependency of two or more modules. **Build these before the modules that need them.**
-
-| # | Component | Package | Plan ref |
-|---|---|---|---|
-| [02-01](/docs/02-platform/02-01-identity-and-access) | Identity & access | `@apollo/iam` | F01, F02, F03 |
-| [02-02](/docs/02-platform/02-02-audit-trail) | Audit trail | `@apollo/audit` | F04 |
-| [02-03](/docs/02-platform/02-03-settings-and-lists) | Settings & reference lists | `@apollo/config` | F05 |
-| [02-04](/docs/02-platform/02-04-file-storage) | File storage | `@apollo/files` | F06 |
-| [02-05](/docs/02-platform/02-05-design-system) | Design system & UI kit | `@apollo/ui` | F12 |
-| [02-06](/docs/02-platform/02-06-list-engine) | List engine (filter/sort/page/export) | `@apollo/list` | F08 |
-| [02-07](/docs/02-platform/02-07-outbound-messaging) | Outbound messaging | `@apollo/messaging` | F07, D10 |
-| [02-08](/docs/02-platform/02-08-inbound-pipeline) | Inbound message pipeline | `@apollo/inbound` | A1 (shared stack) |
-| [02-09](/docs/02-platform/02-09-event-store-and-projections) | Event store & projections | `@apollo/events` | F14 |
-| [02-10](/docs/02-platform/02-10-client-link-tokens) | Tokenised client links | `@apollo/links` | A13 |
-| [02-11](/docs/02-platform/02-11-approval-engine) | Maker-checker approval engine | `@apollo/approvals` | D23 |
-| [02-12](/docs/02-platform/02-12-adapter-framework) | External adapter framework | `@apollo/adapters` | A12 |
-| [02-13](/docs/02-platform/02-13-job-runtime) | Job & scheduler runtime | `@apollo/jobs` | (implicit) |
-
-### `03-modules/` — business modules
-
-| # | Module | Package | Plan ref |
-|---|---|---|---|
-| [03-01](/docs/03-modules/03-01-clients) | Clients, sites & contacts | `@apollo/clients` | D1 / M2 |
-| [03-02](/docs/03-modules/03-02-contracts-and-rate-cards) | Contracts & rate cards | `@apollo/contracts` | D13, D1 / M2 |
-| [03-03](/docs/03-modules/03-03-demand-intake) | Demand intake channels | `@apollo/intake` | A1 / M3 |
-| [03-04](/docs/03-modules/03-04-requisitions) | Requisitions & fulfilment | `@apollo/requisitions` | D2, D14 thin / M3 |
-| [03-05](/docs/03-modules/03-05-candidates) | Candidates & supply bases | `@apollo/candidates` | D3, A2, A9 / M4 |
-| [03-06](/docs/03-modules/03-06-credentials-and-verification) | Credentials & verification | `@apollo/credentials` | D4, D16 / M4 |
-| [03-07](/docs/03-modules/03-07-candidate-app-backend) | Candidate app backend | `@apollo/candidate-app` | D3 / M4 |
-| [03-08](/docs/03-modules/03-08-engagement-and-availability) | Engagement & availability | `@apollo/engagement` | D10, D29, A3, A4, A5, A14 / M5 |
-| [03-09](/docs/03-modules/03-09-matching-and-ranking) | Matching & ranking | `@apollo/matching` | D5, D18, A8 / M6 |
-| [03-10](/docs/03-modules/03-10-selection-and-offers) | Selection & offers | `@apollo/selection` | D6, D20 / M7 |
-| [03-11](/docs/03-modules/03-11-placements-and-trial) | Placements & trial tracking | `@apollo/placements` | D7, A6 / M8 |
-| [03-12](/docs/03-modules/03-12-attendance-and-timesheets) | Attendance & timesheets | `@apollo/attendance` | D22 thin / M8 |
-| [03-13](/docs/03-modules/03-13-billing-and-receivables) | Billing & receivables | `@apollo/billing` | D8, A7, D25 thin / M9 |
-| [03-14](/docs/03-modules/03-14-analytics-and-reporting) | Analytics & reporting | `@apollo/analytics` | D9, D28, A11 / M9 |
-| [03-15](/docs/03-modules/03-15-legacy-migration) | Legacy CPAL migration | `@apollo/migration` | A10 / M1 |
-| [03-16](/docs/03-modules/03-16-client-portal) | Client portal | `@apollo/portal` | D12 / M10 |
-| [03-17](/docs/03-modules/03-17-associate-onboarding) | Associate onboarding | `@apollo/onboarding` | D21 / M11 |
-| [03-18](/docs/03-modules/03-18-workforce-operations) | Workforce operations | `@apollo/workforce` | D23 / M12 |
-| [03-19](/docs/03-modules/03-19-payroll) | Payroll | `@apollo/payroll` | D24 / M13 |
-| [03-20](/docs/03-modules/03-20-demand-prioritisation) | Demand prioritisation & approval | `@apollo/demand-ops` | D14 full / M14 |
-| [03-21](/docs/03-modules/03-21-collections) | Collections & credit notes | `@apollo/collections` | D25 full / M15 |
+| File | What it covers | Plan |
+|---|---|---|
+| [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) | Clients, sites, contacts, sender identities, rate cards, contracts, the three waiting periods | D1, D13 |
+| [03-02](/docs/03-modules/03-02-demand-intake) | Six channels, four queues, spreadsheet mapping, completeness scoring and the chase | A1 |
+| [03-03](/docs/03-modules/03-03-requisitions-and-allocation) | The requisition, its versions and states, the fulfilment board, shift lines, owner and allocation | D2, D14 (thin) |
+| [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) | The candidate, two supply bases, credentials, verification queue, category attributes | D4, D16, A2, A9 |
+| [03-05](/docs/03-modules/03-05-candidate-app) | Sign-up, profile, jobs, shifts, **check-in**, documents, availability | D3 |
+| [03-06](/docs/03-modules/03-06-engagement-and-availability) | Six segments, cadence, decay, voice campaigns, response capture on one schema | D29, A3, A4, A5, A14 |
+| [03-07](/docs/03-modules/03-07-matching-and-ranking) | Search, ranked sets with rationale, six weight sets, overrides, outcome write-back | D5, D18, A8 |
+| [03-08](/docs/03-modules/03-08-selection-and-offers) | Interviews, structured decisions, offers to signature and contract mapping | D6, D20 |
+| [03-09](/docs/03-modules/03-09-placement-and-trial) | Joining, privileging, day 0/7/30/60/90, and the immutable day-90 record | D7, A6 |
+| [03-10](/docs/03-modules/03-10-attendance-and-timesheets) | Attendance from app check-ins, exceptions, timesheets, client approval, deemed approval | D22 (thin) |
+| [03-11](/docs/03-modules/03-11-billing-and-receivables) | Two invoice paths, the evidence behind each, receivables | D8, A7, D25 (thin) |
+| [03-12](/docs/03-modules/03-12-analytics-and-reporting) | Seven reports and the monthly pack, from marts built on the event spine | D9, D28, A11 |
+| [03-13](/docs/03-modules/03-13-legacy-migration) | Profiling, the pipeline, duplicates, reconciliation — the largest unpriced item | A10 |
+| [03-14](/docs/03-modules/03-14-client-portal) | The first client login, and the sixth intake channel | D12 |
+| [03-15](/docs/03-modules/03-15-associate-onboarding) | Associate profile, statutory forms, document checklist, the payroll gate | D21 |
+| [03-16](/docs/03-modules/03-16-workforce-operations) | Maker-checker engine, salary revisions, advances, holds, geo-fencing | D23 |
+| [03-17](/docs/03-modules/03-17-payroll) | Pay runs against a third-party engine, statutory reports, payslips | D24 |
+| [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) | Priority scoring, recruiter suggestion, requisition approval | D14 (full) |
+| [03-19](/docs/03-modules/03-19-timesheet-extensions) | Leave, overtime, internal approval routing | D22 (full) |
+| [03-20](/docs/03-modules/03-20-collections) | Payments, TDS, ageing, dunning, credit and debit notes | D25 (full) |
 
 ### `04-integrations/` — external systems
 
-| # | Contents |
-|---|---|
-| [04-01](/docs/04-integrations/04-01-integration-register) | Every external system, status, risk, cost driver, failure mode |
-| [04-02](/docs/04-integrations/04-02-whatsapp) | WhatsApp Business API — inbound + outbound, one number, templates |
-| [04-03](/docs/04-integrations/04-03-voice-and-transcription) | Outbound voice, speech-to-text, answer extraction |
-| [04-04](/docs/04-integrations/04-04-document-ocr-and-esignature) | Document OCR, electronic signature |
-| [04-05](/docs/04-integrations/04-05-identity-and-registry-verification) | Aadhaar/PAN/EPFO aggregator, council registries |
-| [04-06](/docs/04-integrations/04-06-payroll-and-finance) | Payroll engine, finance system invoice export |
+Start with the **[register](/docs/04-integrations/04-00-integration-register)**: every system, supplier
+status, risk, cost driver and failure mode, plus the rules every integration obeys.
 
-### `05-delivery/` — running the build
+| File | System | Supplier named? |
+|---|---|---|
+| [04-01](/docs/04-integrations/04-01-whatsapp) | WhatsApp Business Platform | No |
+| [04-02](/docs/04-integrations/04-02-sms) | SMS, DLT-registered | No |
+| [04-03](/docs/04-integrations/04-03-email) | Email ingestion and sending | Amazon SES |
+| [04-04](/docs/04-integrations/04-04-outbound-voice) | Outbound voice | No |
+| [04-05](/docs/04-integrations/04-05-speech-to-text) | Speech-to-text | No |
+| [04-06](/docs/04-integrations/04-06-ai-parsing-and-classification) | AI parsing and intent classification | No |
+| [04-07](/docs/04-integrations/04-07-client-hrms-ats) | Client HRMS / ATS connectors | Count unknown |
+| [04-08](/docs/04-integrations/04-08-client-spreadsheets) | Client spreadsheet formats | Count unknown |
+| [04-09](/docs/04-integrations/04-09-credential-registries) | Credential registries and aggregator | No |
+| [04-10](/docs/04-integrations/04-10-document-ocr) | Document OCR | No |
+| [04-11](/docs/04-integrations/04-11-electronic-signature) | Electronic signature | No |
+| [04-12](/docs/04-integrations/04-12-app-stores) | Apple App Store and Google Play | Accounts pending |
+| [04-13](/docs/04-integrations/04-13-finance-system) | Finance system | No |
+| [04-14](/docs/04-integrations/04-14-payroll-engine) | Payroll engine | No |
+| [04-15](/docs/04-integrations/04-15-legacy-cpal) | Legacy CPAL | Access pending |
 
-| # | Contents |
+### `05-delivery/` — how the work happens
+
+| File | What it covers |
 |---|---|
-| [05-01](/docs/05-delivery/05-01-build-order) | Dependency-ordered build sequence, phase gates |
-| [05-02](/docs/05-delivery/05-02-implementation-playbook) | How to take one spec from doc to merged PR |
-| [05-03](/docs/05-delivery/05-03-open-decisions) | All 45 open items, what each blocks, working assumptions |
+| [05-01](/docs/05-delivery/05-01-build-sequence) | All 35 specs in build order as one **phase → epic → spec → tasks → blocks** table, then the phase gates and exit conditions, what cannot be resequenced, and what gets cut first. **Carries no day counts or dates** — sequence lives here, calendar in [00-05](/docs/00-foundation/00-05-delivery-roadmap), effort in [06-03](/docs/06-source-plan/06-03-timeline) |
+| [05-02](/docs/05-delivery/05-02-implementation-playbook) | One spec → a merged PR: what to read, the order of work, tests, the PR template, and what to do when the spec is wrong |
+| [05-03](/docs/05-delivery/05-03-open-decisions) | All 96 open decisions with owners and working assumptions, the 7 estimate blockers, and the 24 assumptions in force |
+| [05-04](/docs/05-delivery/05-04-external-dependencies) | The 22 accounts, contracts and registrations Apollo must obtain, by month and by track |
+| [05-05](/docs/05-delivery/05-05-documentation-uat-and-golive) | The four D11 deliverables: technical documentation, user guides, UAT support, cutover and legacy retirement |
+
+### `06-source-plan/` — the client plan, reproduced
+
+The requirement document converted to markdown, page for page. Read it to check what was actually sold;
+do not edit it — it is regenerated from the HTML by `docs-site/scripts/import-requirement-doc.mjs`
+(`npm run import:prd`). The original, with its tabs, filters and styling intact, is served by the docs
+site at `/requirement-doc`.
+
+| File | What it covers |
+|---|---|
+| [06-01](/docs/06-source-plan/06-01-read) | **How to read this plan** — The source doc's own reading guide: what a milestone, an item, an effort band and a condition mean in its vocabulary |
+| [06-02](/docs/06-source-plan/06-02-summary) | **Summary** — The commercial summary: scope at a glance, totals, and what the six months buy |
+| [06-03](/docs/06-source-plan/06-03-timeline) | **Timeline and estimate** — The month-by-month gantt and the effort estimate behind it, per milestone and in total |
+| [06-04](/docs/06-source-plan/06-04-register) | **Scope register** — All 208 items in one flat register, with client ref, band, effort, AI leverage, risk and confidence |
+| [06-05](/docs/06-source-plan/06-05-clientdoc) | **The client's own document** — The excerpts from Apollo's original brief that the plan was written against |
+| [06-06](/docs/06-source-plan/06-06-milestone-detail) | **Milestone detail** — Index of the sixteen milestone pages below, with item counts and effort per milestone |
+| [06-07](/docs/06-source-plan/06-07-m0) … [06-22](/docs/06-source-plan/06-22-m15) | One page per milestone, M0 to M15: what it owns, what must exist first, every item with its screens and its conditions |
+| [06-23](/docs/06-source-plan/06-23-open) | **Open items** — the 49 open items as the source raised them, before they were merged into [05-03](/docs/05-delivery/05-03-open-decisions) |
+| [06-24](/docs/06-source-plan/06-24-integ) | **Integrations** — the external systems the plan names, as it names them |
+| [06-25](/docs/06-source-plan/06-25-deps2) | **Dependencies** — the X01–X29 external dependencies with the months they are needed by |
+---
+
+## 6. Traceability scheme
+
+Short, stable identifiers used everywhere.
+
+| Prefix | Means | Source | Example |
+|---|---|---|---|
+| `M<n>` | Milestone | Verbatim from the plan | `M3` — Demand Intake & Allocation |
+| `M<n>-I<k>` | **The engineering index** — one per buildable item | Verbatim | `M3-I12` — fulfilment board |
+| `D<n>` / `A<n>` | The client's own deliverable number | Verbatim | `D2`, `A13` |
+| `F<nn>` | A platform prerequisite Hiresense identified, assumed by the client's list but named nowhere in it | Verbatim | `F14` — event recording |
+| `OI-A-<nn>` | Open decision from Part A | Verbatim | `OI-A-13` — guarantee period |
+| `OI-M3-<nn>` | Open decision from the Part B M3 chapter | Verbatim | `OI-M3-02` — dedupe rule |
+| `OI-HS-<nn>` | Open decision raised by Hiresense. `01`–`18` from the plan; **`19`–`65` raised while writing these specs** | Verbatim / new | `OI-HS-29` — will a hospital click the link? |
+| `AS-<nn>` | A working assumption held until an open item closes. `01`–`06` from the plan; `07`–`24` adopted here | Verbatim / new | `AS-04` — M4 owns the attribute definition |
+| `X<nn>` | An external dependency: an account, contract, registration or access | Verbatim | `X29` — client link recipients |
+| `NN-KK` | A spec in these docs | New | `03-07` — matching and ranking |
+
+**Rules.**
+
+- Every acceptance criterion in a spec's §10 names the requirement item or condition it satisfies.
+- Every `OI-…` referenced in a spec exists in [05-03](/docs/05-delivery/05-03-open-decisions).
+- Every `AS-…` is listed in [05-03](/docs/05-delivery/05-03-open-decisions) §6 with every spec it applies
+  to — assumptions are applied in more than one place by design, and they move together.
+- Every one of the plan's 208 items appears in exactly one component's §3, indexed in
+  [00-04](/docs/00-foundation/00-04-component-map) §6.
+- Anything present here but absent from the source is marked **[engineering addition]** with a
+  justification.
 
 ---
 
-## Conventions used in every spec
+## 7. The seven things most likely to hurt
 
-Each component spec in `02-platform/` and `03-modules/` uses the same eleven sections:
+Pulled out of the specs because they decide the shape of the engagement.
 
-```
-1.  Purpose            — one paragraph, what it is for
-2.  Scope              — in scope / explicitly out of scope
-3.  Plan traceability  — which M<n>-I<k> items this covers
-4.  Dependencies       — what must exist first / what consumes this
-5.  Data model         — tables, columns, indexes
-6.  State machines     — every lifecycle, as a transition table
-7.  API surface        — endpoints, request/response shape
-8.  Events & jobs      — what it emits, what it subscribes to, scheduled work
-9.  Frontend           — screens, routes, components
-10. Acceptance criteria— testable statements, traced to the plan's conditions
-11. Open questions     — decisions blocking this component, with working assumption
-```
-
-If a section does not apply (a service with no screens), it says **N/A** rather than being omitted —
-so a reader can always tell the difference between "nothing here" and "not written yet".
-
----
-
-## Traceability
-
-Every requirement in this documentation traces back to the delivery plan:
-
-- `M<n>-I<k>` — engineering index from the plan (e.g. `M3-I12` = Fulfilment board)
-- `D<n>` / `A<n>` — Apollo's own deliverable number (e.g. `D2`, `A13`)
-- `F<nn>` — Hiresense-identified platform prerequisite (e.g. `F03` = role & permission model)
-- `OI-…` — open decision (e.g. `OI-A-13`), catalogued in `05-03-open-decisions.md`
-- `AS-<nn>` — working assumption held until an open item closes
-
-Nothing in these docs is invented scope. If a spec contains something the plan does not, it is
-marked **[engineering addition]** with a one-line justification.
-
+1. **`02-11` must be live before `03-03` writes its first requisition.** Build the event spine after M3
+   and the M9 reports cannot cover the earlier period at all. Not recoverable.
+2. **There is no client login until Phase 6.** Every client interaction is a tokenised link (`02-14`),
+   and both invoice paths run through it.
+3. **There is no attendance route but the app.** No app, no attendance, no timesheet, no shift invoice.
+4. **Permanent billing has no fallback.** No contract terms at trigger time means it does not run.
+5. **Seven estimate blockers are open**, including one — `OI-A-13` — that changes scope rather than a
+   number.
+6. **Half the suppliers are unnamed.** Each is an unpriced integration and a failure mode nobody can
+   test against.
+7. **The back half is compressed.** Five of the ten build steps begin in months five and six, each
+   needing the one before it, so they cannot be parallelised by adding people.

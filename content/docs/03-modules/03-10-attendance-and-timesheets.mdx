@@ -1,0 +1,282 @@
+---
+title: "03-10 Attendance and timesheets"
+description: "The contractual invoice chain. Shift attendance arrives from app check-ins — there is no other route — exceptions are resolved by a person, and the period is compiled into a…"
+---
+
+**Package** `@apollo/timesheets` · **Schema** `timesheets` · **Plan** D22 (thin slice) · **Effort** ~41.5pd · **Risk** High `SHARED` · **Build in** Phase 5
+
+## 1. Purpose
+
+The contractual invoice chain. Shift attendance arrives from app check-ins — **there is no other
+route** — exceptions are resolved by a person, and the period is compiled into a timesheet priced
+against the contract version in force. The client approves it through a tokenised link, or it is deemed
+approved when the window expires, and `03-11` invoices against the **approved** timesheet rather than
+raw attendance.
+
+Attendance is recorded with a location stamp that is **not enforced** in Release 1. The field exists so
+geo-fencing can be switched on in `03-16` without a data change.
+
+## 2. Scope
+
+### In scope
+
+- Shift attendance: expected, checked in, checked out, no-show, with the location stamp recorded
+- Exception resolution before a timesheet is compiled, including bulk resolution of a systemic cause
+- Manual time correction with a mandatory reason, audited because it changes an invoice
+- Timesheet compilation, pricing against the contract version, and reissue after correction
+- Sending for approval, which issues the A13 timesheet link
+- Timesheet tracking with the **visible deemed-approval countdown**
+- The check-in receiver, including offline check-ins synced later
+- The approved-timesheet export for the manual payroll process
+
+### Explicitly out of scope
+
+- The app check-in screen — `03-05`.
+- The client approval page and link mechanism — `02-14`.
+- Invoicing — `03-11`.
+- Leave categorisation, overtime treatment and internal approval routing — `03-19`, Phase 7.
+- Geo-fence enforcement and attendance upload from outside — `03-16`.
+- Trial check-ins, which are a different thing entirely — `03-09`.
+
+### Explicitly not built
+
+- **Leave and overtime.** Explicitly out of the thin slice.
+- Internal Apollo approval before the client sees the timesheet — `03-19`.
+- Blocking a check-in on location. Recorded, not enforced.
+- Silent amendment of an approved timesheet. A correction requires reissue.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M8-I7` | D22 | Shift attendance and exception resolution | L | 4.5 |
+| `M8-I8` | D22 | Timesheet | XL | 5.0 |
+| `M8-I9` | D22 | Timesheet tracking | L | 3.0 |
+| `M8-I14` | D22 | Check-in receiver | L | 3.0 |
+| `M8-I15` | D22 | Timesheet build | XL | 5.0 |
+| `M8-I16` | D22 | Timesheet waiting period | M | 2.0 |
+| `M8-I17` | D22 | Approved timesheet export | S | 1.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-05` (**the app is the only attendance route**), `03-03` (shift demand lines
+to match a check-in against), `03-01` (rate resolution and the deemed-approval window), `02-14` (the
+approval link), `02-02` (corrections are audited).
+
+**Consumed by:** `03-11` (**the approved timesheet is the shift-invoice input**), `03-17` (payroll
+inputs), `03-19` (extends this), `03-16` (attendance pairing and geo-fencing).
+
+**External:** none directly.
+
+## 5. Data model
+
+```sql
+CREATE TABLE timesheets.shift_attendance (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    shift_demand_line_id uuid NOT NULL,
+    candidate_id uuid NOT NULL,
+    shift_acceptance_id uuid,
+    expected_start timestamptz NOT NULL, expected_end timestamptz NOT NULL,
+    checked_in_at timestamptz, checked_out_at timestamptz,
+    check_in_location point,                  -- RECORDED, not enforced (Part A CLOSED)
+    check_out_location point,
+    check_in_accuracy_m numeric(6,1),
+    was_offline_sync boolean NOT NULL DEFAULT false,
+    location_flag text CHECK (location_flag IN ('within_expected','outside_expected','unknown')),
+    state text NOT NULL DEFAULT 'expected' CHECK (state IN
+      ('expected','checked_in','checked_out','no_show','exception','resolved')),
+    corrected_start timestamptz, corrected_end timestamptz,
+    correction_reason text, corrected_by uuid, corrected_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX ON timesheets.shift_attendance (shift_demand_line_id, candidate_id);
+CREATE INDEX ON timesheets.shift_attendance (state, expected_start);
+
+CREATE TABLE timesheets.attendance_exception (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    shift_attendance_id uuid NOT NULL REFERENCES timesheets.shift_attendance(id),
+    kind text NOT NULL CHECK (kind IN
+      ('missing_check_in','missing_check_out','no_show','unmatched_check_in','location_outside')),
+    state text NOT NULL DEFAULT 'open' CHECK (state IN ('open','resolved')),
+    systemic_cause text,                      -- e.g. 'app_outage' — enables bulk resolution
+    resolution text, resolution_reason text,
+    resolved_by uuid, resolved_at timestamptz,
+    raised_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE timesheets.timesheet (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    reference text NOT NULL UNIQUE,
+    client_id uuid NOT NULL, location_id uuid NOT NULL,
+    period_start date NOT NULL, period_end date NOT NULL,
+    contract_version_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'building' CHECK (state IN
+      ('building','built','internally_approved','sent_for_approval',
+       'approved','deemed_approved','queried','invoiced','void')),
+    -- 'internally_approved' is added by 03-19 in Phase 7; unused before then
+    has_unresolved_exceptions boolean NOT NULL DEFAULT false,
+    total_hours numeric(8,2), total_value numeric(14,2), currency text NOT NULL DEFAULT 'INR',
+    client_link_id uuid,
+    sent_for_approval_at timestamptz,
+    approval_window_days integer, approval_window_source text
+      CHECK (approval_window_source IN ('client','platform_default')),
+    approved_at timestamptz, approved_by_recipient_id uuid,
+    deemed_at timestamptz,
+    reissued_from uuid REFERENCES timesheets.timesheet(id),
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (client_id, location_id, period_start, period_end, reference)
+);
+CREATE INDEX ON timesheets.timesheet (state, sent_for_approval_at);
+
+CREATE TABLE timesheets.timesheet_line (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    timesheet_id uuid NOT NULL REFERENCES timesheets.timesheet(id),
+    shift_attendance_id uuid NOT NULL,
+    candidate_id uuid NOT NULL,
+    shift_date date NOT NULL,
+    hours numeric(6,2) NOT NULL,
+    rate_card_line_id uuid, rate numeric(14,2) NOT NULL,
+    value numeric(14,2) NOT NULL,
+    has_exception boolean NOT NULL DEFAULT false,
+    client_query_reason text                  -- a queried line routes back without blocking the rest
+);
+
+CREATE TABLE timesheets.timesheet_export (    -- the manual-payroll handoff (M8-I17, OI-A-15)
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid, period_start date NOT NULL, period_end date NOT NULL,
+    document_id uuid NOT NULL,
+    row_count integer NOT NULL,
+    exported_by uuid NOT NULL, exported_at timestamptz NOT NULL DEFAULT now(),
+    is_repeat boolean NOT NULL DEFAULT false  -- the same period cannot be silently exported twice
+);
+```
+
+## 6. State machines
+
+### `ShiftAttendance` (`M8-I7`, `M8-I14`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | shift accepted | `expected` | |
+| `expected` | check-in received | `checked_in` | Location **stamped, not checked**; offline sync keeps the **original timestamp** |
+| `checked_in` | check-out received | `checked_out` | Ready for the timesheet |
+| `expected` | shift passes with no check-in | `no_show` | **Distinguishable from a missing check-in** |
+| `checked_in` | shift passes with no check-out | `exception` | **Does not silently become a full shift or a zero shift** |
+| — | check-in with no matching shift | `exception` | Raised, **never discarded** |
+| `exception` | resolved with a reason | `resolved` | Attributed and audited — it changes billable hours |
+
+### `Timesheet` (`M8-I8`, `M8-I15`, `M8-I16`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | period opens | `building` | Lines accumulate from resolved attendance |
+| `building` | compiled | `built` | Priced against the contract version in force. **Flagged if exceptions remain unresolved** |
+| `built` | sent | `sent_for_approval` | Issues the A13 timesheet link; the countdown starts **when the link is sent** |
+| `sent_for_approval` | client approves | `approved` | Recipient recorded |
+| `sent_for_approval` | window expires | `deemed_approved` | Per-client window, platform default fallback. **As valid an invoice input as an explicit approval** |
+| `sent_for_approval` | client queries a line | `queried` | **Routes back to Ops without approving the whole timesheet** |
+| `approved`/`deemed_approved` | invoiced by `03-11` | `invoiced` | One invoice per timesheet period, ever |
+| `approved`/`invoiced` | correction needed | `void` + new timesheet | **Reissued, not silently amended** |
+
+`03-19` inserts `internally_approved` between `built` and `sent_for_approval` in Phase 7. The client
+window still starts only when the link is actually sent.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/me/attendance/check-in` · `/check-out` | candidate | Idempotency key; original timestamp accepted |
+| `GET` | `/v1/attendance?client=&date=&candidate=&state=` | `timesheet:read` | Expected vs actual, location stamp, flags |
+| `GET` | `/v1/attendance/exceptions?kind=&state=open` | `timesheet:manage` | The resolution queue |
+| `POST` | `/v1/attendance/exceptions/:id/resolve` | `timesheet:manage` | Reason required |
+| `POST` | `/v1/attendance/exceptions/bulk-resolve` | `timesheet:manage` | A systemic cause, e.g. an app outage |
+| `POST` | `/v1/attendance/:id/correct` | `timesheet:correct` | **Reason required, audited — it changes an invoice** |
+| `POST` | `/v1/timesheets/build` | `timesheet:manage` | Compile a period for a client and location |
+| `GET` | `/v1/timesheets?state=&client=&period=` | `timesheet:read` | Tracking, with the deemed countdown |
+| `GET` | `/v1/timesheets/:id` | `timesheet:read` | Lines, hours, value, exception flags |
+| `POST` | `/v1/timesheets/:id/send-for-approval` | `timesheet:manage` | **Blocked while unresolved exceptions remain** |
+| `POST` | `/v1/timesheets/:id/resend` | `timesheet:manage` | New link, original invalidated |
+| `POST` | `/v1/timesheets/:id/reissue` | `timesheet:manage` | Correction after approval |
+| `POST` | `/v1/timesheet-exports` | `timesheet:export` | Approved and deemed-approved rows only; **repeat exports visible** |
+
+## 8. Events and jobs
+
+**Events emitted:** `timesheets.attendance.checked_in` · `.checked_out` · `.exception_raised` ·
+`.corrected` · `timesheets.timesheet.built` · `.sent_for_approval` · `.approved` · `.deemed_approved` ·
+`.queried` · `.invoiced` · `timesheets.export.taken`.
+
+**Events subscribed:** `candidates.shift.accepted` → create the `expected` row;
+`links.link.answered` (timesheet type) → approve or query; `links.link.deemed` → deemed approval.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `timesheets.detect-no-shows` | hourly | Raises exceptions after a shift window closes |
+| `timesheets.build` | daily / on demand | Compiles the period, resolves rates via `03-01`, prices lines |
+| `timesheets.deem-approval` | hourly | Marks deemed approved when the window expires; **countdown visible before expiry** |
+| `timesheets.export` | on demand or scheduled | The manual-payroll handoff |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Shift attendance — who was expected, check-in/out times, **where the phone was**; filter by client, date, candidate; flags missing check-ins and **home-healthcare check-ins away from the visit address**; manual correction with a reason | `/attendance` | `M8-I7` |
+| Resolve a problem — filter to missed check-in or check-out, resolve with a reason, bulk-resolve a systemic cause | `/attendance/exceptions` | `M8-I7` |
+| Timesheet — shifts, hours and value; lines with unresolved problems marked; send for approval | `/timesheets/:id` | `M8-I8` |
+| Timesheet tracking — by period, approval state, **time left before deemed approved**, resend | `/timesheets` | `M8-I9` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Attendance is recorded at shift level against a check-in and a location stamp | `M8-I7` |
+| AC2 | **The location stamp is recorded and not enforced**; geo-fencing is a named Phase 2 item | `M8-I7`, Part A CLOSED |
+| AC3 | A no-show is distinguishable from a missing check-in | `M8-I7` |
+| AC4 | A manual correction **requires a reason and is audited, since it affects an invoice** | `M8-I7` → `M0-I4` |
+| AC5 | **There is no alternative attendance route — no app means no attendance** | `M8-I7`, `M4-I7` |
+| AC6 | An exception is resolved **before the timesheet is compiled** for that period | `M8-I7` |
+| AC7 | A missed check-out **does not silently become a full shift or a zero shift**; it is resolved explicitly | `M8-I7` |
+| AC8 | Resolution is attributed and audited, since it changes billable hours | `M8-I7` |
+| AC9 | A systemic cause — an app outage — can be resolved in bulk | `M8-I7` |
+| AC10 | Unresolved exceptions are visible on the timesheet **before it is sent for approval** | `M8-I7` |
+| AC11 | A check-in away from the expected location is **flagged for a person to resolve**; whether it is blocked is a setting in M12 | `M8-I7`, `M12-I5` |
+| AC12 | A timesheet is compiled for the period from shift-level attendance | `M8-I8`, `M8-I15` |
+| AC13 | Value is calculated against the contract rate resolved through the M2 lookup | `M8-I8`, `M2-I11` |
+| AC14 | A timesheet with unresolved exceptions is **flagged before it can be sent for approval** | `M8-I8` |
+| AC15 | Sending for approval issues an A13 timesheet approval link | `M8-I8`, `M7-I12` |
+| AC16 | **Leave categorisation and overtime treatment are explicitly out of the thin slice** | `M8-I8` |
+| AC17 | A correction after approval **requires the timesheet to be reissued, not silently amended** | `M8-I8` |
+| AC18 | **An approved timesheet is the input to the D25 shift invoice, not raw attendance** | `M8-I9`, `M9-I15` |
+| AC19 | Where no response arrives, the per-client deemed-approval window applies | `M8-I9`, `M8-I16` |
+| AC20 | **The deemed countdown is visible before expiry, so finance can chase** | `M8-I9` |
+| AC21 | A platform default prevents an unconfigured client stalling invoicing | `M8-I9`, `OI-A-05` |
+| AC22 | Approval evidence is retrievable for a billing query, timestamped against an identified recipient | `M8-I9`, `OI-A-12` |
+| AC23 | A check-in matches to a shift demand line in M3 | `M8-I14`, `M3-I14` |
+| AC24 | **An offline check-in syncs with its original timestamp preserved, not the sync time** | `M8-I14` |
+| AC25 | A duplicate check-in from a retried sync **does not create a second attendance record** | `M8-I14` |
+| AC26 | The location stamp is stored without a boundary check | `M8-I14` |
+| AC27 | **A check-in with no matching shift raises an exception rather than being discarded** | `M8-I14` |
+| AC28 | Each line resolves a rate against the **contract version in force** | `M8-I15`, `M2-I11` |
+| AC29 | Compilation is repeatable; regenerating after a correction produces a consistent result | `M8-I15` |
+| AC30 | The approval state is set by the client through an A13 link, **not by an internal user** | `M8-I15`, Part A CLOSED |
+| AC31 | Internal approval routing is explicitly out of the thin slice | `M8-I15`, `M15-I2` |
+| AC32 | A timesheet with no client response is deemed approved after the configured window | `M8-I16` |
+| AC33 | The window resolves per client with a platform default fallback so **invoicing does not stall** | `M8-I16`, `OI-A-05` |
+| AC34 | A client response before expiry suppresses the timer | `M8-I16` |
+| AC35 | The deemed event is auditable and **visibly distinguished from an explicit approval** | `M8-I16` |
+| AC36 | **A deemed approval is as valid an invoice input as an explicit one** | `M8-I16`, `M9-I15` |
+| AC37 | Only approved or deemed-approved timesheets appear in the export | `M8-I17` |
+| AC38 | The same period **cannot be silently exported twice** without it being visible | `M8-I17` |
+| AC39 | The export is retired once M13 payroll connects directly | `M8-I17`, `M13-I5` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-15` | **No handoff from the approved timesheet to the manual payroll process is specified.** If required it is a Release 1 addition | `M8-I17` is built as an **addition rather than a clarification** — 1.0pd, and the client's letter (item 12) asks for it. Without it, approved timesheet data leaves the system with no defined artefact while payroll runs by hand. | `M8-D22` |
+| `OI-A-16` | **Contractual MVP volume ceiling** — the cap imposed by manual payroll processing | An Apollo input rather than a deliverable, but it bounds the throughput this module and `03-11` must support. **Should be a stated number, not a month-five discovery.** | `M8-D22`, `M9-D25` |
+| `OI-A-05` | Platform default deemed-approval window | 14 days, from `02-03` | `M8-I9`, `M8-I16` |
+| `OI-A-12` | Approval must be timestamped against an identified recipient | `02-14`'s recipient model | `M8-I9` |
+| `OI-HS-17` | Home healthcare visit address — who supplies the coordinate to check against? | Held on the shift line; **the source is unresolved**. Until then, `location_flag` is `unknown` for home visits rather than falsely `within_expected`. | `M8-I7`, `M12-I5` |
+| `OI-HS-18` | Should geo-fencing enforcement move from M12 into M8 for home healthcare? In a hospital a check-in is corroborated by a ward and colleagues; in a home the location stamp is the only evidence | **Flagged for a person to resolve**, which is what this module does today. Blocking outright is the `03-16` setting. The check itself is the same either way; only the reference point differs. | `M8-I7`, `M12-I5` |

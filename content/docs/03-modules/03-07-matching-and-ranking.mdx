@@ -1,0 +1,333 @@
+---
+title: "03-07 Matching and ranking"
+description: "Given a vacancy, produce a ranked list of candidates, best first, with a plain explanation of why each ranked where they did and which requirements they do not meet."
+---
+
+**Package** `@apollo/matching` · **Schema** `matching` · **Plan** D5, D18, A8 · **Effort** ~72.0pd · **Risk** High `MODEL` · **Build in** Phase 4
+
+## 1. Purpose
+
+Given a vacancy, produce a ranked list of candidates, best first, with a plain explanation of why each
+ranked where they did and which requirements they do not meet. Weights differ per candidate category
+and per supply base, so there are **at least six sets**. Recruiters can search manually, can move
+someone up or down, and every override is recorded. When a client or interviewer rejects someone with a
+structured reason, that reason feeds back and affects later rankings.
+
+The rejection taxonomy in `03-08` and the features this engine reads are **one design, not two**. If
+the ranking model has no slot for outcome data, feeding rejections back later means rebuilding it. Both
+schemas are agreed in a joint session before either module is built (Part A coupling 1).
+
+## 2. Scope
+
+### In scope
+
+- Advanced candidate search on skill, location, experience and status, with saved searches
+- Talent segments, **shared with the `03-06` cadence model rather than duplicated**
+- The ranked set: score, rationale, met / partly met / unmet criteria, staleness
+- Recruiter override with a mandatory reason, append-only
+- Weight sets per category × base, versioned by effective date
+- The ranking engine, producing rationale **as part of scoring, not reconstructed afterwards**
+- Feature extraction from credentials, category attributes, availability, certifications and outcomes
+- Weight-set selection, recorded on the ranked set
+- Shift-level ranking against a shift demand line
+- Outcome write-back from `03-08`
+- Shortlist assembly and submission, which issues the client link
+
+### Explicitly out of scope
+
+- Interview, decision and offer — `03-08`. It **produces** the outcomes this module consumes.
+- The client-facing shortlist page — `02-14`.
+- The candidate record, credentials and attributes — `03-04`.
+- Availability decay — `03-06`.
+
+### Explicitly not built
+
+- **Retraining the model automatically.** Release 1 applies a configured weight set; continuous
+  learning is not in this contract.
+- Showing candidates their own match score. Ranking is internal only.
+- Sending a shortlist to a client without a recruiter pressing the button.
+- Using the clinical and communication rating — nothing produces that value (`OI-A-07`).
+- Ranking on a partial input set. It fails visibly instead.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M6-I1` | D5 | Candidate search and saved searches | L | 3.0 |
+| `M6-I2` | D5 | Talent segments | M | 2.0 |
+| `M6-I3` | D18 | Ranked candidates, "why this rank", override | XL | 6.0 |
+| `M6-I4` | D5 | Build shortlist and submit | L | 3.0 |
+| `M6-I5` | D18 | Ranking weights | XL | 5.0 |
+| `M6-I6` | D18 | Ranking engine | XXL | 8.0 |
+| `M6-I7` | D18 | Ranking inputs | XL | 5.0 |
+| `M6-I8` | D18 | Weight set selection | L | 3.0 |
+| `M6-I9` | A8 | Outcome write-back | XL | 5.0 |
+| `M6-I10` | D18 | Shift ranking | L | 3.0 |
+
+## 4. Dependencies
+
+**Must exist first — all three, and ranking cannot run on a partial set:** `03-03` (the requisition and
+its category), `03-04` (credentials and category attributes), `03-06` (the freshness score). Plus
+`02-03` (the rejection taxonomy), `02-07`, `02-14` (submission issues the link).
+
+**Consumed by:** `03-08` takes the shortlist; everything after `03-08` depends on this indirectly.
+
+**External:** none. The engine is deterministic scoring against configured weights, not a model API.
+
+**Scheduling note:** the ranking-schema and rejection-taxonomy session with `03-08` happens **before
+either starts**. The client also asks for a crude ranked list on three fields in front of recruiters in
+week eight (gate G2b) — their overrides are the weighting specification.
+
+## 5. Data model
+
+```sql
+CREATE TABLE matching.weight_set (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_category text NOT NULL REFERENCES settings.list_entry(code),
+    base text NOT NULL CHECK (base IN ('base_a','base_b')),
+    version integer NOT NULL,
+    effective_from date NOT NULL,
+    weights jsonb NOT NULL,   -- {credential:0.30, specialty_match:0.25, availability:0.20,
+                              --  recency:0.10, outcomes:0.10, certification:0.05}
+    eligibility_rules jsonb NOT NULL DEFAULT '{}'::jsonb,   -- filter vs weight (OI-HS-10)
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (candidate_category, base, version)
+);
+
+CREATE TABLE matching.ranked_set (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,
+    shift_demand_line_id uuid,               -- non-null for shift ranking (M6-I10)
+    weight_set_id uuid NOT NULL REFERENCES matching.weight_set(id),
+    feature_version integer NOT NULL,        -- so a taxonomy change cannot silently alter old scores
+    state text NOT NULL DEFAULT 'generating'
+      CHECK (state IN ('generating','current','stale','failed')),
+    stale_reason text,                       -- 'requisition_revised' | 'outcome_recorded'
+    failure_reason text,                     -- missing category, credentials or availability
+    generated_at timestamptz NOT NULL DEFAULT now(),
+    generated_by uuid
+);
+CREATE INDEX ON matching.ranked_set (requisition_id, generated_at DESC);
+
+CREATE TABLE matching.rank_entry (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    ranked_set_id uuid NOT NULL REFERENCES matching.ranked_set(id),
+    candidate_id uuid NOT NULL,
+    rank integer NOT NULL,
+    score numeric(6,4) NOT NULL,
+    rationale jsonb NOT NULL,   -- { met:[…], partially_met:[…], unmet:[…],
+                                --   availability:{value, lastConfirmedAt, isStale},
+                                --   absent:[{feature:'clinical_rating', reason:'no producing system'}] }
+    state text NOT NULL DEFAULT 'ranked' CHECK (state IN
+      ('ranked','shortlisted','sent_to_client','outcome_recorded')),
+    UNIQUE (ranked_set_id, candidate_id)
+);
+CREATE INDEX ON matching.rank_entry (ranked_set_id, rank);
+
+CREATE TABLE matching.recruiter_override (   -- append-only
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    ranked_set_id uuid NOT NULL REFERENCES matching.ranked_set(id),
+    candidate_id uuid NOT NULL,
+    from_rank integer NOT NULL, to_rank integer NOT NULL,
+    reason_code text NOT NULL REFERENCES settings.list_entry(code),
+    reason_text text,
+    applied_by uuid NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
+);
+REVOKE UPDATE, DELETE ON matching.recruiter_override FROM PUBLIC;
+
+CREATE TABLE matching.shortlist (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,
+    ranked_set_id uuid,
+    state text NOT NULL DEFAULT 'draft' CHECK (state IN
+      ('draft','submitted','awaiting_client','responded','superseded')),
+    submitted_at timestamptz, submitted_by uuid,
+    client_link_id uuid,                     -- links.client_link
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE matching.shortlist_entry (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    shortlist_id uuid NOT NULL REFERENCES matching.shortlist(id),
+    candidate_id uuid NOT NULL,
+    position integer NOT NULL,
+    added_from text NOT NULL CHECK (added_from IN ('ranked_set','search')),
+    override_applied boolean NOT NULL DEFAULT false,
+    client_response text CHECK (client_response IN ('accepted','rejected','interview_requested')),
+    client_reason_code text,
+    responded_at timestamptz
+);
+
+CREATE TABLE matching.outcome_signal (       -- A8: what M7 writes back
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL,
+    requisition_id uuid NOT NULL,
+    signal_type text NOT NULL,   -- 'client_rejected' | 'interview_rejected' | 'selected'
+                                 -- | 'offer_declined' | 'dropped_out'
+    reason_code text,            -- from the shared taxonomy in 02-03
+    stage text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    state text NOT NULL DEFAULT 'captured'
+      CHECK (state IN ('captured','written_back','included')),
+    written_back_at timestamptz
+);
+CREATE INDEX ON matching.outcome_signal (candidate_id, occurred_at DESC);
+
+CREATE TABLE matching.saved_search (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    owner_id uuid NOT NULL, name text NOT NULL,
+    definition jsonb NOT NULL, is_shared boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE matching.talent_segment (       -- shared with 03-06, defined once
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    name text NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('dynamic','static')),
+    definition jsonb,                        -- dynamic: filters, refreshed on read
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE matching.talent_segment_member (   -- static segments only
+    talent_segment_id uuid NOT NULL REFERENCES matching.talent_segment(id),
+    candidate_id uuid NOT NULL,
+    PRIMARY KEY (talent_segment_id, candidate_id)
+);
+```
+
+## 6. State machines
+
+### `RankedSet` (`M6-I3`, `M6-I6`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | generation requested | `generating` | |
+| `generating` | scored | `current` | Rationale produced **as part of scoring** |
+| `generating` | category, credentials or availability missing | `failed` | **Fails visibly rather than ranking on a partial input set** |
+| `current` | requisition revised | `stale` | Marked and regenerable |
+| `current` | outcome recorded for a ranked candidate | `stale` | |
+| `current` | regenerated | `current` (new set) | **The prior set remains retrievable for audit** |
+
+### `Shortlist` (`M6-I4`)
+
+`draft → submitted → awaiting_client → responded`. Submission is an **explicit recruiter act**; nothing
+is auto-submitted. Resubmission after a client response creates a **new** submission rather than
+overwriting the first.
+
+### `OutcomeSignal` (`M6-I9`)
+
+`captured → written_back → included in the next ranking run`. Write-back is **asynchronous and does not
+gate the offer stage**.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/candidates/search?skill=&location=&experience=&status=&category=&base=&specialty=&credentialState=&availability=` | `candidate:search` | Advanced search, scoped |
+| `GET`/`POST`/`DELETE` | `/v1/saved-searches` | `candidate:search` | |
+| `GET`/`POST`/`PATCH` | `/v1/talent-segments` | `candidate:search` | **Shared with `03-06`** |
+| `POST` | `/v1/requisitions/:id/ranked-sets` | `matching:rank` | Generate; 422 with named missing inputs on a partial set |
+| `GET` | `/v1/ranked-sets/:id` | `matching:read` | Entries with score and rationale |
+| `GET` | `/v1/ranked-sets/:id/entries/:candidateId/rationale` | `matching:read` | Met, partly met, unmet; availability freshness |
+| `POST` | `/v1/ranked-sets/:id/overrides` | `matching:override` | **Reason required** |
+| `POST` | `/v1/shift-demand-lines/:id/ranked-sets` | `matching:rank` | Shift ranking, Base B weights |
+| `GET`/`POST` | `/v1/requisitions/:id/shortlists` | `matching:shortlist` | Build; add from ranked set or search |
+| `POST` | `/v1/shortlists/:id/submit` | `matching:submit` | **Issues the tokenised client link** |
+| `GET`/`POST`/`PATCH` | `/v1/weight-sets` | `weights:manage` | Per category × base, effective-dated |
+| `GET` | `/v1/candidates/:id/outcomes` | `matching:read` | Signals feeding future ranking |
+
+## 8. Events and jobs
+
+**Events emitted:** `matching.ranked_set.generated` · `.failed` · `.stale` ·
+`matching.override.applied` · `matching.shortlist.submitted` · `matching.outcome.written_back`.
+
+**Events subscribed:** `demand.requisition.revised` → mark stale;
+`selection.decision.recorded` and `links.link.answered` (shortlist type) → capture an outcome signal;
+`placement.dropout.recorded` → capture an outcome signal.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `matching.generate` | on demand | Extract features, select the weight set, score, produce rationale |
+| `matching.write-back-outcome` | on outcome events | **Asynchronous; does not gate the offer stage** |
+| `matching.bulk-shift-rank` | on demand | Ranks a period of shifts **without one run per shift** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Candidate search — skill, location, experience, status, plus category, base, specialty, credential state, availability; save the search; add to a shortlist | `/search` | `M6-I1` |
+| Talent segments | `/segments` | `M6-I2` |
+| Ranked candidates — best first with score, credentials, specialty, availability and location; **stale badge** when the requisition changed | `/requisitions/:id/ranking` | `M6-I3` |
+| Why this rank — met / partly met / unmet, and **how fresh the availability behind the rank is** | drawer | `M6-I3` |
+| Override rank — move up or down, **reason required** | dialog | `M6-I3` |
+| Build shortlist — tick from the ranked list, add from search, submit, previous submissions | `/requisitions/:id/shortlist` | `M6-I4` |
+| Ranking weights — per category × base, effective date; **only inputs valid for that category are shown** | `/admin/ranking-weights` | `M6-I5` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Search returns candidates filtered on availability confidence and last-confirmed recency | `M6-I1` |
+| AC2 | Specialty and acuity filters use the **same taxonomy as capture**, per category | `M6-I1`, `M4-I26` |
+| AC3 | Verification state is a filter, so an unverifiable candidate is excludable before shortlisting | `M6-I1` |
+| AC4 | Search respects the user's data scope | `M6-I1`, `OI-HS-01` |
+| AC5 | A segment definition is **shared with the M5 cadence model rather than duplicated** | `M6-I2`, `M5-I5` |
+| AC6 | A dynamic segment refreshes on read; a static segment holds its membership | `M6-I2` |
+| AC7 | Segment size is visible before it is used for a bulk action | `M6-I2` |
+| AC8 | A ranked set is produced with rationale and unmet or partially met criteria **exposed per rank** | `M6-I3` |
+| AC9 | Weights differ by candidate category and supply base — **six combinations minimum** | `M6-I3`, `M6-I5` |
+| AC10 | A set generated before a requisition revision is **marked stale and regenerable** | `M6-I3` |
+| AC11 | Contractual ranking runs against a **shift demand line**, not only a requisition | `M6-I3`, `M6-I10` |
+| AC12 | **Ranking cannot run where category, credentials or availability are missing — it fails visibly** rather than ranking on a partial input set | `M6-I3`, `M6-I6` |
+| AC13 | Rationale names the specific criteria met, partially met and unmet, **not a generic score breakdown** | `M6-I3` |
+| AC14 | A candidate ranked highly on stale availability **shows that staleness in the rationale** | `M6-I3` |
+| AC15 | The rationale is defensible to a client **without exposing the weight model itself** | `M6-I3` |
+| AC16 | Verification state is visible in the rationale so a shortlist can be defended on it | `M6-I3` |
+| AC17 | Where the clinical and communication rating is unpopulated, **its absence is stated rather than silently weighted at zero** | `M6-I3`, `OI-A-07` |
+| AC18 | Overrides are recorded where applied and visible in the submitted shortlist | `M6-I3` |
+| AC19 | An override **requires a reason**, so override patterns are analysable | `M6-I3` |
+| AC20 | Overriding **does not silently retrain the model** — Release 1 applies a configured weight set | `M6-I3` |
+| AC21 | Override history is retained per requisition and exposed to M9 reporting | `M6-I3`, `03-12` |
+| AC22 | Submitting generates a tokenised client link issued to an **identified recipient** | `M6-I4`, `M7-I17` |
+| AC23 | A candidate can be added from search as well as from the ranked set | `M6-I4`, `OI-A-10` |
+| AC24 | A recruiter can override the ranked order before submitting, and the override is recorded | `M6-I4` |
+| AC25 | Submission is an explicit recruiter act; **nothing is auto-submitted to a client** | `M6-I4` |
+| AC26 | The shortlist moves to `awaiting_client` on submission | `M6-I4` |
+| AC27 | Resubmission after a client response creates a **new submission rather than overwriting the first** | `M6-I4` |
+| AC28 | A weight set exists per candidate category and supply base combination | `M6-I5` |
+| AC29 | The weight editor shows **only inputs valid for that category** | `M6-I5` |
+| AC30 | Changing a weight set does not retrospectively alter shortlists already submitted | `M6-I5` |
+| AC31 | Ranking runs against a requisition and a shift demand line **with the same engine** | `M6-I6`, `M6-I10` |
+| AC32 | Rationale is generated **as part of scoring, not reconstructed afterwards** | `M6-I6` |
+| AC33 | A regeneration produces a new set; the prior set remains retrievable for audit | `M6-I6` |
+| AC34 | Features are extracted from credentials, specialty and acuity, availability confidence and recency, and written-back outcomes | `M6-I7` |
+| AC35 | A missing feature is handled **explicitly per feature** rather than defaulting to zero | `M6-I7` |
+| AC36 | An **expired credential is a distinct feature state from a missing one** | `M6-I7`, `M4-I25` |
+| AC37 | **Stale availability is a distinct state from unknown availability** | `M6-I7` |
+| AC38 | Extraction is versioned so a taxonomy change does not silently alter historic scores | `M6-I7` |
+| AC39 | Certifications on the candidate record are available as a ranking input alongside credentials | `M6-I7`, `M4-I19` |
+| AC40 | The correct weight set resolves from the requisition's category and the candidate's base | `M6-I8` |
+| AC41 | A combination with **no configured set fails visibly rather than falling back to a default silently** | `M6-I8` |
+| AC42 | The ranked set records **which weight set version produced it** | `M6-I8` |
+| AC43 | Without candidate category on the requisition, the correct weight set cannot be selected | `M6-I8`, `M3` |
+| AC44 | Selection outcomes and rejection reasons write back onto the candidate record and become an input to subsequent ranking | `M6-I9` |
+| AC45 | Write-back is **asynchronous and does not gate the offer stage** | `M6-I9` |
+| AC46 | The D6 rejection taxonomy and the D18 feature schema are agreed **before either is built** | `M6-I9`, Part A coupling 1 |
+| AC47 | An outcome recorded after a set was generated marks that set stale | `M6-I9` |
+| AC48 | A shift demand line is ranked against Base B weights | `M6-I10` |
+| AC49 | Availability time windows and travel radius are **matching criteria, not just weights** | `M6-I10` |
+| AC50 | A candidate already committed to a conflicting shift is **excluded rather than ranked and rejected later** | `M6-I10` |
+| AC51 | Bulk ranking across a period is possible **without one run per shift** | `M6-I10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-11` | **The relative weighting model across inputs, and its configurability, is not specified.** Three categories × two bases multiplies the weight sets, and the inputs themselves differ by category — the largest unspecified design in Release 1 | Built to **the more configurable of the two possibilities**: every input is a named, weighted, versioned feature per category × base. The client's own suggestion is adopted: a crude ranked list on three fields in front of recruiters in week eight, and their overrides become the specification. | `M6-I3`, `M6-I5`, `M6-I6`, `M6-I7`, `M6-I8`, `M6-I9` |
+| `OI-A-10` | Does hand-assembly survive as a recruiter fallback, or is override on the ranked set the only manual path? | **Both are built**: search can add to a shortlist, and override reorders the ranked set. Materially different screens and a different change-management story for 22 recruiters, so this needs an answer rather than a default. | `M6-D5`, `M6-D18` |
+| `OI-HS-10` | Does an expired credential, a pending verification or stale availability **exclude** a candidate, or only reduce their score? | Modelled as `eligibility_rules` on the weight set, defaulting to **reduce, not exclude**, so either answer is configuration. The difference changes what a recruiter sees and what can be defended to a client. | `M6-I7`, `M4-I25` |
+| `OI-A-07` | The clinical and communication rating has no producing system | Present, unpopulated, and its **absence is stated in the rationale** rather than weighted at zero | `M6-D18` |
+| `OI-M3-14` | Scoring latency must support interactive use on the shortlist screen — target not set | Working budget: a ranked set over a 250k base in ≤3s; bulk shift ranking runs as a batch job | `M6-I6` |
+| `OI-HS-01` | Data scope on search and ranked sets | `AS-18` | `M6-I1` |

@@ -1,0 +1,256 @@
+---
+title: "05-01 Build sequence"
+description: "The dependency-ordered order of work, with a gate at the end of each phase."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** all · **Risk** — · **Build in** Phase 0
+
+The dependency-ordered order of work, with a gate at the end of each phase.
+
+**There are no day counts or calendar dates in this file, deliberately.** Sequence and effort are
+different questions and they get answered in different places: [00-05](/docs/00-foundation/00-05-delivery-roadmap)
+holds the calendar and the milestone mapping, and [06-03](/docs/06-source-plan/06-03-timeline) holds the
+client's own effort figures as they were quoted. This file answers only *what order*, *why that order*,
+and *what must be true before the next phase starts*.
+
+Every spec index used below is a link. The same indices appear on the component map
+([00-04](/docs/00-foundation/00-04-component-map)), so a row here and a row there refer to the same thing.
+
+---
+
+## 1. The whole build in one table
+
+Thirty-six rows covering all thirty-five specs, in build order. **Epic** is the technical name of the
+capability being built. **Spec** is the index it is specified in — click it. **Tasks** opens to the
+high-level division of that epic's work, derived from the spec's own §2 Scope. **Blocks** is what cannot
+start until the row is done.
+
+| Phase | Epic | Spec | Tasks | Blocks |
+|---|---|---|---|---|
+| 1 | Environments and delivery | [02-15](/docs/02-platform/02-15-environments-and-observability) | <details><summary>4 tasks</summary><ul><li>Terraform stacks for the four environments</li><li>Container images and the GitHub Actions pipeline</li><li>Monitoring, alerting and on-call routing</li><li>Backup, restore rehearsal and release rollback</li></ul></details> | Everything — nothing is built or tested without it |
+| 1 | Design system | [02-05](/docs/02-platform/02-05-design-system) | <details><summary>4 tasks</summary><ul><li>The token set shared by web and native</li><li>Web and native component libraries</li><li>The five standard screen states</li><li>Accessibility baseline and its test suite</li></ul></details> | [02-06](/docs/02-platform/02-06-console-shell) |
+| 1 | Console shell | [02-06](/docs/02-platform/02-06-console-shell) | <details><summary>4 tasks</summary><ul><li>Application frame: navigation, header, breadcrumb, content</li><li>Navigation and routes rendered from permissions</li><li>Global search entry point and user menu</li><li>Session expiry and filter-state preservation</li></ul></details> | Every Ops screen |
+| 1 | Identity and access | [02-01](/docs/02-platform/02-01-identity-and-access) | <details><summary>4 tasks</summary><ul><li>Staff authentication, reset, session and idle timeout</li><li>User, role and site administration</li><li>Candidate and client-user identity</li><li>Principal resolution and the route permission guard</li></ul></details> | [02-03](/docs/02-platform/02-03-settings-and-reference-data), [02-04](/docs/02-platform/02-04-file-storage), [02-06](/docs/02-platform/02-06-console-shell), [02-10](/docs/02-platform/02-10-job-runtime), [03-14](/docs/03-modules/03-14-client-portal) |
+| 1 | Audit trail | [02-02](/docs/02-platform/02-02-audit-trail) | <details><summary>4 tasks</summary><ul><li>The append-only audit store</li><li>The in-transaction record API every service calls</li><li>The shared activity-timeline component</li><li>Per-record export for a period</li></ul></details> | Every module that mutates a record |
+| 1 | Configuration and reference data | [02-03](/docs/02-platform/02-03-settings-and-reference-data) | <details><summary>4 tasks</summary><ul><li>The settings register</li><li>Categories, care settings and service lines as editable data</li><li>Waiting periods with per-client override</li><li>Setting versioning, so old records keep their old values</li></ul></details> | [02-13](/docs/02-platform/02-13-market-adapter-layer), and every module reading a category |
+| 1 | File storage | [02-04](/docs/02-platform/02-04-file-storage) | <details><summary>4 tasks</summary><ul><li>Versioned object store with residency and backups</li><li>Virus scanning and quarantine</li><li>The shared upload control and file viewer</li><li>Expiring download links</li></ul></details> | [02-13](/docs/02-platform/02-13-market-adapter-layer), [03-04](/docs/03-modules/03-04-candidate-record-and-credentials), [03-13](/docs/03-modules/03-13-legacy-migration) |
+| 1 | Job runtime — **[engineering addition]** | [02-10](/docs/02-platform/02-10-job-runtime) | <details><summary>4 tasks</summary><ul><li>Queue classes with independent concurrency</li><li>Retry policy, dead-letter visibility and operator re-queue</li><li>Scheduled job triggering from the edge</li><li>Idempotency keys and singleton locks</li></ul></details> | Every asynchronous path |
+| 1 | Credential verification | [02-13](/docs/02-platform/02-13-market-adapter-layer) | <details><summary>5 tasks</summary><ul><li>The three adapter contracts and the traffic-light schema</li><li>Registry configuration, credentials and manual mode</li><li>India registry adapters</li><li>The verification aggregator</li><li>Manual fallback and per-call cost logging</li></ul></details> | [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) |
+| 1 | Legacy assessment — profiling only | [03-13](/docs/03-modules/03-13-legacy-migration) | <details><summary>3 tasks</summary><ul><li>Volume and completeness profile</li><li>Duplicate-rate measurement</li><li>Mapping feasibility assessment</li></ul></details> | The rest of [03-13](/docs/03-modules/03-13-legacy-migration), and any credible sizing of it |
+| 2 | Data access | [02-07](/docs/02-platform/02-07-list-engine) | <details><summary>4 tasks</summary><ul><li>Server-side filter, sort and cursor paging</li><li>Column chooser and saved, shareable views</li><li>Export of the filtered rows and bulk actions</li><li>Virtualisation and the standard list states</li></ul></details> | [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards), and every list screen after it |
+| 2 | Data protection | [02-12](/docs/02-platform/02-12-data-protection) | <details><summary>4 tasks</summary><ul><li>Versioned consent capture and evidence</li><li>Verification consent checked before any adapter dispatch</li><li>Withdrawal, erasure intake and execution</li><li>Residency enforcement, retention policy and the sweep</li></ul></details> | [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) |
+| 2 | Client, contract and rate card | [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) | <details><summary>5 tasks</summary><ul><li>Client, location and department records</li><li>Contacts and per-type link recipients</li><li>Sender identity mapping, one client each</li><li>Versioned rate cards with a baseline rate</li><li>Contract versioning and renewal alerts</li></ul></details> | [02-08](/docs/02-platform/02-08-inbound-pipeline), [02-14](/docs/02-platform/02-14-client-link-surfaces), [03-02](/docs/03-modules/03-02-demand-intake), [03-11](/docs/03-modules/03-11-billing-and-receivables) |
+| 2 | Candidate record | [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) | <details><summary>4 tasks</summary><ul><li>Candidate record and explicit supply-base membership</li><li>Credential store and the verification queue</li><li>Document review against OCR with corrections retained</li><li>Certification records and learner matching</li></ul></details> | [03-05](/docs/03-modules/03-05-candidate-app), [03-06](/docs/03-modules/03-06-engagement-and-availability), [03-07](/docs/03-modules/03-07-matching-and-ranking), [03-13](/docs/03-modules/03-13-legacy-migration) |
+| 2 | Candidate app | [03-05](/docs/03-modules/03-05-candidate-app) | <details><summary>5 tasks</summary><ul><li>Sign-up, OTP and DPDP consent</li><li>Profile building from a CV, with review and correct</li><li>Base A job discovery and application</li><li>Base B shift discovery, acceptance and clash prevention</li><li>Application, offer and shift tracking</li></ul></details> | [03-10](/docs/03-modules/03-10-attendance-and-timesheets) — the only attendance route |
+| 2 | Legacy migration — pipeline | [03-13](/docs/03-modules/03-13-legacy-migration) | <details><summary>5 tasks</summary><ul><li>Extract, map and load, resumable and re-runnable</li><li>Delta runs through to cutover</li><li>Duplicate resolution against app registrations</li><li>Batch, failure and correction screens</li><li>Reconciliation to source totals</li></ul></details> | Cutover and legacy retirement |
+| 3 | Event spine | [02-11](/docs/02-platform/02-11-event-spine) | <details><summary>4 tasks</summary><ul><li>Event definition, versioning and validation package</li><li>Transactional outbox and the publisher</li><li>The append-only, partitioned event log</li><li>Subscription dispatch and mart replay</li></ul></details> | [03-03](/docs/03-modules/03-03-requisitions-and-allocation), [03-12](/docs/03-modules/03-12-analytics-and-reporting) — and it cannot be retrofitted |
+| 3 | Inbound pipeline | [02-08](/docs/02-platform/02-08-inbound-pipeline) | <details><summary>5 tasks</summary><ul><li>Channel receivers storing the raw payload</li><li>Redelivery dedup and sender resolution</li><li>Intent classification with a shared threshold</li><li>The intent-registration contract for new consumers</li><li>Reclassification without re-ingestion</li></ul></details> | [02-09](/docs/02-platform/02-09-outbound-messaging), [03-02](/docs/03-modules/03-02-demand-intake), [03-06](/docs/03-modules/03-06-engagement-and-availability) |
+| 3 | Outbound messaging | [02-09](/docs/02-platform/02-09-outbound-messaging) | <details><summary>5 tasks</summary><ul><li>Templates per channel and purpose, with approval state</li><li>Event triggers and channel fallback order</li><li>One sender across WhatsApp, SMS, email and push</li><li>Retry, suppression and receipt reconciliation</li><li>Delivery log with cost attribution</li></ul></details> | [03-02](/docs/03-modules/03-02-demand-intake), [03-06](/docs/03-modules/03-06-engagement-and-availability) |
+| 3 | Demand intake | [03-02](/docs/03-modules/03-02-demand-intake) | <details><summary>5 tasks</summary><ul><li>The four operational queues</li><li>Channel and per-client spreadsheet configuration</li><li>Required-field sets per candidate category</li><li>Follow-up windows and escalation</li><li>Parser dispatch to the requisition schema</li></ul></details> | [03-03](/docs/03-modules/03-03-requisitions-and-allocation) |
+| 3 | Requisitions and allocation | [03-03](/docs/03-modules/03-03-requisitions-and-allocation) | <details><summary>5 tasks</summary><ul><li>Requisition creation, including verbal capture</li><li>The record view carrying its source evidence</li><li>Versioning, hold, revise and close with their aging rules</li><li>The fulfilment board</li><li>Shift templates and the demand lines they generate</li></ul></details> | [03-07](/docs/03-modules/03-07-matching-and-ranking), [03-10](/docs/03-modules/03-10-attendance-and-timesheets), [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) |
+| 4 | Client link surfaces | [02-14](/docs/02-platform/02-14-client-link-surfaces) | <details><summary>5 tasks</summary><ul><li>Token issue, delivery, expiry and reissue</li><li>The four link types as configuration on one mechanism</li><li>Recipient model per link type</li><li>The three public pages</li><li>Answer routing and the finance-facing link log</li></ul></details> | [03-08](/docs/03-modules/03-08-selection-and-offers), [03-09](/docs/03-modules/03-09-placement-and-trial), [03-10](/docs/03-modules/03-10-attendance-and-timesheets) |
+| 4 | Engagement and availability | [03-06](/docs/03-modules/03-06-engagement-and-availability) | <details><summary>5 tasks</summary><ul><li>Segments and contact schedules across both bases</li><li>Send windows, frequency caps and cost preview</li><li>Voice campaigns and question sets</li><li>Reply handling and the free-text review queue</li><li>Availability confidence and cadence selection</li></ul></details> | [03-07](/docs/03-modules/03-07-matching-and-ranking) |
+| 4 | Matching and ranking | [03-07](/docs/03-modules/03-07-matching-and-ranking) | <details><summary>5 tasks</summary><ul><li>Advanced search and saved searches</li><li>Talent segments shared with the cadence model</li><li>The ranking engine, producing rationale as it scores</li><li>Weight sets per category and base, versioned</li><li>Recruiter override with a mandatory reason</li></ul></details> | [03-08](/docs/03-modules/03-08-selection-and-offers) |
+| 5 | Selection and offers | [03-08](/docs/03-modules/03-08-selection-and-offers) | <details><summary>5 tasks</summary><ul><li>Interview proposal, confirmation and reschedule</li><li>Structured feedback and the awaiting-feedback list</li><li>Decision taxonomy and the selection audit trail</li><li>Offer templates by state, role and skill</li><li>Offer generation, delivery, expiry and reminders</li></ul></details> | [03-09](/docs/03-modules/03-09-placement-and-trial) |
+| 5 | Placement and trial | [03-09](/docs/03-modules/03-09-placement-and-trial) | <details><summary>4 tasks</summary><ul><li>Joining confirmation, opening the 90-day clock</li><li>Placement list and drop-out handling</li><li>Doctor privileging, separate from registration</li><li>Check-in configuration and the trial dashboard</li></ul></details> | [03-11](/docs/03-modules/03-11-billing-and-receivables), [03-15](/docs/03-modules/03-15-associate-onboarding), [03-16](/docs/03-modules/03-16-workforce-operations) |
+| 5 | Attendance and timesheets | [03-10](/docs/03-modules/03-10-attendance-and-timesheets) | <details><summary>4 tasks</summary><ul><li>Shift attendance with location stamping</li><li>Exception resolution and audited manual correction</li><li>Timesheet compilation priced against the contract version</li><li>Approval sending and the deemed-approval window</li></ul></details> | [03-11](/docs/03-modules/03-11-billing-and-receivables), [03-19](/docs/03-modules/03-19-timesheet-extensions) |
+| 6 | Billing and receivables | [03-11](/docs/03-modules/03-11-billing-and-receivables) | <details><summary>5 tasks</summary><ul><li>The immutable day-90 record with snapshotted terms</li><li>Permanent invoice generation at the terms in force</li><li>Shift invoice generation from approved timesheets</li><li>Billing evidence traceable from every invoice</li><li>Receivables with ageing</li></ul></details> | [03-20](/docs/03-modules/03-20-collections) |
+| 6 | Analytics and reporting | [03-12](/docs/03-modules/03-12-analytics-and-reporting) | <details><summary>5 tasks</summary><ul><li>The reporting mart and its refresh</li><li>Funnel, fill rate and time-to-fill</li><li>Trial survival and stage conversion loss</li><li>Channel and recruiter performance</li><li>The scheduled monthly MIS pack</li></ul></details> | [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) |
+| 6 | Associate onboarding | [03-15](/docs/03-modules/03-15-associate-onboarding) | <details><summary>4 tasks</summary><ul><li>Associate profile, bank and statutory identifiers</li><li>Statutory forms with return-with-reason</li><li>Document checklist by role and state</li><li>The guided in-app flow and the pay-run gate</li></ul></details> | [03-17](/docs/03-modules/03-17-payroll) |
+| 6 | Workforce operations | [03-16](/docs/03-modules/03-16-workforce-operations) | <details><summary>4 tasks</summary><ul><li>The maker-checker request engine</li><li>Salary revision, advance and hold</li><li>External attendance upload paired against check-ins</li><li>Geo-fence configuration and enforcement</li></ul></details> | [03-17](/docs/03-modules/03-17-payroll), [03-19](/docs/03-modules/03-19-timesheet-extensions) |
+| 6 | Client portal | [03-14](/docs/03-modules/03-14-client-portal) | <details><summary>4 tasks</summary><ul><li>Portal accounts and per-client data scoping</li><li>Raising a requisition that produces the same record</li><li>Logged-in shortlist and timesheet screens</li><li>Invoices, rate card and contract, read-only</li></ul></details> | — |
+| 6 | Demand prioritisation | [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) | <details><summary>4 tasks</summary><ul><li>Priority scoring with visible reasoning</li><li>The priority board and override with a reason</li><li>Recruiter suggestion against the operating norm</li><li>The requisition approval state</li></ul></details> | — |
+| 7 | Timesheet extensions | [03-19](/docs/03-modules/03-19-timesheet-extensions) | <details><summary>4 tasks</summary><ul><li>Leave types and leave records</li><li>Overtime rules varying by client and state</li><li>Internal approval routing, reusing the 03-16 engine</li><li>The full calculation layered on the M8 attendance data</li></ul></details> | — |
+| 7 | Collections | [03-20](/docs/03-modules/03-20-collections) | <details><summary>4 tasks</summary><ul><li>Payment matching, part-payments and TDS</li><li>Overdue ageing from the contract payment terms</li><li>Chase history and dunning that stops on payment</li><li>Credit and debit notes</li></ul></details> | — |
+| 7 | Payroll | [03-17](/docs/03-modules/03-17-payroll) | <details><summary>5 tasks</summary><ul><li>Pay run lifecycle: open, lock, send, receive, close</li><li>Payroll settings and engine field mapping</li><li>The engine integration boundary and exception reporting</li><li>PF and ESIC reports and challans</li><li>Payslip delivery in the app and over WhatsApp</li></ul></details> | — |
+
+**How to read a row.** The Spec link is the authority. Tasks are a division of the epic, not a work
+breakdown — each one is several sessions and expands against the spec's Scope, acceptance criteria and
+API surface when it is picked up. Blocks is the reason the row sits where it does. If a task here and
+the spec's §2 Scope disagree, the spec wins and this table is wrong — fix it here.
+
+One spec appears twice: [03-13](/docs/03-modules/03-13-legacy-migration) is profiled in Phase 1 and
+built in Phase 2, and the two passes have nothing in common but the spec.
+[02-14](/docs/02-platform/02-14-client-link-surfaces) is listed once, in Phase 4, but a thin slice of it
+is pulled forward into Gate G2 — see §3.
+
+---
+
+## 2. Phase 1 — Foundations
+
+Nothing here has a prerequisite in the codebase. Two things start in parallel on day one:
+**[02-05](/docs/02-platform/02-05-design-system) design system** (it must be complete before screen
+design is finalised) and **[02-15](/docs/02-platform/02-15-environments-and-observability) environments**
+(nothing can be built or tested without one).
+
+| Order | Epic | Component | Blocked by | Why now |
+|---|---|---|---|---|
+| 1a | E1.1 | [02-15](/docs/02-platform/02-15-environments-and-observability) environments and observability | — | Nothing can be built or tested without it |
+| 1b | E1.2 | [02-05](/docs/02-platform/02-05-design-system) design system | — | **Must be complete before screen design, not alongside it** |
+| 2 | E1.3 | [02-01](/docs/02-platform/02-01-identity-and-access) identity and access + [02-02](/docs/02-platform/02-02-audit-trail) audit trail | 1a | Sign-in must be audited from the first login |
+| 3 | E1.4 | [02-03](/docs/02-platform/02-03-settings-and-reference-data) settings and reference data | 2 | **Categories and care settings exist as data on day one** |
+| 4 | E1.4 | [02-04](/docs/02-platform/02-04-file-storage) file storage · [02-10](/docs/02-platform/02-10-job-runtime) job runtime | 2 | Everything else assumes both |
+| 5 | E1.2 | [02-06](/docs/02-platform/02-06-console-shell) console shell | 1b, 2 | The frame every Ops screen sits inside |
+| 6 | E1.5 | [02-13](/docs/02-platform/02-13-market-adapter-layer) market adapter layer | 3, 4 | Long external lead time (`X14`, `X16`); start early, finish in Phase 2 |
+| 7 | E1.6 | [03-13](/docs/03-modules/03-13-legacy-migration) profiling only (`M1-I10`) | 4 | **Until this runs, A10 cannot be sized at all** |
+
+**Gate G1:** a named recruiter signs in, sees only their permitted navigation, an administrator
+adds a candidate category **as data**, and every action appears on the activity trail.
+
+**Exit conditions:** four environments provisioned from one pipeline · a release promoted dev→prod
+without hand-edited config · every list route carries the scope predicate · append-only grants proven
+by test · the CPAL profiling figures delivered, or `OI-A-02` formally escalated.
+
+---
+
+## 3. Phase 2 — Client and candidate spine
+
+| Order | Epic | Component | Blocked by | Why now |
+|---|---|---|---|---|
+| 1 | E2.1 | [02-07](/docs/02-platform/02-07-list-engine) list engine | Phase 1 | First needed by the client and rate card lists |
+| 2 | E2.1 | [02-12](/docs/02-platform/02-12-data-protection) data protection | Phase 1 | **Consent is needed the moment candidate data is captured** |
+| 3 | E2.2 | [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) clients, contracts and rate cards | 1 | [03-02](/docs/03-modules/03-02-demand-intake) cannot resolve a sender without it; [03-11](/docs/03-modules/03-11-billing-and-receivables) cannot invoice without it |
+| 4 | E2.3 | [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) candidate record and credentials | 2, [02-13](/docs/02-platform/02-13-market-adapter-layer) | Ranking needs credentials and attributes |
+| 5 | E2.3 | [03-05](/docs/03-modules/03-05-candidate-app) candidate app | 4 | **Store review is calendar time — a placeholder build goes through review in this phase** |
+| 6 | E2.4 | [03-13](/docs/03-modules/03-13-legacy-migration) migration pipeline | 4 | Merge lives in [03-04](/docs/03-modules/03-04-candidate-record-and-credentials), so it is built first |
+
+**Gate G2 — the client's own request: one client, one nurse, one link.** A thin slice of
+[02-14](/docs/02-platform/02-14-client-link-surfaces) is built early **out of phase order** so a
+tokenised day-90 link reaches a real hospital contact, is opened on a phone, answered, and produces an
+immutable record. This settles the riskiest behavioural assumption in the plan long before the code that
+depends on it ships.
+
+**Gate G2b:** a crude ranked list on three fields in front of recruiters against a live
+requisition. Their overrides are the weighting specification (`OI-A-11`).
+
+**Exit conditions:** a contract activated with its three windows and read back through the terms lookup
+· a candidate verified end to end through a real registry or its manual fallback · a placeholder app
+build approved by both stores · the migration reconciling on a sample batch.
+
+---
+
+## 4. Phase 3 — Demand
+
+| Order | Epic | Component | Blocked by | Why now |
+|---|---|---|---|---|
+| 1 | E3.1 | **[02-11](/docs/02-platform/02-11-event-spine) event spine** | Phase 1 | **Must be live before [03-03](/docs/03-modules/03-03-requisitions-and-allocation) writes its first requisition. This cannot be retrofitted.** |
+| 2 | E3.2 | [02-08](/docs/02-platform/02-08-inbound-pipeline) inbound pipeline | 1, [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) | Built once, consumed by A14 |
+| 3 | E3.2 | [02-09](/docs/02-platform/02-09-outbound-messaging) outbound messaging | 2 | First needed by the A1 follow-up chase |
+| 4 | E3.3 | [03-02](/docs/03-modules/03-02-demand-intake) demand intake | 2, 3 | |
+| 5 | E3.3 | [03-03](/docs/03-modules/03-03-requisitions-and-allocation) requisitions and allocation | 4 | |
+
+**Gate G3:** the same requirement sent by email, spreadsheet, WhatsApp text and WhatsApp voice
+note produces four requisitions **differing only in source channel and raw payload**.
+
+**Exit conditions:** the intent-registration contract test passes with a second consumer registered ·
+no automatic merge occurs anywhere · aging excludes held days · every status transition and allocation
+is evented and append-only.
+
+---
+
+## 5. Phase 4 — Engagement and matching
+
+| Order | Epic | Component | Blocked by | Why now |
+|---|---|---|---|---|
+| 1 | E4.1 | [02-14](/docs/02-platform/02-14-client-link-surfaces) client link surfaces | [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) | **Built ahead of its three consumers** (Part A coupling 5) |
+| 2 | E4.2 | [03-06](/docs/03-modules/03-06-engagement-and-availability) engagement and availability | [03-04](/docs/03-modules/03-04-candidate-record-and-credentials), [02-08](/docs/02-platform/02-08-inbound-pipeline), [02-09](/docs/02-platform/02-09-outbound-messaging) | A3, A4, A5, A14 are **one unit — do not split them across sprints** |
+| 3 | E4.3 | [03-07](/docs/03-modules/03-07-matching-and-ranking) matching and ranking | [03-03](/docs/03-modules/03-03-requisitions-and-allocation), [03-04](/docs/03-modules/03-04-candidate-record-and-credentials), [03-06](/docs/03-modules/03-06-engagement-and-availability) | **Needs all three; cannot rank on a partial set** |
+
+The ranking-schema and rejection-taxonomy session with [03-08](/docs/03-modules/03-08-selection-and-offers)
+happens **before either starts** (Part A coupling 1).
+
+**Gate G4:** a Base B nurse is contacted on cadence, replies on WhatsApp, their freshness
+score resets, and a shift ranking reorders because of it. **App adoption is measured here** on the
+in-house nurse pilot.
+
+**Exit conditions:** WhatsApp templates approved and the cadence enabled with a cost projection shown
+first · a response from app, WhatsApp and voice reconciling to one record · ranking failing visibly on
+a partial input set.
+
+---
+
+## 6. Phase 5 — Selection, placement and attendance
+
+| Order | Epic | Component | Blocked by | Why now |
+|---|---|---|---|---|
+| 1 | E5.1 | [03-08](/docs/03-modules/03-08-selection-and-offers) selection and offers | [03-07](/docs/03-modules/03-07-matching-and-ranking), [02-14](/docs/02-platform/02-14-client-link-surfaces), [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) | |
+| 2 | E5.2 | [03-09](/docs/03-modules/03-09-placement-and-trial) placement and trial | 1 | **Without an accepted offer there is no joining event** |
+| 3 | E5.3 | [03-10](/docs/03-modules/03-10-attendance-and-timesheets) attendance and timesheets | [03-05](/docs/03-modules/03-05-candidate-app), [03-03](/docs/03-modules/03-03-requisitions-and-allocation), [02-14](/docs/02-platform/02-14-client-link-surfaces) | |
+
+**Gate G5:** a candidate is shortlisted, the client responds by link, an offer is signed,
+joining is confirmed and the trial events schedule themselves.
+
+**Gate G6:** a shift is checked into on the app, appears on a timesheet, is approved by a
+client link, and raises a shift invoice traceable to the approval in two clicks.
+
+**Exit conditions:** the day-90 record immutable with snapshotted terms · day 30/60 proven unable to
+reach the billing path · an offline check-in syncing with its original timestamp · deemed approval
+producing a valid invoice input.
+
+---
+
+## 7. Phase 6 — Money and the rest of Release 1
+
+Two independent workstreams plus the R2 modules. [03-11](/docs/03-modules/03-11-billing-and-receivables)
+and [03-12](/docs/03-modules/03-12-analytics-and-reporting) **share nothing but the event data and can be
+staffed separately.**
+
+| Order | Epic | Component | Blocked by |
+|---|---|---|---|
+| 1a | E6.1 | [03-11](/docs/03-modules/03-11-billing-and-receivables) billing and receivables | [03-09](/docs/03-modules/03-09-placement-and-trial), [03-10](/docs/03-modules/03-10-attendance-and-timesheets), [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) |
+| 1b | E6.2 | [03-12](/docs/03-modules/03-12-analytics-and-reporting) analytics and reporting | [02-11](/docs/02-platform/02-11-event-spine) (since Phase 3) |
+| 2 | E6.3 | [03-15](/docs/03-modules/03-15-associate-onboarding) associate onboarding · [03-16](/docs/03-modules/03-16-workforce-operations) workforce operations | [03-09](/docs/03-modules/03-09-placement-and-trial), [03-10](/docs/03-modules/03-10-attendance-and-timesheets) |
+| 3 | E6.4 | [03-14](/docs/03-modules/03-14-client-portal) client portal | [02-01](/docs/02-platform/02-01-identity-and-access) portal realm, and everything it displays |
+| 4 | E6.5 | [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) demand prioritisation | **[03-12](/docs/03-modules/03-12-analytics-and-reporting)** — it reads performance data that does not exist earlier |
+
+**Gate G7:** a permanent invoice fires from a day-90 record, and the funnel report covers a
+period that has already passed.
+
+---
+
+## 8. Phase 7 — R2 remainders
+
+| Order | Epic | Component | Blocked by |
+|---|---|---|---|
+| 1 | E7.1 | [03-19](/docs/03-modules/03-19-timesheet-extensions) timesheet extensions | [03-16](/docs/03-modules/03-16-workforce-operations) approval engine, [03-10](/docs/03-modules/03-10-attendance-and-timesheets) |
+| 2 | E7.2 | [03-20](/docs/03-modules/03-20-collections) collections | [03-11](/docs/03-modules/03-11-billing-and-receivables) |
+| 3 | E7.3 | [03-17](/docs/03-modules/03-17-payroll) payroll | [03-15](/docs/03-modules/03-15-associate-onboarding), [03-16](/docs/03-modules/03-16-workforce-operations), [03-19](/docs/03-modules/03-19-timesheet-extensions) |
+
+[03-16](/docs/03-modules/03-16-workforce-operations)'s approval engine is built before
+[03-19](/docs/03-modules/03-19-timesheet-extensions) reuses it. **Payroll is last, behind three other
+modules, and is the item most exposed to everything upstream.**
+
+---
+
+## 9. What cannot be resequenced
+
+| Rule | Consequence of breaking it |
+|---|---|
+| [02-11](/docs/02-platform/02-11-event-spine) before [03-03](/docs/03-modules/03-03-requisitions-and-allocation) | **M9 reports cannot cover the earlier period at all.** Not recoverable. |
+| [02-03](/docs/02-platform/02-03-settings-and-reference-data) categories as data in Phase 1 | Doctors become a migration rather than a module |
+| [02-14](/docs/02-platform/02-14-client-link-surfaces) before [03-08](/docs/03-modules/03-08-selection-and-offers), [03-09](/docs/03-modules/03-09-placement-and-trial), [03-10](/docs/03-modules/03-10-attendance-and-timesheets) | No client surface exists; D12 is deferred |
+| [02-13](/docs/02-platform/02-13-market-adapter-layer) before [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) | No candidate can be verified |
+| [03-05](/docs/03-modules/03-05-candidate-app) before [03-10](/docs/03-modules/03-10-attendance-and-timesheets) | No attendance, no timesheet, no shift invoice |
+| [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) contract terms before [03-11](/docs/03-modules/03-11-billing-and-receivables) | Permanent billing does not run — **no fallback** |
+| A3, A4, A5, A14 together | Build any three and none does anything useful |
+| Ranking and rejection schema agreed before [03-07](/docs/03-modules/03-07-matching-and-ranking) and [03-08](/docs/03-modules/03-08-selection-and-offers) | A8 becomes a rebuild rather than a layer |
+| [03-16](/docs/03-modules/03-16-workforce-operations) before [03-19](/docs/03-modules/03-19-timesheet-extensions) | The approval engine gets built twice |
+
+---
+
+## 10. If the schedule slips
+
+The plan states it plainly: **any slip in the early phases lands entirely on Phases 6–7**, because that
+is the only thing left to cut. The client's stated priority if the period cannot hold everything is
+**three category modules on a thinner R2**, because the category dimension reaches into the adapters,
+the weight model and the trial question sets, and the R2 remainder does not.
+
+Cut in this order:
+
+| Order to cut | Spec | Why it goes here |
+|---|---|---|
+| 1 | [03-20](/docs/03-modules/03-20-collections) collections | Nothing depends on it; chasing stays manual |
+| 2 | [03-19](/docs/03-modules/03-19-timesheet-extensions) timesheet extensions | The thin-slice timesheet in [03-10](/docs/03-modules/03-10-attendance-and-timesheets) still bills |
+| 3 | [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) demand prioritisation | Prioritisation reverts to recruiter judgement |
+| 4 | [03-14](/docs/03-modules/03-14-client-portal) client portal | The tokenised links already cover every client action |
+| 5 | [03-17](/docs/03-modules/03-17-payroll) payroll | **Cut last despite being least ready** — until it exists payroll is manual, and that caps contractual volume (`OI-A-16`) |

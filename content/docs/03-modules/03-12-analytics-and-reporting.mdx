@@ -1,0 +1,278 @@
+---
+title: "03-12 Analytics and reporting"
+description: "How many vacancies get filled, how fast, where candidates drop out, how each recruiter and each intake channel performs, how many placements survive to day 90, and how the rate…"
+---
+
+**Package** `@apollo/reporting` · **Schema** `reporting` · **Plan** D9, D28, A11 · **Effort** ~43.5pd · **Risk** Medium `DATA` · **Build in** Phase 6
+
+## 1. Purpose
+
+How many vacancies get filled, how fast, where candidates drop out, how each recruiter and each intake
+channel performs, how many placements survive to day 90, and how the rate agreed compares to the
+standard rate. Seven report screens plus the monthly pack, all reading **marts materialised from the
+event spine**, never from operational tables.
+
+Every one of these reports depends on events having been written **when the work happened**. If `02-11`
+had been built after `03-03`, none of them could cover the earlier period at all.
+
+## 2. Scope
+
+### In scope
+
+- Funnel and stage conversion (`M9-I5`)
+- Fill rate and time-to-fill, showing distribution rather than just an average (`M9-I6`)
+- Trial survival across the full day 0–90 curve (`M9-I7`)
+- Stage-level conversion loss by client and by recruiter (`M9-I8`)
+- Channel and recruiter performance (`M9-I9`)
+- The monthly MIS pack, generated on a schedule (`M9-I10`)
+- Rate agreed against baseline by client, role, specialty and acuity (`M9-I11`)
+- The mart layer that makes all of the above possible (`M9-I17`)
+
+### Explicitly out of scope
+
+- Billing — `03-11`. The two workstreams share nothing but the underlying event data and can be staffed
+  independently.
+- Event capture — `02-11`. This module reads.
+- Operational counters inside working screens: parse accuracy, override rates, suggestion quality,
+  usage counts. **Removed from the operating screens deliberately** — instrumenting every screen
+  separately is a second reporting layer nobody asked for.
+
+### Explicitly not built
+
+- Any client-facing dashboard. Clients see links until Phase 6 and the portal after it.
+- Demand forecasting. Not in this contract.
+- Comparison, preview and trend views: side-by-side diffs, period-on-period comparison, trend lines.
+  Useful, and none of them stops a release.
+- Self-service report building. Seven defined reports plus the pack.
+- Real-time dashboards. Marts refresh daily.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M9-I5` | D9 | Funnel | M | 2.0 |
+| `M9-I6` | D9 | Fill and time to fill | L | 3.0 |
+| `M9-I7` | D9 | Trial survival | M | 2.0 |
+| `M9-I8` | D28 | Where candidates drop out | L | 3.0 |
+| `M9-I9` | D28 | Channel and recruiter performance | M | 2.0 |
+| `M9-I10` | D28 | Monthly pack | L | 3.0 |
+| `M9-I11` | A11 | Rate variance | M | 2.0 |
+| `M9-I17` | D28 | Reporting tables (marts) | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-11` — **and it must have been live since Phase 3**. Plus `03-03`
+(`StatusTransition` and `AllocationRecord`, both append-only from day one), `03-07` (overrides),
+`03-08` (structured rejection reasons), `03-09` (drop-out reasons and trial outcomes), `03-01` (rate
+baselines), `02-03` (close reasons), `02-07`.
+
+**Consumed by:** `03-18` reads performance data for its recruiter suggestions — which is why `03-18`
+sits in Phase 6 and not next to `03-03`.
+
+**External:** none.
+
+**Hard dependency:** D28 stage-level loss **by recruiter cannot be produced at all** without the D14
+owner and allocation fields in `03-03`.
+
+## 5. Data model
+
+```sql
+-- All marts are rebuilt from events.platform_event. None queries an operational table.
+
+CREATE TABLE reporting.mart_requisition_stage (
+    requisition_id uuid NOT NULL,
+    client_id uuid NOT NULL, location_id uuid NOT NULL,
+    candidate_category text NOT NULL, care_setting text NOT NULL, service_line text NOT NULL,
+    source_channel text NOT NULL,
+    owner_id uuid, owner_name text,
+    stage text NOT NULL,
+    entered_at timestamptz NOT NULL, exited_at timestamptz,
+    duration_seconds bigint,
+    held_seconds bigint NOT NULL DEFAULT 0,          -- excluded from aging (M3 AC6)
+    close_reason_code text,
+    PRIMARY KEY (requisition_id, stage, entered_at)
+);
+
+CREATE TABLE reporting.mart_requisition_fill (
+    requisition_id uuid PRIMARY KEY,
+    client_id uuid NOT NULL, candidate_category text NOT NULL, source_channel text NOT NULL,
+    owner_id uuid,
+    positions_requested integer NOT NULL, positions_filled integer NOT NULL,
+    first_complete_at timestamptz,                   -- time-to-fill measured FROM here
+    filled_at timestamptz,
+    time_to_fill_seconds bigint,                     -- excluding held time
+    completeness_at_intake numeric(4,3),             -- the A1 value case (M9-I9)
+    is_closed boolean NOT NULL DEFAULT false, close_reason_code text
+);
+
+CREATE TABLE reporting.mart_recruiter_allocation (   -- covers the PERIOD a recruiter held it
+    requisition_id uuid NOT NULL,
+    recruiter_id uuid NOT NULL, recruiter_name text NOT NULL,
+    is_site_resident boolean NOT NULL,                -- comparability needs site attribution (M0-I2)
+    allocated_at timestamptz NOT NULL, removed_at timestamptz,
+    PRIMARY KEY (requisition_id, recruiter_id, allocated_at)
+);
+
+CREATE TABLE reporting.mart_candidate_stage_loss (
+    requisition_id uuid NOT NULL, candidate_id uuid NOT NULL,
+    client_id uuid NOT NULL, candidate_category text NOT NULL,
+    recruiter_id uuid,                                -- from allocation at the time
+    stage text NOT NULL,                              -- ranked | shortlisted | client_response
+                                                      -- | interview | decision | offer | joined
+    outcome text NOT NULL,                            -- progressed | lost
+    reason_code text,                                 -- from the structured taxonomy, never free text
+    occurred_at timestamptz NOT NULL,
+    PRIMARY KEY (requisition_id, candidate_id, stage, occurred_at)
+);
+
+CREATE TABLE reporting.mart_trial_survival (
+    placement_id uuid PRIMARY KEY,
+    client_id uuid NOT NULL, candidate_category text NOT NULL, recruiter_id uuid,
+    joining_date date NOT NULL,
+    survived_to_day integer,                          -- the full 0→90 curve, not just the endpoint
+    outcome text,                                     -- survived | ended
+    end_reason_code text,
+    retention_basis text,                             -- acknowledged | deemed
+    invoice_value numeric(14,2)                       -- revenue at risk
+);
+
+CREATE TABLE reporting.mart_channel_performance (
+    period_month date NOT NULL, source_channel text NOT NULL,
+    client_id uuid, candidate_category text,
+    requisitions integer NOT NULL, completeness_avg numeric(4,3),
+    placements integer NOT NULL,
+    PRIMARY KEY (period_month, source_channel, client_id, candidate_category)
+);
+
+CREATE TABLE reporting.mart_rate_variance (
+    requisition_id uuid NOT NULL, invoice_line_id uuid,
+    client_id uuid NOT NULL, role_code text NOT NULL,
+    specialty text, acuity text,                      -- requires the A9 attribute set (M4-I26)
+    baseline_rate numeric(14,2), agreed_rate numeric(14,2),
+    variance_pct numeric(6,2),
+    occurred_at timestamptz NOT NULL,
+    PRIMARY KEY (requisition_id, occurred_at)
+);
+
+CREATE TABLE reporting.mart_refresh (
+    mart text PRIMARY KEY,
+    last_event_id uuid, last_refreshed_at timestamptz NOT NULL,
+    rows integer, duration_ms integer
+);
+
+CREATE TABLE reporting.monthly_pack (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    period_month date NOT NULL UNIQUE,
+    composition jsonb NOT NULL,                       -- configurable without a deployment
+    document_id uuid,
+    state text NOT NULL DEFAULT 'scheduled'
+      CHECK (state IN ('scheduled','generating','ready','failed')),
+    generated_at timestamptz
+);
+```
+
+## 6. State machines
+
+### `MonthlyPack`
+
+`scheduled → generating → ready`, or `failed` with a reason. Composition is configurable, so the pack
+can change **without a deployment**.
+
+Everything else is derived data with no lifecycle. Marts are rebuilt idempotently from the event log;
+a rebuild produces the same numbers.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/reports/funnel?client=&category=&from=&to=` | `report:read` | Requisitions reaching each stage and the drop between |
+| `GET` | `/v1/reports/fill?client=&category=&recruiter=&from=&to=` | `report:read` | Fill rate and time-to-fill with **distribution, not only an average** |
+| `GET` | `/v1/reports/trial-survival?client=&category=&recruiter=` | `report:read` | The full day 0–90 curve, end reasons, revenue at risk |
+| `GET` | `/v1/reports/stage-loss?by=client\|recruiter&from=&to=` | `report:read` | Where candidates are lost, with structured reasons |
+| `GET` | `/v1/reports/performance?by=channel\|recruiter&from=&to=` | `report:read` | Placements by channel; requisitions held, fill rate, time-to-fill per recruiter |
+| `GET` | `/v1/reports/rate-variance?client=&role=&specialty=&acuity=` | `report:read` | Agreed against baseline |
+| `GET`/`POST` | `/v1/reports/monthly-pack` | `report:read` / `report:manage` | Composition and generation |
+| `GET` | `/v1/reports/monthly-pack/:period/export` | `report:read` | The document |
+
+Every report endpoint supports the `02-07` export, and every export is audited — a report leaving the
+platform carries personal data.
+
+## 8. Events and jobs
+
+**Events emitted:** `reporting.mart.refreshed` · `reporting.monthly_pack.generated`.
+
+**Events subscribed:** the five families in `01-06` §1 — `demand.requisition.*`, `demand.allocation.*`,
+`matching.*`, `selection.*`, `placement.*` — plus `billing.invoice.raised` and
+`timesheets.timesheet.approved`.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `reporting.refresh-marts` | daily, and on demand | Incremental from the last processed event id |
+| `reporting.rebuild-mart` | on demand | Full replay from the event log — the correctness backstop |
+| `reporting.monthly-pack` | monthly | Generates and exports **without manual assembly** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Funnel — requisitions reaching each stage through to placement, the drop between, filters by client, category and period | `/reports/funnel` | `M9-I5` |
+| Fill and time to fill — proportion filled, how long **not counting days on hold**, by client, category and recruiter | `/reports/fill` | `M9-I6` |
+| Trial survival — proportion lasting to day 90, reasons where they did not | `/reports/trial-survival` | `M9-I7` |
+| Where candidates drop out — by client and by recruiter, with the rejection reasons behind the losses | `/reports/stage-loss` | `M9-I8` |
+| Channel and recruiter performance | `/reports/performance` | `M9-I9` |
+| Monthly pack — schedule, composition, export | `/reports/monthly-pack` | `M9-I10` |
+| Rate variance — agreed against standard, split by client, role, specialty and acuity | `/reports/rate-variance` | `M9-I11` |
+
+Charts use Recharts themed by `02-05` tokens. Every screen shows the **as-at time of the last mart
+refresh**, so nobody mistakes a daily mart for live data.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | The funnel is computed from `StatusTransition` records, so it is **correct retrospectively** | `M9-I5`, `M3-I28` |
+| AC2 | Conversion is reported per stage, not only end to end | `M9-I5` |
+| AC3 | Filtering by candidate category is possible, since category is on the requisition | `M9-I5` |
+| AC4 | **Without the event foundation written at build time this report cannot be produced at all** | `M9-I5`, `M3-I31` |
+| AC5 | Time-to-fill is measured from the requisition **reaching complete**, consistent with the aging rule | `M9-I6`, `M3` BR4 |
+| AC6 | Held days are excluded from aging | `M9-I6`, `M3` AC6 |
+| AC7 | **Distribution is shown, not only an average, since the tail is the operational problem** | `M9-I6` |
+| AC8 | Fill rate by recruiter requires the D14 allocation | `M9-I6`, `M3-I16` |
+| AC9 | Unfilled requisitions are analysable by close reason | `M9-I6`, `M0-I5` |
+| AC10 | Survival is reported across the **full day 0 to 90 curve**, not only the final outcome | `M9-I7` |
+| AC11 | Drop-out reasons come from the M8 taxonomy | `M9-I7`, `M8-I2` |
+| AC12 | **Revenue at risk is calculable**, since the invoice fires at day 90 | `M9-I7` |
+| AC13 | Survival by recruiter requires the D14 allocation | `M9-I7` |
+| AC14 | Loss by client and by stage is computed from `StatusTransition` timestamps | `M9-I8` |
+| AC15 | **Loss by recruiter cannot be produced at all without the D14 owner and allocation** | `M9-I8` |
+| AC16 | Loss reasons come from the **structured rejection taxonomy, not free text** | `M9-I8`, `M7-I4` |
+| AC17 | The report is correct retrospectively only if events were written at the time | `M9-I8`, `M3-I31` |
+| AC18 | Recruiter attribution uses the **allocation history, covering the period the recruiter held the requisition** | `M9-I8`, `M3-I16` BR3 |
+| AC19 | Channel performance is reportable because source channel is retained on every requisition | `M9-I9`, `M3` AC2 |
+| AC20 | **Verbal capture is measurable rather than invisible**, since it is recorded with source and capturing recruiter | `M9-I9`, `M3` BR4 |
+| AC21 | Site-resident and floating recruiters are comparable, which requires site attribution | `M9-I9`, `M0-I2` |
+| AC22 | Channel quality includes **completeness at intake**, which is the A1 value case | `M9-I9` |
+| AC23 | Recruiter performance uses allocation history, not current allocation only | `M9-I9` |
+| AC24 | The monthly pack generates on schedule **without manual assembly** | `M9-I10` |
+| AC25 | Composition is configurable so the pack can change **without a deployment** | `M9-I10` |
+| AC26 | The pack exports in formats leadership actually uses | `M9-I10` |
+| AC27 | Variance is reported by client, role, specialty and acuity | `M9-I11` |
+| AC28 | Baseline comes from the rate card baseline attribute | `M9-I11`, `M2-I5` |
+| AC29 | The specialty and acuity breakdown **requires the A9 attribute set on the requisition** | `M9-I11`, `M4-I26` |
+| AC30 | Marts materialise from the event foundation, **not by querying operational tables** | `M9-I17` |
+| AC31 | Stage-level loss requires `StatusTransition`, which M3 writes append-only | `M9-I17`, `M3-I28` |
+| AC32 | The recruiter dimension requires the D14 allocation history | `M9-I17`, `M3-I16` |
+| AC33 | A full rebuild from the event log reproduces the same numbers as the incremental refresh | `M9-I17` |
+| AC34 | Every screen states the as-at time of the last refresh | `01-03` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-14` | Query performance must support interactive dashboards — **target not set** | Working budget: any report over 12 months returns in ≤3s from a mart. Without an agreed target there is no performance acceptance test. | `M9-I17` |
+| `OI-HS-01` | Whether a recruiter sees only their own site's figures | `AS-18` — reports respect the same scope resolver as every list | `M9-I5` |
+| `OI-A-07` | Nothing produces the clinical and communication rating, so no report can use it | Excluded from every report rather than shown as an empty column | `M9-I8` |
+| `OI-HS-36` **[raised here]** | Who receives the monthly pack, in what format, and by what route? | Generated and downloadable; **not emailed automatically** until recipients are named. The plan says "formats leadership actually uses" without naming them. | `M9-I10` |
+| `OI-HS-37` **[raised here]** | Mart refresh cadence — daily is assumed | Daily overnight, with on-demand refresh for a named report. If leadership expects same-day figures during the morning call, hourly refresh is a small change now and an awkward one later. | `M9-I17` |

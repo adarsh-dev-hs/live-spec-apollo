@@ -1,0 +1,114 @@
+---
+title: "06-04 Scope register"
+description: "Every client deliverable, the milestone carrying it, and its specification state — plus coverage against the source document."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+Every client deliverable, which milestone carries it, and its current specification state. The view for scope review.
+
+## Milestones
+
+| ID | Milestone | Deliverables | Release | Items | Effort | Months | Specification basis |
+|---|---|---|---|---|---|---|---|
+| M0 | Platform Foundations | F01–F06 | `Foundations` | 6 | 48.0pd | 1–2 | Hiresense-defined. These capabilities are assumed by the client's deliverables but named in none of them. |
+| M1 | Platform Foundations & Migration | D11, A10, A12, F10, F12 | `Release 1` | 16 | 128.5pd | 1–3 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M2 | Client, Contract & Rate Card | D1, D13, F08 | `Release 1` | 14 | 81.0pd | 2–3 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M3 | Demand Intake & Allocation | D2, A1, D14 (thin), F07, F14 | `Release 1` | 32 | 208.0pd | 3–4 | Client Part B chapter, version 1, 7 August 2026. Complete. |
+| M4 | Candidate Record & Credentials | D3, D4, D16, A2, A9, F13 | `Release 1` | 27 | 184.5pd | 2–4 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M5 | Engagement & Availability | D10, D29, A3, A4, A5, A14 | `Release 1` | 16 | 107.5pd | 3–5 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M6 | Matching & Ranking | D5, D18, A8 | `Release 1` | 10 | 72.0pd | 4–5 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M7 | Selection, Offer & Client Response | D6, D20, A13 | `Release 1` | 18 | 126.5pd | 4–5 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M8 | Placement, Trial & Shift Attendance | D7, A6, D22 (thin) | `Release 1` | 17 | 104.0pd | 5–6 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M9 | Billing, Revenue & Reporting | D8, A7, D25 (thin), D9, D28, A11 | `Release 1` | 17 | 88.5pd | 5–6 | Client Part A v2 + Hiresense analysis. Client Part B chapter not yet received. |
+| M10 | Client Portal | D12 | `Release 2` | 8 | 44.0pd | 5–6 | Client R2 / deferred list. D12 is named as deferred throughout Part A. No client specification received. |
+| M11 | Associate Onboarding | D21 | `Release 2` | 5 | 26.5pd | 5–6 | Client R2 / deferred list. Named in Part A as D21 Associate onboarding with its contents listed. |
+| M12 | Workforce Operations | D23 | `Release 2` | 6 | 38.0pd | 5–6 | Client R2 / deferred list. Named in Part A as D23 Workforce operations with its contents listed. |
+| M13 | Payroll | D24 | `Release 2` | 5 | 35.0pd | 6–6 | Client R2 / deferred list. Named in Part A as D24 Payroll with its contents listed. |
+| M14 | Demand Prioritisation & Approval | D14 (full) | `Release 2` | 4 | 26.5pd | 5–6 | Client R2 / later release. Part A states the prioritisation engine and the requisition approval workflow remain in the later release. |
+| M15 | Timesheet Operations & Collections | D22 (full), D25 (full) | `Release 2` | 7 | 44.0pd | 6–6 | Client R2 / later release. Part A lists these as remaining in the later release for D22 and D25. |
+
+## Deliverables
+
+Every deliverable across the six months, keyed by our own index. The client's deliverable number is carried alongside it, and the right-hand column lists the exact items that implement it, so a deliverable can always be traced down to buildable work. Deliverables that arrived as a thin slice in one milestone and a remainder in another appear twice, once for each. D15 and D17 were descoped from the contract entirely and do not appear.
+
+| Index | Client ref | Deliverable | Release | Provenance | Pri | Surface | Risk | Implemented by | Scope note |
+|---|---|---|---|---|---|---|---|---|---|
+| M0 | F01 | Login and session handling | `Foundations` | Hiresense-defined | `P0` | All | `Medium` `COMP` | M0-I1 | How an Apollo user gets into the platform and stays in. D11 asks for role-based access but never says how anyone signs in. |
+| M0 | F02 | User management | `Foundations` | Hiresense-defined | `P0` | All | `Low` `SHARED` | M0-I2 | Creating and managing the Apollo staff who use the platform. M3 requires a requisition owner from 'the Apollo internal user list' - nothing else creates that list. |
+| M0 | F03 | Roles and permissions | `Foundations` | Hiresense-defined | `P0` | All | `High` `SPEC` | M0-I3 | What each role can see and do. D11 says 'role-based access control' as a phrase - the actual permission model, and whether a recruiter sees only their own site, is not specified anywhere. |
+| M0 | F04 | Audit trail | `Foundations` | Hiresense-defined | `P0` | All | `Medium` `COMP` | M0-I4 | One place that records who did what and when. Several milestones need this - M3 status changes, M7 selection decisions, M7 link responses - and building it six times would be six different answers. |
+| M0 | F05 | Settings and lists administration | `Foundations` | Hiresense-defined | `P0` | All | `Medium` `SHARED` | M0-I5 | One admin area for every configurable list and waiting period in the platform. There are at least nine of them; without a shared home they become nine separate screens. |
+| M0 | F06 | Document and file storage | `Foundations` | Hiresense-defined | `P0` | All | `Medium` `COMP` | M0-I6 | Where every uploaded file lives: CVs, certificates, ID scans, WhatsApp voice notes, signed offers, invoices. |
+| M3 | F07 | Message sending infrastructure | `Release 1` | Hiresense-defined | `P0` | All | `High` `EXT` | M3-I30 | The plumbing underneath every message the platform sends. D10 covers templates and preferences; the queue, retries and delivery receipts underneath are assumed. |
+| M2 | F08 | Lists, search, filters and export | `Release 1` | Hiresense-defined | `P0` | All | `Low` `SHARED` | M2-I14 | The shared table component every Ops screen uses. Around twenty screens in this plan are lists; building filtering and paging separately in each is the same work twenty times. |
+| M1 | F10 | Environments, pipeline and monitoring | `Release 1` | Hiresense-defined | `P0` | All | `Medium` `EXT` | M1-I16 | Four environments, a way to move code between them, and enough monitoring to know when something has broken. |
+| M1 | F12 | Design system and component library | `Release 1` | Hiresense-defined | `P0` | All | `Low` `SHARED` | M1-I4 | The shared visual language and the components built from it. Five different surfaces in this plan - if each is designed separately the work is done five times and looks like it. |
+| M4 | F13 | Data protection: consent, residency, retention | `Release 1` | Hiresense-defined | `P0` | All | `High` `COMP` | M4-I27 | Handling personal and health-related data about candidates in a way that meets Indian data protection law. |
+| M3 | F14 | Event recording for reporting | `Release 1` | Hiresense-defined | `P0` | All | `High` `DATA` | M3-I31 | Every module writes an event as things happen, and the reports in M9 read those events later. This is the one prerequisite that cannot be added afterwards. |
+| M3 | D2 | Demand management | `Release 1` | Original R1 | `P0` | Ops/Admin | `Medium` `SPEC` | M3-I9, M3-I10, M3-I11, M3-I12, M3-I13, M3-I14, M3-I15, M3-I27, M3-I28 | Requisition object and lifecycle: creation, versioning, hold, revise, close; shift templates; fulfilment board and aging. |
+| M3 | A1 | Multi-channel demand ingestion | `Release 1` | New addition | `P0` | Ops/Admin | `High` `EXT` | M3-I1, M3-I2, M3-I3, M3-I4, M3-I5, M3-I6, M3-I7, M3-I8, M3-I17, M3-I18, M3-I19, M3-I20, M3-I21, M3-I22, M3-I23, M3-I24, M3-I25, M3-I26, M3-I29, M3-I32 | Five live channels plus verbal capture, all normalising to one requisition schema. Owns the inbound stack consumed by A14. |
+| M3 | D14 | Prioritisation & allocation (thin slice) | `Release 1` | Thin slice from R2 | `P1` | Ops/Admin | `Low` `XMOD` | M3-I16 | Owner field and capture of the allocation made on the daily morning call. No engine, no approval workflow. |
+| M1 | D11 | Foundations & documentation | `Release 1` | Original R1 | `P0` | Ops/Admin | `High` `SHARED` | M1-I1, M1-I5, M1-I6, M1-I7, M1-I8, M1-I9 | Deployment to the client-hosted AWS Mumbai account, technical and user documentation, UAT support and go-live. Access control, environments and audit are delivered once in M0 rather than separately here. |
+| M1 | A10 | Legacy migration (CPAL) | `Release 1` | New addition | `P0` | Ops/Admin | `High` `DATA` | M1-I2, M1-I10, M1-I11, M1-I12 | Migration of CPAL and current tooling so the platform becomes system of record. Effort basis awaits joint data profiling. |
+| M1 | A12 | Configurable market layer | `Release 1` | New addition | `P0` | Ops/Admin | `High` `SPEC` | M1-I3, M1-I13, M1-I14, M1-I15 | Adapter interfaces behind identity, certification and qualification. India adapter in R1; must accept US, Germany, Ireland later. |
+| M2 | D1 | Client & contract management | `Release 1` | Original R1 | `P0` | Ops/Admin | `Medium` `XMOD` | M2-I1, M2-I2, M2-I3, M2-I4, M2-I5, M2-I6, M2-I11 | Client entity, locations, departments, rate cards by role/skill/location. Sender resolution in A1 matches against this base. |
+| M2 | D13 | Contract creation & versioning | `Release 1` | Moved from R2 | `P0` | Ops/Admin | `High` `XMOD` | M2-I7, M2-I8, M2-I9, M2-I10, M2-I12, M2-I13 | Contract record with versioning, renewal alerts, history; the deemed-confirmation and deemed-approval windows the M9 triggers read. |
+| M4 | D3 | Candidate mobile app | `Release 1` | Original R1 | `P0` | Candidate App | `High` `SHARED` | M4-I1, M4-I2, M4-I4, M4-I5, M4-I6, M4-I7, M4-I8, M4-I9, M4-I10, M4-I20, M4-I21, M4-I22 | Three-way shared build. Self-registration, resume parsing, dedupe, job and shift discovery, application tracking, shift check-in. Hard dependency of the contractual invoice chain. |
+| M4 | D4 | Candidate verification (KYC) | `Release 1` | Original R1 | `P0` | Ops/Admin | `High` `EXT` | M4-I12, M4-I14, M4-I23, M4-I24 | Document OCR and identity verification behind the M1 adapter layer. |
+| M4 | D16 | Verification - extended | `Release 1` | Moved from R2 | `P0` | Ops/Admin | `High` `EXT` | M4-I11, M4-I13, M4-I19, M4-I25 | Credential object with issuer, validity period and verification method; verification queue with pendency tracking. |
+| M4 | A2 | Two supply bases | `Release 1` | New addition | `P0` | Ops/Admin, Candidate App | `Medium` `XMOD` | M4-I15, M4-I16, M4-I17 | Base A and Base B as separate supply bases against a shared credential record, not a status flag. |
+| M4 | A9 | Specialty & acuity capture | `Release 1` | New addition | `P0` | Ops/Admin, Candidate App | `Medium` `SPEC` | M4-I3, M4-I18, M4-I26 | Per-category attribute set on both requisition and candidate record. Requisition-side ownership is open item 1. |
+| M5 | D10 | Notifications & alerts | `Release 1` | Original R1 | `P0` | All | `Medium` `SHARED` | M5-I1, M5-I2, M5-I3, M5-I4, M5-I8, M5-I9 | Template management, trigger configuration, delivery status, retry, opt-out, preference management, per-user notification log. |
+| M5 | D29 | Reminders, nudges & preferences | `Release 1` | Moved from R2 | `P0` | All | `Medium` `SHARED` | M5-I5 | Scheduling layer the cadence engine executes through. |
+| M5 | A3 | Availability decay | `Release 1` | New addition | `P0` | Ops/Admin | `Medium` `XMOD` | M5-I10 | Availability confidence value decaying on a configurable schedule per base; reset on confirmed response. |
+| M5 | A4 | Re-contact cadence engine | `Release 1` | New addition | `P0` | Ops/Admin | `High` `SPEC` | M5-I11 | Selects who to contact on confidence, configurable per segment. Base B runs every 3-4 days across the whole base. |
+| M5 | A5 | Outbound voice with response capture | `Release 1` | New addition | `P0` | Voice | `High` `EXT` | M5-I6, M5-I12, M5-I13 | Integration and response extraction schema. Voice provider not named. |
+| M5 | A14 | Candidate response capture | `Release 1` | New addition | `P0` | WhatsApp, Candidate App | `High` `SHARED` | M5-I7, M5-I14, M5-I15, M5-I16 | Consumes the A1 inbound stack with a candidate-response intent schema. Structured payload across WhatsApp template and app. |
+| M6 | D5 | Matching & shortlisting | `Release 1` | Original R1 | `P0` | Ops/Admin | `Medium` `SPEC` | M6-I1, M6-I2, M6-I4 | Advanced search, saved searches, talent segments, recruiter override. Whether hand-assembly survives is open. |
+| M6 | D18 | Matching & shortlisting (AI) | `Release 1` | Moved from R2 | `P0` | Ops/Admin | `High` `MODEL` | M6-I3, M6-I5, M6-I6, M6-I7, M6-I8, M6-I10 | Ranked set with rationale and unmet criteria, weighted per category and supply base. Weight model not specified. |
+| M6 | A8 | Outcome write-back to ranking | `Release 1` | New addition | `P0` | Ops/Admin | `High` `XMOD` | M6-I9 | Selection outcomes and rejection reasons feed subsequent ranking. Schema must be agreed with D6 before either is built. |
+| M7 | D6 | Interview & selection | `Release 1` | Original R1 | `P0` | Ops/Admin | `Medium` `XMOD` | M7-I1, M7-I2, M7-I3, M7-I4 | Slot proposal, reschedule, feedback, accept/hold/reject with mandatory structured rejection reasons and audit trail. |
+| M7 | D20 | Offer management | `Release 1` | Moved from R2 | `P0` | Ops/Admin, WhatsApp | `High` `EXT` | M7-I5, M7-I6, M7-I7, M7-I14, M7-I15, M7-I16 | Offer generation, delivery, tracking, expiry, digital signature, offer-to-contract mapping. Without it the permanent chain stops after selection. |
+| M7 | A13 | Client link surfaces | `Release 1` | New addition | `P0` | Client link | `High` `SHARED` | M7-I8, M7-I9, M7-I10, M7-I11, M7-I12, M7-I13, M7-I17, M7-I18 | One tokenised mechanism, four link types: shortlist response, day 30/60/90 check-in, timesheet approval. Only day-90 is a billing trigger. |
+| M8 | D7 | Onboarding & joining | `Release 1` | Original R1 | `P0` | Ops/Admin | `Medium` `XMOD` | M8-I1, M8-I2, M8-I10 | Joining confirmation with date tracking; drop-out capture with reason returning the position to fulfilment. |
+| M8 | A6 | Trial period tracking | `Release 1` | New addition | `P0` | Ops/Admin, Client link, Voice/WhatsApp | `High` `XMOD` | M8-I3, M8-I4, M8-I5, M8-I6, M8-I11, M8-I12, M8-I13 | Check-ins at day 0, 7, 30, 60, 90 capturing attendance, salary timeliness, preceptor and accommodation. Question sets differ by category. |
+| M8 | D22 | Time & attendance (thin slice) | `Release 1` | Thin slice from R2 | `P0` | Candidate App, Ops/Admin | `High` `SHARED` | M8-I7, M8-I8, M8-I9, M8-I14, M8-I15, M8-I16, M8-I17 | Shift attendance by app check-in with location stamp recorded not enforced; timesheet with client approval state. No leave or overtime treatment. |
+| M9 | D8 | Billing & receivables | `Release 1` | Original R1 | `P0` | Ops/Admin | `High` `XMOD` | M9-I1, M9-I2, M9-I12, M9-I14 | Permanent placement invoice fired on the day-90 client-acknowledged retention record, against contract terms in force. |
+| M9 | A7 | Retention-linked invoicing | `Release 1` | New addition | `P0` | Ops/Admin | `High` `XMOD` | M9-I3, M9-I13 | The trigger record held as auditable evidence capable of supporting a billing query. |
+| M9 | D25 | Billing - auto-invoice (thin slice) | `Release 1` | Thin slice from R2 | `P0` | Ops/Admin | `Medium` `XMOD` | M9-I4, M9-I15, M9-I16 | Shift-level invoice from the client-approved timesheet and contract. No debit or credit notes, no dunning. |
+| M9 | D9 | Intelligence & analytics | `Release 1` | Original R1 | `P1` | Ops/Admin | `Medium` `DATA` | M9-I5, M9-I6, M9-I7 | Funnel and conversion, fill rate, time-to-fill, trial survival. |
+| M9 | D28 | Analytics - performance & MIS | `Release 1` | Moved from R2 | `P1` | Ops/Admin | `Medium` `XMOD` | M9-I8, M9-I9, M9-I10, M9-I17 | Stage-level conversion loss by client and recruiter, channel and recruiter performance, monthly MIS pack. Requires the D14 owner field. |
+| M9 | A11 | Rate variance instrumentation | `Release 1` | New addition | `P1` | Ops/Admin | `Low` `DATA` | M9-I11 | Rate agreed against baseline by client, role, specialty and acuity. |
+| M10 | D12 | Client portal | `Release 2` | Deferred to R2 | `P0` | Client Portal | `High` `COMP` | M10-I1, M10-I2, M10-I3, M10-I4, M10-I5, M10-I6, M10-I7, M10-I8 | Logged-in website for clients: raise vacancies, track them, review shortlists, approve timesheets, download invoices. Becomes the sixth A1 intake channel. |
+| M11 | D21 | Associate onboarding | `Release 2` | Deferred to R2 | `P0` | Candidate App, Ops/Admin | `Medium` `COMP` | M11-I1, M11-I2, M11-I3, M11-I4, M11-I5 | Associate profile, statutory forms including PF/UAN transfer and gratuity nomination, document checklist, app-guided onboarding. |
+| M12 | D23 | Workforce operations | `Release 2` | Deferred to R2 | `P0` | Ops/Admin, Candidate App | `Medium` `SHARED` | M12-I1, M12-I2, M12-I3, M12-I4, M12-I5, M12-I6 | Maker-checker request engine, attendance upload and verification pairing, salary revision individual and bulk, advance, hold and release. Also where geo-fencing enforcement switches on. |
+| M13 | D24 | Payroll | `Release 2` | Deferred to R2 | `P0` | Ops/Admin, Candidate App, WhatsApp | `High` `EXT` | M13-I1, M13-I2, M13-I3, M13-I4, M13-I5 | Third-party engine integration, payroll inputs and cycle configuration, PF and ESIC reports and challans, payslips in-app and over WhatsApp. |
+| M14 | D14 (full) | Prioritisation & allocation - remainder | `Release 2` | Later release | `P1` | Ops/Admin | `Medium` `MODEL` | M14-I1, M14-I2, M14-I3, M14-I4 | The prioritisation engine, suggested recruiter allocation with load balancing, and the requisition approval workflow. M3 carries only the owner field and allocation capture. |
+| M15 | D22 (full) | Time & attendance - remainder | `Release 2` | Later release | `P1` | Ops/Admin | `Medium` `XMOD` | M15-I1, M15-I2, M15-I6 | Leave categorisation, overtime treatment and internal timesheet approval routing. M8 carries the thin slice: attendance by app check-in plus client approval. |
+| M15 | D25 (full) | Billing - remainder and collections | `Release 2` | Later release | `P1` | Ops/Admin, Client link | `Medium` `XMOD` | M15-I3, M15-I4, M15-I5, M15-I7 | Payment receipt, reconciliation including part-payments and TDS, ageing, reminders and dunning, credit and debit notes. M9 carries the thin slice: shift invoice from an approved timesheet. |
+
+## Coverage against the source document
+
+Every item in this plan was checked back against Apollo's Part A v2, and every deliverable and process stage in that document was checked forward into this plan. The results below are generated from the plan data rather than asserted, so they move if the plan does.
+
+| Check | Result | Detail |
+|---|---|---|
+| Release 1 deliverables present | `34 of 34` | Every deliverable in the Part A inventory has at least one item against it, in the module the document assigns it to. |
+| Module assignment matches | `0 mismatches` | No deliverable sits in a different milestone from the one Part A names. |
+| Items with no source | `0` | Every item traces to a client deliverable, or to M0 which is declared as Hiresense-defined and additive. |
+| Descoped deliverables correctly absent | `D15, D17` | Both were removed from the contract. D15's taxonomy is absorbed into A9 as the document instructs; D17's rating field exists unpopulated with no producing system. |
+| Named capabilities evidenced | `all` | Each capability named in the deliverable descriptions appears in the elements or scenarios of the items carrying that deliverable. |
+| Permanent process flow | `18 of 18 stages` | Every stage from client onboarding to reporting has items behind its named deliverables. |
+| Contractual process flow | `10 of 10 stages` | Every stage from shift requisition to shift invoice has items behind its named deliverables. |
+| Open items carried | `18 of 18` | Every OPEN marker in Part A is in the register, plus 14 from the M3 Part B chapter and 14 raised by Hiresense. |
+| Closed items respected | `8 of 8` | Each decision Part A records as CLOSED is reflected in scope rather than reopened — three candidate categories, four A13 link types, app check-in attendance, client timesheet approval, shared inbound pipeline, day-60 intent. |
+| Delay consequences stated | `16 of 16` | Each row of the document's 'breaks if delayed' table has its consequence written into the milestone that owns it. |
+| Build order respects dependencies | `no violations` | No milestone is scheduled to start before something the document says it depends on. |
+| Release 2 deliverables | `4 + 3 remainders` | D12, D21, D23 and D24 carried as M10–M13. The remainders of D14, D22 and D25 carried as M14 and M15, so each split deliverable appears twice rather than being hidden in one row. |
+
+> **Attribution corrections made during this check.** The verification queue moved from D4 to D16, which is where Part A names it. The per-user notification log moved from D29 to D10 for the same reason. A10 now states explicitly that the platform becomes the system of record and the legacy tool is retired once reconciliation passes. The manual override path is evidenced under D5 as well as D18, since Part A lists it alongside the D5 search capabilities.

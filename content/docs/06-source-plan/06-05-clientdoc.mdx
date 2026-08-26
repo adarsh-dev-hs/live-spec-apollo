@@ -1,0 +1,227 @@
+---
+title: "06-05 The client's own document"
+description: "Apollo's text reproduced without alteration: the deliverable inventory, the module structure and the letter of 19 August 2026."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+The client’s own text, reproduced without alteration, so anything in this plan can be checked against what was actually written. Nothing on this tab is Hiresense wording.
+
+## Deliverable inventory
+
+*Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory*
+
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D1 | Client & contract management | Original R1 | M2 — Client, Contract & Rate Card |
+> | D2 | Demand management | Original R1 | M3 — Demand Intake & Allocation |
+> | D3 | Candidate mobile app | Original R1 | M4 — Candidate Record & Credentials |
+> | D4 | Candidate verification (KYC) | Original R1 | M4 — Candidate Record & Credentials |
+> | D5 | Matching & shortlisting | Original R1 | M6 — Matching & Ranking |
+> | D6 | Interview & selection | Original R1 | M7 — Selection, Offer & Client Response |
+> | D7 | Onboarding & joining | Original R1 | M8 — Placement, Trial & Shift Attendance |
+> | D8 | Billing & receivables | Original R1 | M9 — Billing, Revenue & Reporting |
+> | D9 | Intelligence & analytics | Original R1 | M9 — Billing, Revenue & Reporting |
+> | D10 | Notifications & alerts | Original R1 | M5 — Engagement & Availability |
+> | D11 | Foundations & documentation | Original R1 | M1 — Platform Foundations & Migration |
+> | D13 | Contract creation & versioning | Moved from R2 | M2 — Client, Contract & Rate Card |
+> | D14 | Prioritisation & allocation | Thin slice from R2 | M3 — Demand Intake & Allocation |
+> | D16 | Verification — extended | Moved from R2 | M4 — Candidate Record & Credentials |
+> | D18 | Matching & shortlisting (AI) | Moved from R2 | M6 — Matching & Ranking |
+> | D20 | Offer management | Moved from R2 | M7 — Selection, Offer & Client Response |
+> | D22 | Time & attendance | Thin slice from R2 | M8 — Placement, Trial & Shift Attendance |
+> | D25 | Billing — auto-invoice | Thin slice from R2 | M9 — Billing, Revenue & Reporting |
+> | D28 | Analytics — performance & MIS | Moved from R2 | M9 — Billing, Revenue & Reporting |
+> | D29 | Reminders, nudges & preferences | Moved from R2 | M5 — Engagement & Availability |
+> | A1 | Multi-channel demand ingestion | New addition | M3 — Demand Intake & Allocation |
+> | A2 | Two supply bases | New addition | M4 — Candidate Record & Credentials |
+> | A3 | Availability decay | New addition | M5 — Engagement & Availability |
+> | A4 | Re-contact cadence engine | New addition | M5 — Engagement & Availability |
+> | A5 | Outbound voice with response capture | New addition | M5 — Engagement & Availability |
+> | A6 | Trial period tracking | New addition | M8 — Placement, Trial & Shift Attendance |
+> | A7 | Retention-linked invoicing | New addition | M9 — Billing, Revenue & Reporting |
+> | A8 | Outcome write-back to ranking | New addition | M6 — Matching & Ranking |
+> | A9 | Specialty & acuity capture | New addition | M4 — Candidate Record & Credentials |
+> | A10 | Legacy migration | New addition | M1 — Platform Foundations & Migration |
+> | A11 | Rate variance instrumentation | New addition | M9 — Billing, Revenue & Reporting |
+> | A12 | Configurable market layer | New addition | M1 — Platform Foundations & Migration |
+> | A13 | Client link surfaces | New addition | M7 — Selection, Offer & Client Response |
+> | A14 | Candidate response capture | New addition | M5 — Engagement & Availability |
+>
+> Count confirmation
+>
+> | Provenance | Count | Deliverables |
+> |---|---|---|
+> | Original Release 1 | 11 | D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11 |
+> | Moved from Release 2 (in full) | 6 | D13, D16, D18, D20, D28, D29 |
+> | Thin slice from Release 2 | 3 | D14, D22, D25 |
+> | New addition at revision | 14 | A1 – A14 |
+> | Release 1 total | 34 | 20 carried from the SOW + 14 added |
+>
+> 11 + 6 + 3 + 14 = 34. Module allocation sums to the same total: M1 (3) + M2 (2) + M3 (3) + M4 (5) + M5 (6) + M6 (3) + M7 (3) + M8 (3) + M9 (6) = 34.
+
+## Module structure
+
+*Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure*
+
+> *M1 — Platform Foundations & Migration*
+>
+> Carries role-based access control, deployment to the client-hosted AWS Mumbai environment, technical and user documentation, UAT support and go-live for the enlarged Release 1, together with the market adapter interfaces sitting behind identity, certification and qualification. It also carries migration of CPAL and current tooling into the platform as the system of record, including retirement of the legacy tool.
+>
+> Deliverables: D11, A10, A12
+>
+> Surfaces: Ops/Admin only — administration and configuration screens. No candidate-facing or client-facing surface.
+>
+> **OPEN** — A12 market coverage. Only the India adapter is in scope for Release 1. With three candidate categories, the India adapter set now spans nursing councils, the NMC and state medical councils, the allied health councils and the Pharmacy Council; several have no API and resolve to document plus manual verification behind the same interface. The requirement is that the interface accepts the US, Germany and Ireland later without change to core domain logic. The set of interface contracts to be proven against those three markets in Release 1 is not enumerated in the revision.
+>
+> **OPEN** — A10 effort basis. Estimation is to follow a joint data profiling exercise that has not yet run. Apollo will provide access for profiling ahead of estimation.
+>
+> **OPEN** — A10 against D3 duplicate handling. D3 scopes duplicate detection and merge for app self-registration. The revision does not state whether the migrated CPAL base is resolved through the same mechanism or through a one-time migration-side process.
+>
+> Note: the LMS is being built by an internal Apollo team and is outside HireSense scope. It is expected to connect to this platform via API at a later point; no Release 1 deliverable depends on it and no LMS integration is scoped here.
+
+> *M2 — Client, Contract & Rate Card*
+>
+> Holds the client entity with its locations and departments, rate cards by role, skill and location, and the contract record with versioning, renewal alerts and history. It supplies the contract terms the billing triggers read — the day-90 retention terms for permanent, and the timesheet approval terms for contractual — including the per-client windows after which retention is deemed confirmed and a timesheet deemed approved where a client does not respond.
+>
+> Deliverables: D1, D13
+>
+> Surfaces: Ops/Admin.
+>
+> **OPEN** — D1 user provisioning scope. D1 includes user provisioning with role-based access. D12 (client portal) is deferred and A13 operates without login or account provisioning, so there is no client-side login in Release 1. Confirm that D1 provisioning in Release 1 covers Apollo internal users only.
+>
+> **CLOSED** — Deemed-confirmation and deemed-approval windows. Both are configurable per client and held in D13: the day-90 retention deemed-confirmation window, and the timesheet deemed-approval window added with client timesheet approval. Estimate the configurability, not a fixed period. Both require a platform-level default so that a client onboarded without a configured window does not stall invoicing. Apollo has not yet supplied the default values.
+
+> *M3 — Demand Intake & Allocation*
+>
+> Captures a requisition from any channel the client already uses and normalises it to a single structured requisition object carrying candidate category, with source retained, completeness scored against required fields and follow-up routed back through the originating channel; it also holds shift templates, live fulfilment status and aging, and the demand lifecycle of hold, revise and close. It attaches an owner to the requisition and records the recruiter allocation that the daily morning call already makes.
+>
+> Deliverables: D2, A1, D14 (thin slice)
+>
+> Surfaces: Ops/Admin. Email, client-format spreadsheets, WhatsApp text and voice notes and client HRMS/ATS are ingestion paths rather than rendered surfaces; verbal capture by a site-resident recruiter is entered through Ops/Admin.
+>
+> **OPEN** — A1 channel count in Release 1. A1 names six ingestion channels including the client portal. D12 is deferred, so five are available in Release 1. Confirm the portal channel is specified but not built, rather than dropped from A1.
+>
+> **OPEN** — A9 requisition-side fields. A9 now carries a per-category attribute set on both the requisition and the candidate record, so requisition granularity differs by category. The requisition-side fields are not explicitly scoped into D2. Ownership of that half of A9 needs assigning between M3 and M4.
+>
+> Scope boundary: the prioritisation engine and the requisition approval workflow remain in the later release. What sits in Release 1 is an owner field and capture of an allocation made outside the system — a record, not an assignment engine. The inbound parsing pipeline is built here under A1 and consumed by A14 in M5.
+
+> *M4 — Candidate Record & Credentials*
+>
+> Holds the candidate as a record spanning two supply bases against a shared credential object carrying issuer, validity period and verification method, with document OCR, identity verification behind the M1 adapter layer, and a verification queue with pendency tracking. It covers three candidate categories — nurses, doctors and allied health — with A9 held as a per-category attribute set, and includes the candidate mobile app: self-registration with phone and OTP, resume upload and parsing, duplicate detection and merge, job and shift discovery, application and shift tracking, and shift check-in.
+>
+> Deliverables: D3, D4, D16, A2, A9
+>
+> Surfaces: Ops/Admin (candidate record, verification queue, pendency tracker) and Candidate App.
+>
+> **OPEN** — Clinical and communication rating field. D17 is descoped, but the candidate record retains a clinical and communication rating attribute. No producing system is specified, and whether D18 ranking weights that attribute is not stated. Until the production method is decided, the field is present and unpopulated.
+>
+> **CLOSED** — Candidate categories. Resolved. Release 1 covers nurses, doctors and allied health. Category is a field on the requisition and the candidate record; A9 becomes a per-category attribute set — specialty and acuity for nurses, specialty, case-mix and grade for doctors, discipline, equipment and technique competency for allied health. The D15 taxonomy is not revived as a deliverable; it is absorbed into A9. The credential model in D16 is unchanged, so additional registries resolve as adapters and configuration.
+>
+> D3 is a three-way shared build and a hard dependency. D3 sits in M4, but shift discovery, acceptance and check-in serve M8, and its response surface is one of the two A14 channels in M5. Because shift attendance is captured by app check-in with no alternative route, D3 is a hard dependency of the contractual invoice chain — no app, no attendance, no shift invoice. Sequence it against all three consumers.
+
+> *M5 — Engagement & Availability*
+>
+> Determines which candidates to contact, on what schedule, through which channel and with which question set, configurable per segment, and delivers on that decision over WhatsApp, SMS, email, app push and outbound voice with template management, trigger configuration, delivery status, retry, opt-out, preference management and a per-user notification log. It captures the response on a single structured schema across the WhatsApp interactive template and the candidate app, writes it back to the candidate record, and resets the availability confidence value that otherwise decays on a configurable schedule per base.
+>
+> Deliverables: D10, D29, A3, A4, A5, A14
+>
+> Surfaces: Ops/Admin (cadence configuration, template management, notification and response logs), Candidate App, WhatsApp interactive templates, outbound voice.
+>
+> A3, A4, A5 and A14 form a closed loop: the cadence engine selects on confidence, delivery goes out, the response returns on a structured schema, and the confirmed response resets confidence, which determines the next selection. None of the four is independently operable. Treat them as one unit for estimation and sequencing — see A5.
+>
+> Base B cadence runs across the whole base every three to four days, and Base A on a longer cycle; the cadence is configurable per segment, so per-channel message volumes are a function of configuration rather than a fixed number.
+>
+> **CLOSED** — Ownership of the shared inbound pipeline. Assigned. The channel receiver, queue, sender identity resolution, parser dispatch, intent classification, unparseable-message handling and retry are built once under A1 in M3. A14 consumes that stack with a candidate-response intent schema. HireSense returns three estimate lines: the pipeline once, A1 schema and routing, A14 schema and routing.
+>
+> **OPEN** — Free-text fallback. A14 states that free-text responses fall back to parsing. No accuracy threshold, confidence handling or human-review path is specified for parsed responses that then reset availability confidence in A3.
+>
+> **OPEN** — A5 provider. Apollo will confirm the outbound voice provider. The items to be estimated are the integration and the response extraction schema, not the voice service itself.
+
+> *M6 — Matching & Ranking*
+>
+> Produces a ranked candidate set against a requisition, exposing the rationale for each rank together with unmet or partially met criteria, applying different weightings per candidate category and supply base, with saved searches, talent segments, advanced search on skill, location, experience and status, and recruiter override. It consumes selection outcomes and structured rejection reasons written back from M7 so that subsequent ranking reflects them.
+>
+> Deliverables: D5, D18, A8
+>
+> Surfaces: Ops/Admin.
+>
+> **OPEN** — Manual shortlist assembly. D5 is described as retaining search and submission while manual shortlist building is superseded by ranked output. Whether hand-assembly survives as a recruiter fallback, or whether recruiter override on the ranked set is the only manual path, is not stated.
+>
+> **OPEN** — Ranking input weighting. D18 consumes the credential record (D16), specialty and acuity (A9), availability confidence and recency (A3), and written-back outcomes (A8). With three candidate categories and two supply bases, the weight sets multiply accordingly, and the inputs themselves differ by category. The relative weighting model across those inputs, and its configurability, is not specified.
+
+> *M7 — Selection, Offer & Client Response*
+>
+> Runs slot proposal and confirmation, reschedule and cancellation, feedback capture, the accept / hold / reject decision with mandatory structured rejection reasons against a configurable taxonomy and a selection audit trail, then generates, delivers, tracks and expires the offer through to digital signature and offer-to-contract mapping. It also provides the tokenised client link mechanism, built once and instantiated by configurable link type — shortlist response, trial check-in at day 30, 60 and 90, and timesheet approval — reached without login or account provisioning and delivered through the channel the client already uses.
+>
+> Deliverables: D6, D20, A13
+>
+> Surfaces: Ops/Admin, Client link surfaces, and WhatsApp/email as the delivery channel for the offer and for both links.
+>
+> **CLOSED** — A13 scope and ownership. A13 remains one deliverable in M7. The link mechanism is built once and instantiated by type; instances serve M7 (shortlist), M8 (day 30, 60 and 90 check-in) and M9 (timesheet approval). Only the day-90 retention instance is a billing trigger — day 30 and day 60 capture signal and must not create a second trigger path. Price the mechanism once and each type as an instance.
+>
+> **CLOSED** — Day-60 client intent. Resolved by the day 30 / 60 / 90 check-in link type. No Ops/Admin workaround is required.
+>
+> **OPEN** — Recipient identity model. A13 requires the retention confirmation to be timestamped against an identified recipient. Whether recipients are held per client, per location, per requisition or per placement, and how they are maintained without account provisioning, is not specified.
+
+> *M8 — Placement, Trial & Shift Attendance*
+>
+> Records joining confirmation with date tracking and drop-out capture with reasons, then tracks a configurable set of check-in events across day 0, 7, 30, 60 and 90 capturing attendance, salary payment timeliness, preceptor assignment and accommodation status, with client intent captured at day 60 and an auditable client-acknowledged record at day 90. It also carries shift-level attendance captured by check-in on the candidate app, and the timesheet, which now holds an approval state set by the client through an A13 link; leave categorisation, overtime treatment and the internal approval routing workflow remain in the later release.
+>
+> Deliverables: D7, A6, D22 (thin slice)
+>
+> Surfaces: Ops/Admin (trial dashboard, attendance and timesheet), Candidate App (shift check-in and candidate-side responses), outbound voice/WhatsApp for candidate-side check-ins, Client link surfaces for the day 30, 60 and 90 records and for timesheet approval.
+>
+> **CLOSED** — Shift attendance capture mechanism. Attendance is captured by check-in on the candidate app, replacing the Excel import in the original D22. Release 1 records a location stamp against each check-in without enforcing a boundary; geo-fencing moves off the exclusion list to a named Phase 2 item so the field exists when enforcement is specified. Pilot runs on in-house nurses.
+>
+> **CLOSED** — Client timesheet approval. Added. The timesheet carries an approval state set by the client through an A13 link type — the same mechanism as the day-90 confirmation, second instance. D25 invoices against an approved timesheet rather than raw attendance. A deemed-approval window is configurable per client in D13, with a platform-level default so an unconfigured client does not stall invoicing.
+
+> *M9 — Billing, Revenue & Reporting*
+>
+> Generates the permanent placement invoice on the day-90 client-acknowledged retention record rather than at placement, holding that acknowledgement as an auditable trigger record capable of supporting a billing query, and generates shift-level invoices from the client-approved timesheet and contract for the contractual scope. It reports funnel and conversion, fill rate, time-to-fill, trial survival, stage-level conversion loss by client and by recruiter, channel and recruiter performance, the monthly MIS pack, and rate agreed against baseline by client, role, specialty and acuity.
+>
+> Deliverables: D8, A7, D25 (thin slice), D9, D28, A11
+>
+> Surfaces: Ops/Admin. The trigger record it depends on is produced by the A13 client link surface in M7.
+>
+> For team shape: this module holds two workstreams with no shared component beyond the underlying event data — a billing engine covering two distinct invoice paths, and a reporting layer. They can be staffed and sequenced independently.
+>
+> **OPEN** — Guarantee and replacement period. Invoicing at day 90 removes the need to reverse a pre-confirmation failure. What remains is a failure after day 90 inside a longer guarantee window. If the guarantee period is aligned to the 90-day trial, D25 debit and credit notes stay in the later release; if it is longer, that capability returns to Release 1. Apollo will confirm the period before estimation.
+>
+> **OPEN** — Collections and the finance system. The chain ends at invoice raised and receivable recorded. Payment receipt, reconciliation including part-payments and TDS, ageing, reminders and dunning, and credit and debit notes are all outside Release 1. The finance system invoices post to has not been named; Apollo will confirm. Regardless of the answer, build the invoice object addressable by API or file export so the target system attaches later without reopening the module.
+>
+> Hard dependency: D28 stage-level loss by recruiter cannot be produced without the D14 owner field in M3.
+
+## Client letter, 19 August 2026
+
+*Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August*
+
+> Points that apply across the plan rather than to one milestone. The per-milestone points are reproduced in each milestone on the Milestone detail tab.
+>
+> **What complete means at Month 6** — Permanent placement and contractual staffing as live lines of business. Nurses, doctors and allied health professionals as three category modules. Hospital and home healthcare settings as placement destinations. A platform able to receive learner and certification records from the Apollo LMS.
+>
+> **Category is a dimension, not a release** — The decision that matters is not when the other categories arrive. It is whether the core is built category-aware, and that is settled in M0 and M1 - in the data model, in the settings layer and in the adapter interfaces - not in R2. A core built to one category makes doctors a migration rather than a module.
+>
+> **Item 15** — Each category module delivered as a working end-to-end path before any part of it is thickened - one client, one requisition, one candidate: sourced, ranked, shortlisted to the client, placed, tracked to day 90 and invoiced. Nurses first.
+>
+> **Item 16** — Acceptance and milestone sign-off tied to gates that produce something a stakeholder can operate, rather than to module completion.
+>
+> **Item 17** — A gate every three to four weeks, with a working demonstration and named Apollo attendees: Shallu Kakkar for fulfilment and the recruiter workflow, Suman for the client-facing surfaces, and Mr. Abednego Peter for clinical quality and the candidate record. A written record at each gate of what was raised and what changed as a result.
+>
+> **Item 18** — The scenario catalogue against which acceptance is measured to be authored jointly and finalised gate by gate, rather than fixed during M1 design. Where feedback at a gate concerns capability already inside the agreed scope, it completes the specification for that capability rather than constituting a change.
+>
+> **Priority** — If the delivery period cannot hold both the three category modules and the full R2 remainder, we would rather have three category modules on a thinner R2 than one category module on a complete R2. The category dimension is what becomes expensive to retrofit, because it reaches into the M1 adapters, the M6 weight model and the M8 question sets. The R2 remainder does not.
+>
+> **Drafting point 1** — §5.1 defines the functional boundary as the scope in Sections 2.1 and 2.2. This SOW has no Sections 2.1 or 2.2 - Section 2 is the build sequence and is not subdivided. Please point the clause at the scope register.
+>
+> **Drafting point 2** — §5.1 also states that no external client-portal users are onboarded in the first six months, and separately that portal users for hospitals and home healthcare providers are onboarded in R2, which falls inside the six months. Please reconcile.
+>
+> **Not asking for** — No reduction in scope, no change to the six-month delivery period, no reduction in M0, and no change to your dependency logic where it reflects a real constraint.
+
+> **Milestones M10 to M15 have no module section.** Part A records only that five deliverables defer to a later release. Everything this plan says about those six milestones is Hiresense analysis built from the capability names, not from client text.

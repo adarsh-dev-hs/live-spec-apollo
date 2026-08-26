@@ -1,0 +1,30 @@
+---
+title: "06-24 Integrations"
+description: "Every outside system the platform touches, its supplier status, risk, cost driver and open item."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+Every outside system the platform touches. Half of them have no named supplier yet. Each unnamed supplier is an unpriced integration and a failure mode nobody can test against.
+
+| System | Used for | Status | Risk | Cost driver | Used by | Open item |
+|---|---|---|---|---|---|---|
+| WhatsApp Business API | Inbound text and voice notes; outbound follow-up on missing fields; D10 delivery; offer delivery; A13 link delivery; trial check-in prompts. | Provider selection pending. A single registered number and template set shared across A1 and D10 - not two. | `High` | Billed per conversation. Follow-up and cadence volume is a direct cost input. | M3-A1, M5-D10, M7-D20, M7-A13, M8-A6 | OI-HS-05 |
+| Email ingestion | Requisition capture by email; follow-up delivery. | Monitored mailbox model undecided - one address with sender routing, or per-client addresses. | `Medium` | Low direct cost. Per-client addresses add operational setup for every new client. | M3-A1 | OI-M3-13 |
+| Speech-to-text | Transcription of WhatsApp voice notes to the requisition schema. | Provider not named. May or may not be the same provider as A5 outbound voice. Language coverage must be proven against field-captured audio. | `High` | Per-minute. Volume driven by how many clients use voice notes. | M3-A1, M3-C06 | OI-M3-05 |
+| Intent classification / parsing model | Separates demand intents from candidate-response intents on the shared inbound stack; extracts fields to the requisition schema. | Threshold, fallback and retraining path to be agreed once across A1 and A14. | `High` | Inference cost per inbound. Accuracy directly sets manual-entry queue load. | M3-A1, M5-A14 | OI-M3-06 |
+| Client HRMS / ATS | Structured requisition payloads from client systems, bypassing parsing. | Number and identity of client systems in R1 not specified. Each is a separate connector. | `High` | Per-connector build effort, not consumption. | M3-A1, M3-C09 | OI-M3-03 |
+| Client spreadsheet formats | Per-client column mapping to the requisition schema. | Number of distinct formats in R1 not specified. | `High` | Per-format mapping and test data. | M3-A1, M3-S06 | OI-M3-04 |
+| Outbound voice (A5) | Re-contact of the passive base; escalated trial check-ins. | Provider unconfirmed. Scoped items are the integration and the response extraction schema, not the voice service. | `High` | Per-minute, plus AI inference for the conversational layer. | M5-A5, M8-A6 | OI-A-09 |
+| Identity & credential adapters (A12) | INC/NUID, NMC and state medical councils, allied health councils, Pharmacy Council, Aadhaar via DigiLocker, PAN, EPFO, court checks. | Several registries have no API and resolve to document plus manual verification behind the same interface. Aggregator-first (IDfy / AuthBridge) recommended. | `High` | Per-check pricing from the aggregator. | M1-A12, M4-D4, M4-D16 | OI-A-01 |
+| Apple App Store and Google Play | Publishing the candidate app, which is the only route by which shift attendance reaches the platform. | Organisation enrolment needed in Apollo's name. Apple requires a D-U-N-S number. First submission is reviewed more slowly than later updates. | `High` | Annual developer fees. No per-use cost. | M4-D3, M8-D22 | OI-HS-08 |
+| Digital signature | Offer signature and offer-to-contract mapping. | Provider not named in the specification. | `Medium` | Per-envelope. | M7-D20 | - |
+| Document OCR | Credential and document extraction on the candidate record. | Provider not named. Sits behind the M1 adapter layer. | `Medium` | Per-page. | M4-D4 | - |
+| Finance system | Destination for raised invoices and open receivables. | Not named. Part A instructs building the invoice object addressable by API or file export so the target attaches later. | `Medium` | None until named. | M9-C05 | OI-A-14 |
+| Legacy CPAL and current tooling | Source system for the A10 migration into the platform as system of record. | Joint data profiling has not run. Volume, quality and duplicate rate all unknown. | `High` | None. Effort risk, not consumption risk. | M1-A10 | OI-A-02 |
+
+> **The client has asked for consumption volumes.** Part B asks for message and API volumes per requisition across WhatsApp, email and transcription, so running costs can be modelled. WhatsApp is billed per conversation and the contact schedule drives the volume, so this cannot be answered until the M5 cadence design settles (OI-HS-05). Payroll and voice add further per-unit costs in M13 and M5.

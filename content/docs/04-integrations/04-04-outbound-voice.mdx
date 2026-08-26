@@ -1,0 +1,114 @@
+---
+title: "04-04 Outbound voice"
+description: "A5 calls candidates who have not responded on any other channel, asks whether they are still available, and writes the answer back."
+---
+
+**Package** `@apollo/integration-voice` · **Schema** `engagement` · **Plan** A5 · **Effort** ~11.0pd · **Risk** High `EXT` · **Build in** Phase 4
+
+## 1. Purpose
+
+A5 calls candidates who have not responded on any other channel, asks whether they are still available,
+and writes the answer back. **Apollo buys the calling service; Hiresense builds the integration and the
+part that turns a spoken answer into structured data.**
+
+Providers differ enormously in how conversations are handled, what the transcript looks like, and which
+Indian languages are covered. **Apollo has not named one**, which is why this cannot be sized.
+
+## 2. Scope
+
+**In scope:** placing a call through the provider, returning the recording and transcript, retrying a
+no-answer per campaign policy, storing recordings with residency and retention, per-minute cost
+recording, and the provider interface itself.
+
+**Explicitly out of scope:** campaign configuration and question sets (`03-06`); turning a transcript
+into a structured answer (`03-06`'s `M5-I13`, though it is tightly coupled here); the voice service
+itself, which Apollo buys.
+
+**Explicitly not built:** inbound calls; a human call centre workflow; call recording review as a
+quality process beyond the `03-06` review queue.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M5-I12` | A5 | Voice provider integration | XXL | 8.0 |
+
+`M5-I13` (answer extraction) and `M5-I6` (campaigns) are `03-06`. Escalated trial check-ins
+(`03-09`) use the same provider.
+
+## 4. Dependencies
+
+**Must exist first:** `03-06` (campaigns and the response schema), `02-04` (recordings), `02-12`
+(residency, retention and **recording consent**), `02-10`.
+
+**Consumed by:** `03-06` cadence escalation, `03-09` trial check-in escalation.
+
+**External:** `X04` — **name the supplier; obtain a calling number with telecom KYC completed; confirm
+DND and TRAI scrubbing for calls to candidates; confirm Indian language coverage and per-minute
+pricing.** Calling twelve hundred people in India has a regulatory layer beyond the technical one.
+
+## 5. Data model
+
+`engagement.voice_call` and `engagement.voice_campaign` (`03-06`). The provider contract:
+
+```ts
+interface VoiceProvider {
+  placeCall(i: { to: string; scriptId: string; language: string;
+                 callbackUrl: string }): Promise<{ providerCallId: string }>
+  getResult(providerCallId: string): Promise<{
+    state: 'completed' | 'no_answer' | 'busy' | 'failed'
+    durationSeconds: number
+    recordingUrl?: string
+    transcript?: string
+    structuredAnswers?: Record<string, unknown>   // some providers return this, some do not
+    costUnits: number
+  }>
+}
+```
+
+`structuredAnswers` being optional is deliberate: a provider that returns structure removes most of
+`M5-I13`, and one that returns only audio does not. **The difference is not knowable until the provider
+is named.**
+
+## 6. State machines
+
+`queued → dialling → connected → completed`, or `no_answer → retry` within the campaign's call window
+and frequency caps, or `failed`.
+
+## 7. API surface
+
+| Direction | Endpoint | Purpose |
+|---|---|---|
+| Outbound | in-process `voice.placeCall()` | Called only by `03-06` |
+| Inbound | `POST /hooks/voice/:provider` (via `edge-webhook`) | Call completion callback with recording and transcript |
+
+## 8. Events and jobs
+
+`engagement.voice-dial` and `engagement.extract-voice-answer` (`provider` class, `03-06`).
+Events: `engagement.voice_call.completed`.
+
+## 9. Frontend
+
+**N/A** — the campaign screen and call log are `03-06`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A call completes and returns a transcript and structured response | `M5-I12` |
+| AC2 | A no-answer retries per the campaign policy, within the call window and frequency caps | `M5-I12`, `M5-I6` |
+| AC3 | **Recordings are stored with residency and retention applied** | `M5-I12`, `M0-I6`, `M4-I27` |
+| AC4 | Provider replacement requires no change above the integration boundary | `M5-I12` |
+| AC5 | Per-minute cost plus inference cost is recorded against the call | `M5-I7`, `OI-HS-05` |
+| AC6 | Language coverage matches the operating reality, not a default | `M5-I6` |
+| AC7 | Extraction below the confidence threshold routes to review rather than writing back | `M5-I13`, `OI-A-08` |
+| AC8 | DND and TRAI scrubbing is applied before a number is dialled | `X04` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-09` | **Which provider will make the automated phone calls?** | Stub adapter behind the interface above. **The integration cannot be sized against an unknown API, and language coverage cannot be tested.** Estimate blocker. | `M5-I12`, `M5-I13`, `M5-I6`, `M5-I7`, `M3-I23` |
+| `OI-M3-05` | **Is this the same provider as speech-to-text for inbound voice notes?** | Unknown. **Same provider means one integration; different providers mean two, and language coverage must be proven twice.** | `M3-I23`, `M5-A5` |
+| `X04` | Calling number, telecom KYC, DND/TRAI scrubbing, language coverage, pricing | Apollo's to obtain; regulatory layer beyond the technical one | Phase 4 |
+| `OI-A-08` | No accuracy threshold or human-review path for voice-derived answers | Below threshold → review queue, never a silent confidence reset | `M5-A14` |

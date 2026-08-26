@@ -1,0 +1,85 @@
+---
+title: "06-03 Timeline and estimate"
+description: "Six months, sixteen milestones, the delivery principles, the schedule and the basis of the estimate."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+Six months, sixteen milestones, sequenced by what has to exist before what, rather than by the original release split.
+
+| Measure | Value | Detail |
+|---|---|---|
+| Months | **6** | 126 working days at 21 per month. |
+| Person-days | **1362** |  |
+| Average team size | **10.8** | Effort divided by 126 days. A floor, not a plan. |
+| Design days | **224** | Front-loaded into months 1–3. |
+| QA days | **358** | Back-loaded into months 4–6. |
+
+## How the work is delivered
+
+| Principle | What it means |
+|---|---|
+| A working path before a thick one | Each category is taken end to end - one client, one requisition, one candidate sourced, ranked, shortlisted, placed, tracked to day 90 and invoiced - before any part of it is thickened. Nurses first, then doctors, then allied health. Module coherence remains a secondary aim because it is cheaper to build, but it gives way to getting a path working. |
+| Gates every three to four weeks | Each gate is a working demonstration rather than a document. Named Apollo attendees: Shallu Kakkar for fulfilment and the recruiter workflow, Suman for the client-facing surfaces, Mr. Abednego Peter for clinical quality and the candidate record. A written record at each gate of what was raised and what changed. |
+| Sign-off on what can be operated | Acceptance is tied to a gate producing something a stakeholder can use, not to a milestone being complete. |
+| The scenario catalogue is authored jointly | The conditions each item must satisfy are settled gate by gate rather than fixed during design. Where feedback at a gate concerns capability already inside the agreed scope, it completes the specification for that capability. Where it introduces capability the plan does not describe, it is a change. |
+| Three assumptions the gates exist to settle | Whether recruiters accept a ranked shortlist and what their overrides imply about the weighting; whether a hospital contact will click a link to confirm retention at day 90; and whether candidates install the app, since shift attendance has no other route. |
+
+## Milestone schedule
+
+| Milestone | Month 1 | Month 2 | Month 3 | Month 4 | Month 5 | Month 6 | pd |
+|---|---|---|---|---|---|---|---|
+| M0 Platform Foundations | ● | ● |  |  |  |  | 48.0 |
+| M1 Platform Foundations & Migration | ● | ● | ● |  |  |  | 128.5 |
+| M2 Client, Contract & Rate Card |  | ● | ● |  |  |  | 81.0 |
+| M4 Candidate Record & Credentials |  | ● | ● | ● |  |  | 184.5 |
+| M3 Demand Intake & Allocation |  |  | ● | ● |  |  | 208.0 |
+| M5 Engagement & Availability |  |  | ● | ● | ● |  | 107.5 |
+| M6 Matching & Ranking |  |  |  | ● | ● |  | 72.0 |
+| M7 Selection, Offer & Client Response |  |  |  | ● | ● |  | 126.5 |
+| M8 Placement, Trial & Shift Attendance |  |  |  |  | ● | ● | 104.0 |
+| M9 Billing, Revenue & Reporting |  |  |  |  | ● | ● | 88.5 |
+| M14 Demand Prioritisation & Approval |  |  |  |  | ● | ● | 26.5 |
+| M10 Client Portal |  |  |  |  | ● | ● | 44.0 |
+| M11 Associate Onboarding |  |  |  |  | ● | ● | 26.5 |
+| M12 Workforce Operations |  |  |  |  | ● | ● | 38.0 |
+| M15 Timesheet Operations & Collections |  |  |  |  |  | ● | 44.0 |
+| M13 Payroll |  |  |  |  |  | ● | 35.0 |
+
+## Sequencing notes per milestone
+
+| ID | Milestone | Months | Effort | Why it sits here |
+|---|---|---|---|---|
+| M0 | Platform Foundations | 1 – 2 | 48.0pd | The base everything else needs. Design system, permission model, entity spine and event foundation go before any module screen is finalised. F14 in particular must exist before M3 build, not after. |
+| M1 | Platform Foundations & Migration | 1 – 3 | 128.5pd | Environment and console shell first. A10 migration runs alongside but the platform is not system of record until it reconciles. A12 adapters must land before M4 verification starts. |
+| M2 | Client, Contract & Rate Card | 2 – 3 | 81.0pd | D13 contract terms are sequenced early, not late, because M9 cannot invoice without them. |
+| M4 | Candidate Record & Credentials | 2 – 4 | 184.5pd | The mobile app starts here but is planned against M5 and M8 as well. App store review cycles add calendar time that team size does not remove. |
+| M3 | Demand Intake & Allocation | 3 – 4 | 208.0pd | The inbound pipeline is built here and reused by M5, so it must land before M5 reply capture is integrated. |
+| M5 | Engagement & Availability | 3 – 5 | 107.5pd | The four availability deliverables are one unit — do not split them across sprints. WhatsApp template approval has an external lead time that gates go-live. |
+| M6 | Matching & Ranking | 4 – 5 | 72.0pd | Schedule the ranking-schema and rejection-taxonomy session with M7 before either starts. |
+| M7 | Selection, Offer & Client Response | 4 – 5 | 126.5pd | Build the link mechanism early — M8 and M9 both wait on it. |
+| M8 | Placement, Trial & Shift Attendance | 5 – 6 | 104.0pd | Depends on M7 offers for the joining event and on the M4 app for attendance. |
+| M9 | Billing, Revenue & Reporting | 5 – 6 | 88.5pd | Billing and reporting are independent workstreams and can be staffed separately. |
+| M14 | Demand Prioritisation & Approval | 5 – 6 | 26.5pd | Sits with the rest of the Release 2 work, not next to M3. The approval workflow only needs M3, but the priority scoring and the recruiter suggestion read performance data that M9 produces, and M9 does not start until month 5. Building it in month 4 would mean building a suggestion engine against data that does not exist yet. |
+| M10 | Client Portal | 5 – 6 | 44.0pd | R2. Needs M3, M6, M7, M8 and M9 in place to have anything to display. |
+| M11 | Associate Onboarding | 5 – 6 | 26.5pd | R2. Must complete before M13 payroll can run for anyone. |
+| M12 | Workforce Operations | 5 – 6 | 38.0pd | R2. The approval engine here is reused by M15, so build it first of the two. |
+| M15 | Timesheet Operations & Collections | 6 – 6 | 44.0pd | R2. Full timesheet extends M8; collections extend M9. |
+| M13 | Payroll | 6 – 6 | 35.0pd | R2. Last. Needs M11 forms, M12 approvals and M15 timesheets before a pay run is possible. |
+
+## Basis of the estimate
+
+| Item | Basis |
+|---|---|
+| Working days | A month is taken as 21 working days. Six months is 126 working days per person. |
+| Effort to calendar | Person-days divide by team size, then get checked against the build order and the couplings. Several milestones cannot run at the same time however many people are on them. |
+| What is not in the figures | Discovery workshops, client sessions, defect cycles past first-pass QA, project management, and the 500 consulting hours in the legal SOW. UAT support is in M1 as a line item; the rest is not. |
+| Confidence | Milestones M1 to M9 are sized from the client's Release 1 list. M10 to M15 are sized from capability names only, with no client chapter, and all their items carry Low confidence. |
+
+> **On the team size figure.** Total effort divided by 126 working days gives the average team size needed to finish inside six months. That average is not a plan on its own: design front-loads into months one and two, QA back-loads into months five and six, and the integration-heavy items in M1, M4, M5 and M13 need specialists rather than more generalists. Treat the number as the floor for capacity planning, then shape the team around the build order.
+
+> **The back half is compressed, and this is the main schedule risk.** Five of the ten build steps begin in months five and six: M8, then M9 and M11, then M10, M12 and M14, then M15, then M13. Each of those steps needs the one before it, so they cannot simply be run in parallel by adding people. Two consequences worth stating now. First, any slip in months one to four lands entirely on the Release 2 milestones, because they are the only things left to cut. Second, M13 payroll sits last behind three other milestones — if the contractual line matters commercially, it is the item most exposed to everything upstream of it.

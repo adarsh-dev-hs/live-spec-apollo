@@ -1,0 +1,524 @@
+---
+title: "06-14 M7 — Selection, Offer & Client Response"
+description: "This covers interviews, the decision, and the offer. Propose interview slots, handle changes and cancellations, record feedback, then accept, hold or reject with a reason picked from a…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M7 · D6, D20, A13 · Months 4–5*
+
+`Release 1` · `18 items` · `104 conditions` · `126.5pd` · `10 high risk` · `Ops/Admin, Client link`
+
+This covers interviews, the decision, and the offer. Propose interview slots, handle changes and cancellations, record feedback, then accept, hold or reject with a reason picked from a list. If accepted, generate the offer from a template, send it over WhatsApp, track it, chase it, and get it signed. It also builds the way clients interact with the platform: a one-off web link sent to them over the channel they already use. There is no client login anywhere in this milestone. The same link mechanism is used four ways — responding to a shortlist, three trial check-ins, and approving a timesheet — but only the 90-day one causes an invoice to be raised.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D6 | Interview & selection | Original R1 | M7 — Selection, Offer & Client Response |
+> | D20 | Offer management | Moved from R2 | M7 — Selection, Offer & Client Response |
+> | A13 | Client link surfaces | New addition | M7 — Selection, Offer & Client Response |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M7 — Selection, Offer & Client Response. Reproduced without alteration.*
+>
+> Runs slot proposal and confirmation, reschedule and cancellation, feedback capture, the accept / hold / reject decision with mandatory structured rejection reasons against a configurable taxonomy and a selection audit trail, then generates, delivers, tracks and expires the offer through to digital signature and offer-to-contract mapping. It also provides the tokenised client link mechanism, built once and instantiated by configurable link type — shortlist response, trial check-in at day 30, 60 and 90, and timesheet approval — reached without login or account provisioning and delivered through the channel the client already uses.
+>
+> Deliverables: D6, D20, A13
+>
+> Surfaces: Ops/Admin, Client link surfaces, and WhatsApp/email as the delivery channel for the offer and for both links.
+>
+> **CLOSED** — A13 scope and ownership. A13 remains one deliverable in M7. The link mechanism is built once and instantiated by type; instances serve M7 (shortlist), M8 (day 30, 60 and 90 check-in) and M9 (timesheet approval). Only the day-90 retention instance is a billing trigger — day 30 and day 60 capture signal and must not create a second trigger path. Price the mechanism once and each type as an instance.
+>
+> **CLOSED** — Day-60 client intent. Resolved by the day 30 / 60 / 90 check-in link type. No Ops/Admin workaround is required.
+>
+> **OPEN** — Recipient identity model. A13 requires the retention confirmation to be timestamped against an identified recipient. Whether recipients are held per client, per location, per requisition or per placement, and how they are maintained without account provisioning, is not specified.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Context** — The permanent billing chain fires from a hospital contact clicking a link to confirm a nurse is still employed. That is an assumption about client behaviour, and on the current plan the first real client touches it in month five or six - after the invoicing that depends on it is built. One client, one nurse, one link in month two settles it.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+Build the link mechanism once, then configure four types on top of it. Three other modules use those links, so build it before them. Be careful that the day 30 and day 60 links never gain the power to trigger billing — only day 90 does.
+
+### Records this milestone owns
+
+- Interview — slot, format, panel and state, plus the history of any changes.
+- InterviewFeedback — structured feedback from each interviewer.
+- SelectionDecision — accept, hold or reject, with a reason from the configured list.
+- RejectionReason — the configured list. Shared with the ranking feedback in M6.
+- Offer, OfferVersion — the document, picked by state, role and skill, with an expiry date and reminders.
+- ClientLink — a one-off web address: its type, who it went to, when it was sent, opened and answered.
+- LinkRecipient — the person at the client who received it, recorded so the answer can be attributed. How these are held is not yet decided — see open item OI-A-12.
+
+### How records move
+
+- Interview: proposed → confirmed → held → feedback recorded. Or rescheduled, or cancelled with a reason.
+- SelectionDecision: pending → accepted, held, or rejected with a reason
+- Offer: draft → generated → sent → opened → signed. Or expired, or declined. Then linked to the contract.
+- ClientLink: issued → sent → opened → answered. Or expired → treated as agreed (only for the day-90 and timesheet types, and only after the waiting period in the contract).
+
+### Not in this milestone
+
+- Any client login or client account. Links need no password. The portal is milestone M10.
+- AI video interviews. Later phase.
+- Connecting to interviewers' external calendars. Slots are proposed and confirmed inside the platform.
+- Running background checks at offer stage. Verification happens earlier, in M4.
+- Letting the day 30 or day 60 link trigger an invoice. Those capture information only.
+
+### Needs to exist first
+
+- M6 for the shortlist. M2 for the contract to map the offer to and the waiting periods. M5 to send offers and links.
+
+### What breaks without it
+
+- M8 needs the accepted offer to create a joining event — without offers the whole permanent flow stops after selection. M9 needs the day-90 link answer as its billing trigger. M6 gets rejection reasons back. If the link mechanism is late, the client side of M7 and both invoice paths in M9 stop, because there is no other way to reach a client.
+
+### Items — 18 to build · design 24.5pd, build 68.0pd, QA 34.0pd
+
+#### M7-I1 — Propose interview
+
+`D6` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter.** Offer interview times to the candidate and the client, neither of whom has a login.
+
+##### Screens to build
+
+1. **Propose interview**
+  - Offers one or more times to the candidate and the client
+  - Records which time both sides confirmed
+  - Expires an offer of times that nobody answers
+
+##### Conditions it must satisfy
+
+- A slot is proposed to both the candidate and the client through their respective channels
+- The candidate confirms through the app or WhatsApp; the client through a tokenised link with no login
+- An expired proposal does not silently disappear; it returns to the recruiter for reissue
+- Confirmation from both sides is required before the interview state moves to confirmed
+- Panel availability is not integrated with external calendars in Release 1
+
+Index **M7-I1** · Client ref **D6** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I17, M5-I8**
+
+#### M7-I2 — Interview list
+
+`D6` · `Screen` · `L · 4.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** All interviews across the team: scheduled, held, waiting on feedback.
+
+##### Screens to build
+
+1. **Interview list**
+  - Lists interviews by date with their candidate, client and state
+  - Marks those waiting on feedback
+  - Opens an interview
+2. **Change interview**
+  - Reschedules an interview to a new time, keeping the original in the history
+  - Cancels an interview, requiring a reason
+
+##### Conditions it must satisfy
+
+- Interviews awaiting feedback are visible so the pipeline does not stall silently
+- Filtering by recruiter supports the daily morning call workflow
+- A cancelled interview returns the candidate to the shortlist rather than removing them
+- The board respects data scope (OI-HS-01)
+- Rescheduling preserves the original slot in history rather than overwriting it
+- Cancellation requires a reason from the configurable taxonomy
+- Both parties are notified on any change through their existing channels
+- Repeated rescheduling is visible as a pattern, since it is a fulfilment risk signal
+- Cancellation does not stop the requisition aging clock - only hold does (M3 AC3)
+
+Index **M7-I2** · Client ref **D6** · Band **L** · Design **1.5pd** · Build **4.0pd** · QA **1.5pd** · Total **7.0pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M2-I14**
+
+#### M7-I3 — Interview feedback
+
+`D6` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Client-side (via link).** Capture interview feedback in fixed fields, because free text cannot feed back into ranking.
+
+##### Screens to build
+
+1. **Interview feedback**
+  - Takes the interviewer's rating against set fields
+  - Takes free-text comments
+  - Shows whether feedback is still outstanding
+
+##### Conditions it must satisfy
+
+- Feedback is captured in a structured form that can feed the A8 write-back, not only as free text (Part A stage 11)
+- Client-side feedback arrives through a tokenised link with no login
+- Rating dimensions differ by candidate category where the taxonomy defines it
+- Incomplete feedback blocks the decision or is flagged, per the configured rule
+- Feedback is retained against the selection audit trail (M0-I4)
+
+Index **M7-I3** · Client ref **D6** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I17, M6-I9**
+
+#### M7-I4 — Selection decision
+
+`D6` · `Screen` · `L · 4.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Accept, hold or reject, with a reason from a list. This is what feeds back into M6.
+
+##### Screens to build
+
+1. **Decision**
+  - Accepts, holds or rejects the candidate
+  - Requires a reason from the configured list when rejecting
+  - Moves an accepted candidate to offer
+2. **Selection history**
+  - Lists every decision made about this candidate on this requisition
+  - Shows who decided, when and with what reason
+
+##### Conditions it must satisfy
+
+- A rejection requires a structured reason from the configurable taxonomy; free text alone is rejected (Part A stage 11)
+- The reason taxonomy schema is agreed with the M6 feature schema before either is built (Part A coupling 1)
+- Accept moves the candidate to offer; hold retains them on the shortlist with an expiry
+- Every decision writes a selection audit trail entry with acting user and timestamp
+- The decision triggers the asynchronous A8 write-back without gating the offer stage (Part A stage 12)
+- Every selection decision is retrievable with actor, timestamp and structured reason (Part A stage 11)
+- The trail links to the interview feedback that informed the decision
+- M6 recruiter overrides appear in the same trail
+- The trail is append-only and cannot be edited from any surface (M0-I4)
+- Export supports a client or regulatory query
+
+Index **M7-I4** · Client ref **D6** · Band **L** · Design **1.5pd** · Build **4.0pd** · QA **2.0pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-A-11** · Linked items **M6-I9, M0-I4, M0-I5**
+
+#### M7-I5 — Offer templates
+
+`D20` · `Config` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Platform administrator, BD.** Offer templates, chosen by state, role and skill.
+
+##### Screens to build
+
+1. **Offer templates**
+  - Lists the offer templates by state, role and skill
+  - Writes the wording with placeholders
+  - Saves the template with the date it applies from
+
+##### Conditions it must satisfy
+
+- An offer is generated from a template selected by state, role and skill (Part A stage 13)
+- State-specific clauses are handled by template selection, not by manual editing per offer
+- A template change does not alter offers already generated
+- Preview renders with representative data before the template is activated
+
+Index **M7-I5** · Client ref **D20** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I5**
+
+#### M7-I6 — Create offer
+
+`D20` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, BD.** Build the offer, check it, send it. A mistake here becomes a legal document.
+
+##### Screens to build
+
+1. **Create offer**
+  - Picks the template from the state, role and skill
+  - Fills it from the candidate, requisition and contract
+  - Shows the finished offer before it is sent
+  - Sends the offer
+
+##### Conditions it must satisfy
+
+- The template is auto-selected and the recruiter previews before sending (Part A stage 13)
+- Variables populate from the candidate record, the requisition and the contract terms
+- A manual adjustment to a generated offer requires approval and is audited
+- Delivery goes over WhatsApp, with email as an alternative (Part A stage 13)
+- An offer cannot be generated where the contract has no mapping (M7-I16)
+
+Index **M7-I6** · Client ref **D20** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I12, M7-I14**
+
+#### M7-I7 — Offer tracking
+
+`D20` · `Screen` · `L · 3.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Offers sent, opened, signed or about to expire.
+
+##### Screens to build
+
+1. **Offer tracking**
+  - Lists offers with when they were sent, opened and signed
+  - Shows offers about to expire
+  - Records an offer the candidate declined, with a reason
+
+##### Conditions it must satisfy
+
+- Expiry and reminders run to closure (Part A stage 13)
+- A viewed-but-unsigned offer is distinguishable from an undelivered one
+- An expired offer can be reissued as a new version rather than reopened
+- A decline captures a reason feeding the A8 write-back
+- Without D20 there is no offer acceptance, no joining event, and D7, A6, A13 retention and A7 invoicing all stall (Part A dependency table)
+
+Index **M7-I7** · Client ref **D20** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M8-D7, M5-I8**
+
+#### M7-I8 — Link types
+
+`A13` · `Config` · `L · 3.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: Platform administrator.** Set up the four link types on top of one link mechanism. Only day 90 may trigger billing.
+
+##### Screens to build
+
+1. **Link types**
+  - Lists the four link types: shortlist response, trial check-in, day 90 retention, timesheet approval
+  - Sets how long each type of link stays valid
+  - Marks the day 90 link as the only one that allows an invoice
+
+##### Conditions it must satisfy
+
+- The mechanism is built once and each link type is an instance on top of it (Part A CLOSED item)
+- Only the day-90 retention instance carries the billing trigger flag (Part A CLOSED item)
+- Day 30 and day 60 capture signal and cannot be configured to create a trigger - the flag is not editable on those types
+- A new link type is added as configuration, not as a new build
+- Each type is priced as an instance, the mechanism once (Part A CLOSED item)
+
+Index **M7-I8** · Client ref **A13** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I17, M8-A6, M9-D8**
+
+#### M7-I9 — Link recipients
+
+`A13` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: BD, Fulfilment lead.** Who at the client receives each link. Their answer is recorded against them, which is what makes the invoice defensible.
+
+##### Screens to build
+
+1. **Link recipients**
+  - Lists which contact at the client receives each type of link
+  - Sets the recipient for a client, a site or a placement
+
+##### Conditions it must satisfy
+
+- A link is issued to an identified recipient so the response is timestamped against them (Part A stage 9, 16)
+- Recipients are maintained without login or account provisioning (Part A A6)
+- Whether recipients are held per client, per location, per requisition or per placement is unspecified (OI-A-12)
+- The day-90 acknowledgement must be attributable to a named recipient to support a billing query (Part A stage 16)
+- A recipient change does not invalidate links already issued and responded to
+- This is the highest-impact unresolved design in M7 - the billing trigger is not defensible without it
+
+Index **M7-I9** · Client ref **A13** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **2.0pd** · Total **6.5pd** · Confidence **Low** · Open items **OI-A-12** · Linked items **M2-I4, M9-D8**
+
+#### M7-I10 — Client page: shortlist
+
+`A13` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: Client-side recipient (no login).** A client page reached from a WhatsApp or email link, with no password. They accept, reject or ask for an interview.
+
+##### Screens to build
+
+1. **Client page: shortlist**
+  - Opens from a link with no password
+  - Lists the candidates put forward with the agreed details
+  - Accepts a candidate, rejects one with a reason, or asks for an interview
+  - Confirms the response was received
+
+##### Conditions it must satisfy
+
+- The client responds per candidate: accept, reject with a structured reason, or request interview (Part A stage 10)
+- The response writes into the selection record in D6 (Part A stage 10)
+- The page is reached without login or account provisioning (Part A A6)
+- An expired or already-used link shows a clear state rather than an error
+- The page renders on a phone, since it arrives over WhatsApp
+- Structured rejection reasons here use the same taxonomy as internal decisions (M0-I5)
+
+Index **M7-I10** · Client ref **A13** · Band **XL** · Design **3.0pd** · Build **5.0pd** · QA **2.5pd** · Total **10.5pd** · Confidence **Medium** · Open items **OI-A-12** · Linked items **M7-I17, M7-I4**
+
+#### M7-I11 — Client page: check-in
+
+`A13` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Low`
+
+**Who uses it: Client-side recipient (no login).** Client check-in pages at day 30, 60 and 90. Day 90 asks one question and its answer allows an invoice.
+
+##### Screens to build
+
+1. **Client page: check-in**
+  - Opens from a link with no password
+  - At day 30 and day 60, asks how the placement is going
+  - At day 90, asks one question: is the person still there
+  - Confirms the response was received
+
+##### Conditions it must satisfy
+
+- Day 90 presents one question and one action (Part A stage 16)
+- Day 30 and day 60 capture signal only and must not create a second trigger path (Part A CLOSED item)
+- A day-90 response produces a timestamped acknowledgement against an identified recipient (Part A stage 16)
+- Where no response arrives, contract terms deem retention confirmed after the configured window (Part A stage 16)
+- Either way an auditable trigger record capable of supporting a billing query is produced
+- The deemed path is visibly distinguished from the acknowledged path in the record
+
+Index **M7-I11** · Client ref **A13** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.5pd** · Total **10.0pd** · Confidence **Low** · Open items **OI-A-12, OI-A-05** · Linked items **M8-A6, M9-A7, M2-I10**
+
+#### M7-I12 — Client page: timesheet
+
+`A13` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Low`
+
+**Who uses it: Client-side recipient (no login).** The client approves a timesheet from a link. M9 invoices against the approved version, not raw attendance.
+
+##### Screens to build
+
+1. **Client page: timesheet**
+  - Opens from a link with no password
+  - Lists the shifts worked in the period with their times
+  - Approves the timesheet, or queries a line with a reason
+
+##### Conditions it must satisfy
+
+- The client sets the timesheet approval state through this link (Part A CLOSED item)
+- D25 invoices against an approved timesheet rather than raw attendance (Part A CLOSED item)
+- Where no response arrives, the per-client deemed-approval window in D13 applies (Part A contractual stage 9)
+- A queried line routes back to Ops without approving the whole timesheet
+- The deemed-approval window has a platform default so an unconfigured client does not stall invoicing (OI-A-05)
+- This is the same mechanism as day-90, second instance - not a separate build
+
+Index **M7-I12** · Client ref **A13** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.5pd** · Total **10.0pd** · Confidence **Low** · Open items **OI-A-05, OI-A-12** · Linked items **M8-D22, M9-D25**
+
+#### M7-I13 — Link log
+
+`A13` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: Fulfilment lead, Finance.** Every link sent, opened and answered. Finance uses this to justify an invoice.
+
+##### Screens to build
+
+1. **Link log**
+  - Lists every link sent with its type, who it went to, and whether it was opened and answered
+  - Marks links that expired with no answer
+  - Sends a link again
+
+##### Conditions it must satisfy
+
+- Every link and its lifecycle state is retrievable
+- A link that expired without response and moved to deemed is visibly marked as such
+- Reissuing produces a new token; the original is invalidated
+- The log supports a billing query on any day-90 trigger record (Part A stage 16)
+- Finance can read the log without recruiter permissions (M0-I3)
+
+Index **M7-I13** · Client ref **A13** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I4, M2-I14**
+
+#### M7-I14 — Offer delivery
+
+`D20` · `Integration` · `L · 3.0pd` · `AI Medium` · `Medium` · `EXT` · `Medium`
+
+**Who uses it: System.** Send the offer document over WhatsApp, with email as a fallback.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends the offer document over WhatsApp, falling back to email
+  - Records when it was delivered and when it was opened
+
+##### Conditions it must satisfy
+
+- An offer is delivered over WhatsApp with email fallback (Part A A6)
+- Delivery and view are separately tracked
+- The document link expires and is not indefinitely public
+- Delivery runs on the same registered WhatsApp number as all other traffic (M3-I24)
+- Conversation cost is attributed to offer delivery in the cost model (OI-HS-05)
+
+Index **M7-I14** · Client ref **D20** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-HS-05** · Linked items **M5-I8, M0-I6**
+
+#### M7-I15 — Electronic signature
+
+`D20` · `Integration` · `XL · 5.0pd` · `AI Low` · `Medium` · `EXT` · `Low`
+
+**Who uses it: System.** Get the offer signed electronically and store the signed copy. No provider named yet.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends the offer for electronic signature
+  - Stores the signed document and marks the offer signed
+
+##### Conditions it must satisfy
+
+- An offer is signed digitally and the signed document is retrieved and stored (Part A stage 13)
+- Signature status updates the offer state without polling delay
+- Signer identity evidence is retained for audit (M0-I4, M0-I6)
+- The provider sits behind an interface so it can be replaced without domain change
+- Provider is not named in the specification
+
+Index **M7-I15** · Client ref **D20** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Low** · Open items **-** · Linked items **M0-I6, M3-I26**
+
+#### M7-I16 — Offer to contract link
+
+`D20` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Link the signed offer to the contract whose terms M9 will read at day 90.
+
+##### Screens to build
+
+1. **No screen**
+  - Links the signed offer to the contract version in force at that date
+  - Records the placement fee that will be invoiced later
+
+##### Conditions it must satisfy
+
+- A signed offer is mapped to the contract version in force at signature (Part A stage 13)
+- The placement fee term is captured on the offer so M9 reads a fixed figure at day 90
+- An offer cannot be generated where the client has no active contract
+- The mapping produces the joining event available downstream in M8
+- Terms resolution uses the M2 service rather than reading contract records directly (M2-I12)
+
+Index **M7-I16** · Client ref **D20** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I12, M8-D7**
+
+#### M7-I17 — Client link mechanism
+
+`A13` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: System.** One link mechanism, four configured types, used by three modules. Build it before them.
+
+##### Screens to build
+
+1. **No screen**
+  - Creates a one-off web address for a named recipient that needs no password
+  - Expires the address after the set period
+  - Records when it was opened and answered, against that recipient
+  - Serves all four link types from the same mechanism
+
+##### Conditions it must satisfy
+
+- The mechanism is built once and instantiated by configurable link type (Part A CLOSED item)
+- Instances serve M7 shortlist, M8 day 30/60/90 check-in and M9 timesheet approval (Part A coupling 5)
+- Only the day-90 instance can be configured as a billing trigger
+- Tokens are unguessable, expire, and are invalidated on reissue
+- A response is timestamped against the identified recipient (Part A stage 16)
+- Build the mechanism ahead of the three consuming modules (Part A coupling 5)
+- Without A13 there is no shortlist response path, no trial check-in link, no timesheet approval and no retention trigger - D12 is deferred so no alternative client surface exists (Part A dependency table)
+
+Index **M7-I17** · Client ref **A13** · Band **XL** · Design **1.0pd** · Build **5.0pd** · QA **3.0pd** · Total **9.0pd** · Confidence **Medium** · Open items **OI-A-12** · Linked items **M8-A6, M9-D8, M9-D25**
+
+#### M7-I18 — Link answer routing
+
+`A13` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: System.** Send each link answer to the right place: the shortlist, the trial record, the billing trigger or the timesheet.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends each link answer to the right place: shortlist to the selection record, check-in to the trial record, day 90 to the billing trigger, timesheet to the timesheet
+  - Treats a second submission on the same link as the same answer
+
+##### Conditions it must satisfy
+
+- A shortlist response writes into the selection record (Part A stage 10)
+- A day-90 response produces the auditable trigger record M9 invoices against (Part A stage 17)
+- A timesheet approval sets the approval state on the D22 timesheet object (Part A CLOSED item)
+- A duplicate submission from a re-opened link does not create a second response
+- Day 30 and day 60 responses write signal only and cannot reach the billing trigger path
+
+Index **M7-I18** · Client ref **A13** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **2.0pd** · Total **5.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I17, M8-A6, M9-A7**

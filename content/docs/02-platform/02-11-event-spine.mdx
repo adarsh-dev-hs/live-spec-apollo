@@ -1,0 +1,194 @@
+---
+title: "02-11 Event spine"
+description: "Every module writes an event as things happen, and the reports in M9 read those events later."
+---
+
+**Package** `@apollo/event-spine`, `@apollo/events` · **Schema** `events` · **Plan** F14 · **Effort** ~10.0pd · **Risk** High `DATA` · **Build in** Phase 3
+
+## 1. Purpose
+
+Every module writes an event as things happen, and the reports in M9 read those events later.
+
+**This is the one prerequisite that cannot be added afterwards.** If it is built after M3 rather than
+before it, the reports in M9 cannot be produced for the earlier period at all — the history simply does
+not exist. That single sentence is the whole justification for building it in Phase 3, alongside the
+first module that generates meaningful volume, rather than in Phase 6 when reporting is built.
+
+## 2. Scope
+
+### In scope
+
+- The event definition, versioning and validation layer (`@apollo/events`)
+- The transactional outbox: an event row written **inside** the business transaction
+- The publisher that moves outbox rows to the append-only event log
+- The append-only `platform_event` log, partitioned by month
+- Subscription dispatch to jobs and to the reporting mart refresh
+- Replay: re-deriving a mart from the log without touching operational tables
+
+### Explicitly out of scope
+
+- The reports and marts themselves — `03-12` (`M9-I17` and the seven report screens).
+- The audit trail — `02-02`. Audit answers "who did this to this record"; events answer "how many of
+  these happened, sliced by these dimensions". Different consumers, different retention, different
+  shape.
+- Message delivery — `02-09`.
+
+### Explicitly not built
+
+- Event sourcing as the write model. Operational tables remain the source of truth (`00-02`).
+- A public event stream, webhooks out, or third-party subscriptions.
+- Real-time streaming infrastructure. Postgres plus a polling publisher is sufficient at this volume
+  and keeps everything in one backup and one region.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I31` | F14 | Event recording — every module writes events as work happens | XL | 7.0 |
+
+Depended on by every `03-12` report and named as a hard prerequisite by `M9-I5`, `M9-I8`, `M9-I17`.
+
+## 4. Dependencies
+
+**Must exist first:** `02-10` (the publisher is a job), `02-15` (the database).
+
+**Consumed by:** `03-12` exclusively for reading. **Written to by every component.**
+
+**Critical ordering:** must be live **before** `03-03` starts writing requisitions in Phase 3.
+`03-03`'s `StatusTransition` and `AllocationRecord` are separately append-only in `demand`, but the
+events derived from them are what `03-12` groups by client, category, channel and recruiter.
+
+## 5. Data model
+
+```sql
+CREATE TABLE events.outbox (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    event_name text NOT NULL,
+    event_version integer NOT NULL,
+    payload jsonb NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    correlation_id text NOT NULL,
+    published_at timestamptz
+);
+CREATE INDEX ON events.outbox (published_at NULLS FIRST, id);
+
+CREATE TABLE events.platform_event (
+    id uuid PRIMARY KEY,                    -- same id as the outbox row
+    event_name text NOT NULL,
+    event_version integer NOT NULL,
+    payload jsonb NOT NULL,
+    occurred_at timestamptz NOT NULL,       -- when the business fact happened, NOT when published
+    published_at timestamptz NOT NULL DEFAULT now(),
+    correlation_id text NOT NULL
+) PARTITION BY RANGE (occurred_at);
+-- monthly partitions created ahead by a scheduled job
+
+CREATE INDEX ON events.platform_event (event_name, occurred_at);
+CREATE INDEX ON events.platform_event USING brin (occurred_at);
+REVOKE UPDATE, DELETE ON events.platform_event FROM PUBLIC;
+
+CREATE TABLE events.subscription (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    event_name text NOT NULL,
+    subscriber text NOT NULL,               -- '03-12.marts' | '02-09.triggers' | '03-07.outcome'
+    handler_queue text NOT NULL,
+    is_enabled boolean NOT NULL DEFAULT true,
+    UNIQUE (event_name, subscriber)
+);
+
+CREATE TABLE events.delivery (              -- idempotency for at-least-once dispatch
+    event_id uuid NOT NULL,
+    subscriber text NOT NULL,
+    delivered_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_id, subscriber)
+);
+```
+
+`occurred_at` is the business timestamp, always. A report over August must include an event that
+happened on 31 August and was published on 1 September.
+
+## 6. State machines
+
+### Outbox row
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | service emits inside its transaction | `unpublished` | If the transaction rolls back, the row never exists |
+| `unpublished` | publisher job | `published` | Copied to `platform_event`, then stamped |
+| `published` | — | terminal | The log is append-only; nothing revises an event |
+
+A **correction** is a new event (`billing.invoice.cancelled`), never an edit.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/events?name=&from=&to=&cursor=` | `event:read` (admin, support) | Inspect the log for one entity or period |
+| `GET` | `/v1/events/subscriptions` | `event:read` | What is subscribed to what |
+| `POST` | `/v1/events/replay` | `event:replay` (admin) | Re-dispatch a range to one subscriber — the mart rebuild path |
+
+In-process, the only way to write:
+
+```ts
+await events.emit(tx, RequisitionStatusChanged, {
+  requisitionId, clientId, locationId, candidateCategory, careSetting, serviceLine,
+  from: 'open', to: 'in_fulfilment', ownerId, actorId, occurredAt,
+})
+```
+
+`tx` is required by the type signature. Emitting outside a transaction is a compile error, which is how
+"events are written as work happens" stops being a convention and becomes a property.
+
+## 8. Events and jobs
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `events.publish-outbox` | every minute (and immediately after commit, opportunistically) | Moves outbox rows to the log and dispatches subscriptions |
+| `events.dispatch` | on publish | Delivers to each subscriber's queue, idempotent on `(event_id, subscriber)` |
+| `events.create-partitions` | monthly | Creates next month's partition ahead of time |
+| `events.replay` | on demand | Re-dispatches a range for a mart rebuild |
+
+**Alerting:** outbox lag pages. Reporting correctness depends on the publisher running.
+
+### The event catalogue
+
+Held in `@apollo/events`, one file per schema, ~60 events across the platform. The five families
+reporting cannot do without are listed in `01-06` §1. Every event names its emitting component and its
+consumers, and adding one without a consumer is allowed — the whole point is capturing history before
+anyone asks for it.
+
+## 9. Frontend
+
+| Screen | Route | Note |
+|---|---|---|
+| Event log inspector | `/admin/events` | Admin and support only; filter by name, entity, correlation id, period. Diagnostic, not a report. |
+
+Reports are `03-12`. This screen exists so an engineer can answer "did the event get written" without a
+database session.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Every module writes events **as work happens**, not when a report is requested | `M3-I31` |
+| AC2 | M9 can report on a period that has already passed, because the events were written at the time | `M3-I31` |
+| AC3 | Stage-level drop-off is computable because M3 status transitions were recorded from day one | `M3-I31`, `M3-I28` |
+| AC4 | Reporting by recruiter is possible because M3 allocation history was recorded from day one | `M3-I31`, `M3-I16` |
+| AC5 | An event emitted in a transaction that rolls back does not exist; one in a committed transaction always does | `M3-I31`, `01-02` |
+| AC6 | `occurred_at` is the business timestamp, not the publish time — a late-published event lands in the right period | `M3-I31` |
+| AC7 | The log is append-only; an `UPDATE` or `DELETE` raises | `01-05` |
+| AC8 | A payload carries the dimensions a report groups by, so a mart never joins back to a mutable operational table | `M9-I17` |
+| AC9 | No event payload contains personal data beyond identifiers | `M4-I27`, `01-10` |
+| AC10 | A mart can be rebuilt entirely from the log by replay, without touching operational tables | `M9-I17` |
+| AC11 | Event versions coexist; a schema change does not invalidate historic events | `M6-I7` |
+| AC12 | Outbox lag is monitored and pages on threshold | `01-09` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-14` | No volume targets, so partition sizing and retention are unvalidated | Monthly partitions; the log is retained for the life of the platform, because a report over an old period is exactly the thing this exists for | `M9-I17` |
+| `OI-HS-14` | Does the event log fall under DPDP erasure? | Payloads carry **ids only**, so pseudonymising the candidate record (`AS-22`) renders the log non-identifying without deleting history. This is why the no-personal-data rule is a hard constraint rather than hygiene. | `02-12` |
+| `OI-HS-27` **[raised here]** | Should the event spine be built in Phase 1 rather than Phase 3? | Phase 3 as planned, because that is when the first meaningful events exist. **The risk is entirely one-directional**: too early costs a little idle infrastructure, too late loses history permanently. If Phase 3 slips, this moves forward, not back. | `M9` reporting coverage |

@@ -1,0 +1,274 @@
+---
+title: "03-05 Candidate app"
+description: "The React Native app healthcare professionals use: sign up with a phone number, build a profile from a CV, find permanent jobs and shifts, apply and accept, track what is…"
+---
+
+**Package** `@apollo/mobile` · **Schema** `candidates` · **Plan** D3 · **Effort** ~68.5pd · **Risk** High `SHARED` · **Build in** Phase 2–4
+
+## 1. Purpose
+
+The React Native app healthcare professionals use: sign up with a phone number, build a profile from a
+CV, find permanent jobs and shifts, apply and accept, track what is happening, upload documents, answer
+availability questions, and **check in and out of a shift**.
+
+D3 is a three-way shared build and a hard dependency. It sits in M4, but shift discovery, acceptance
+and check-in serve M8, and it is one of the two channels A14 captures responses on in M5. Because
+**shift attendance is captured by app check-in with no alternative route, no app means no attendance,
+no timesheet and no shift invoice.** Plan it against all three consumers, not just this module.
+
+## 2. Scope
+
+### In scope
+
+- Sign up, phone + OTP, category selection, DPDP consent (`M4-I1`)
+- Profile building from a CV with review-and-correct, or by hand (`M4-I2`, `M4-I20`)
+- Category-specific attribute capture (`M4-I3`)
+- Job discovery and application — Base A (`M4-I4`)
+- Shift discovery, acceptance, clash prevention — Base B (`M4-I5`)
+- Application and shift tracking, interview confirmation, offer acceptance (`M4-I6`)
+- **Shift check-in and check-out with an offline queue** (`M4-I7`)
+- Document upload for verification (`M4-I8`)
+- Notification settings and the per-user message log (`M4-I9`)
+- The in-app availability answer, on the same schema as WhatsApp (`M4-I10`)
+- The app shell: navigation, offline handling, push, release pipeline, help content
+
+### Explicitly out of scope
+
+- The candidate record, credentials and verification queue — `03-04`.
+- Candidate authentication mechanics — `02-01`.
+- Availability decay and cadence selection — `03-06`.
+- Attendance exceptions, timesheets and pricing — `03-10`.
+- The onboarding flow (`M11-I4`) and payslips (`M13-I4`). Those screens are **owned by `03-15` and
+  `03-17`** and built against this app's shell, per the confirmed scope decision.
+
+### Explicitly not built
+
+- Blocking a check-in based on location. The stamp is **recorded, not enforced**; enforcement is
+  `03-16` (`M12-I5`).
+- Candidate-visible match scores. Ranking is an internal tool only.
+- Guided flows over WhatsApp. Anything guided happens here.
+- Web or PWA version. Store distribution only.
+- In-app chat with a recruiter.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M4-I1` | D3 | Sign up — phone, OTP, category, consent | L | 3.0 |
+| `M4-I2` | D3 | Build profile from CV or by hand | L | 3.0 |
+| `M4-I3` | A9 | Specialty details, per category | L | 3.0 |
+| `M4-I4` | D3 | Jobs (Base A) | L | 3.0 |
+| `M4-I5` | D3 | Shifts (Base B) | XL | 5.0 |
+| `M4-I6` | D3 | My applications | L | 3.0 |
+| `M4-I7` | D3 | Shift check-in | XL | 5.0 |
+| `M4-I8` | D3 | My documents | L | 3.0 |
+| `M4-I9` | D3 | Notification settings | M | 2.0 |
+| `M4-I10` | D3 | Am I available | L | 3.0 |
+| `M4-I20` | D3 | CV reading (service) | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` candidate realm, `02-12` consent, `02-04` documents, `03-04` the record
+the app writes to, `02-05` native tokens, `03-01` (client disclosure preference on listings).
+
+**Consumed by:** `03-06` (the app is one of two A14 response channels), `03-10` (**the only source of
+attendance**), `03-08` (offer acceptance), `03-09` (trial check-in prompts appear here).
+
+**External:** `04-12` app stores — **Apollo-owned accounts, Apple needs a D-U-N-S number, and first
+submission is reviewed more slowly than later updates** (`X12`, `X13`). `04-06` CV parsing.
+`04-02`/`04-01` for OTP delivery.
+
+## 5. Data model
+
+Owned by `03-04` and `02-01`. This module adds:
+
+```sql
+CREATE TABLE candidates.application (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL REFERENCES candidates.candidate(id),
+    requisition_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'applied' CHECK (state IN
+      ('applied','shortlisted','interviewing','offered','joined','rejected','withdrawn')),
+    applied_at timestamptz NOT NULL DEFAULT now(),
+    source text NOT NULL DEFAULT 'app',      -- 'app' | 'recruiter'
+    UNIQUE (candidate_id, requisition_id)
+);
+
+CREATE TABLE candidates.shift_acceptance (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL REFERENCES candidates.candidate(id),
+    shift_demand_line_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'accepted'
+      CHECK (state IN ('accepted','declined','cancelled','worked','no_show')),
+    accepted_at timestamptz NOT NULL DEFAULT now(),   -- timestamped confirmation
+    channel text NOT NULL DEFAULT 'app',              -- 'app' | 'whatsapp'
+    UNIQUE (candidate_id, shift_demand_line_id)
+);
+-- a candidate cannot hold two accepted shifts that overlap in time (M4-I5)
+CREATE INDEX ON candidates.shift_acceptance (candidate_id, state);
+
+CREATE TABLE candidates.cv_parse (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL REFERENCES candidates.candidate(id),
+    document_id uuid NOT NULL,
+    extracted jsonb NOT NULL,                -- per-field values
+    confidence jsonb NOT NULL,               -- per-field confidence, drives what is highlighted
+    accepted jsonb,                          -- what the candidate confirmed after correcting
+    outcome text NOT NULL CHECK (outcome IN ('parsed','failed')),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Offline state lives on the device: a durable check-in queue in SQLite (Expo SQLite), replayed on
+reconnect with the **original timestamp preserved**.
+
+## 6. State machines
+
+### `Application` (`M4-I6`)
+
+`applied → shortlisted → interviewing → offered → joined`, or `rejected` / `withdrawn`.
+The app shows a **client-appropriate stage and never an internal rejection reason code**.
+
+### `ShiftAcceptance` (`M4-I5`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | candidate accepts | `accepted` | **Assigned to a named candidate with a timestamped confirmation**; a clashing shift is blocked or warned |
+| `accepted` | candidate or Ops cancels | `cancelled` | Position returns to the shift line |
+| `accepted` | checked in and out | `worked` | Handled by `03-10` |
+| `accepted` | shift passes with no check-in | `no_show` | **An exception in `03-10`, not silent absence** |
+
+An acceptance arriving on both app and WhatsApp **reconciles to one record** (`A14`).
+
+### Offline check-in (`M4-I7`, `M8-I14`)
+
+```
+tap check-in ──▶ write to local queue with device timestamp + location
+             ──▶ optimistic UI: "checked in, will sync"
+             ──▶ on reconnect: POST with the ORIGINAL timestamp and an idempotency key
+                     ├─ accepted → local row cleared
+                     └─ duplicate → server returns the original; no second attendance record
+```
+
+## 7. API surface
+
+Endpoints the app calls. All require the `candidate` realm and are scoped to the caller's own records.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/auth/candidate/otp` · `/verify` · `/refresh` | `02-01` |
+| `POST` | `/v1/consents` | DPDP consent before any personal data is stored |
+| `GET`/`PATCH` | `/v1/me/profile` | Profile, completeness expressed as **what ranking needs** |
+| `POST` | `/v1/me/cv` | Upload; returns the parse for review |
+| `POST` | `/v1/me/cv/:id/accept` | Confirms corrected values |
+| `GET`/`PUT` | `/v1/me/attributes` | Category-specific fields; **partial completion saved and resumable** |
+| `GET` | `/v1/me/jobs?location=&role=` | Base A, filtered to the candidate's category and credential state |
+| `POST` | `/v1/me/applications` | Apply |
+| `GET` | `/v1/me/shifts?from=&to=` | Base B, **within the travel radius on the availability record** |
+| `POST` | `/v1/me/shifts/:lineId/accept` · `/decline` | Clash blocked |
+| `GET` | `/v1/me/applications` | Stage per application, interview slots, offers |
+| `POST` | `/v1/me/interviews/:id/confirm` | |
+| `POST` | `/v1/me/offers/:id/accept` | |
+| `POST` | `/v1/me/attendance/check-in` · `/check-out` | Idempotency key required; original timestamp accepted |
+| `GET`/`POST` | `/v1/me/documents` | Required set differs by category |
+| `GET`/`PUT` | `/v1/me/notification-settings` | |
+| `GET` | `/v1/me/messages` | The per-user notification log |
+| `GET`/`POST` | `/v1/me/availability` | Same structured payload as the WhatsApp template |
+
+## 8. Events and jobs
+
+**Events emitted:** `candidates.application.created` · `candidates.shift.accepted` · `.declined` ·
+`candidates.attendance.checked_in` · `.checked_out` · `candidates.availability.answered` (app channel).
+
+**Events subscribed:** `selection.interview.proposed`, `selection.offer.sent`,
+`placement.trial_event.due` → push notification and an in-app item;
+`candidates.credential.expiring` → re-upload prompt.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `candidates.parse-cv` | on upload | `04-06`; **failure retains the file and falls back to manual entry** |
+| `candidates.push` | on subscribed events | Expo push through `02-09` |
+
+## 9. Frontend
+
+| Screen | Stack | Item |
+|---|---|---|
+| Sign up — phone, OTP, category, consent | onboarding | `M4-I1` |
+| Build profile — CV upload with review-and-correct, or manual | onboarding | `M4-I2` |
+| Specialty details — nurse: specialty, acuity · doctor: specialty, case-mix, grade · allied: discipline, equipment, technique | onboarding | `M4-I3` |
+| Jobs — list, filter, detail, apply | main | `M4-I4` |
+| Shifts — date, times, location, rate; accept/decline; accepted list | main | `M4-I5` |
+| My applications — stage tracking, interview confirmation, offer acceptance, **trial check-in prompts at day 0/7/30/60/90** | main | `M4-I6` |
+| Shift check-in — arrive, finish, **offline-tolerant** | main | `M4-I7` |
+| My documents — required set by category, camera capture, rejection reasons, expiry prompts | profile | `M4-I8` |
+| Notification settings — messages received, channel opt-out | profile | `M4-I9` |
+| Am I available — Base A notice period, Base B time windows and travel distance, last-confirmed date | main | `M4-I10` |
+
+Help content for registration and check-in ships with the app (`M1-I7`).
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A candidate registers with phone and OTP and reaches a usable profile state | `M4-I1` |
+| AC2 | OTP resend is rate-limited and expiry enforced | `M4-I1` |
+| AC3 | A phone number already registered routes to sign-in rather than creating a duplicate | `M4-I1` |
+| AC4 | **DPDP consent is captured before any personal data is stored**, and retained as evidence | `M4-I1`, `M4-I27` |
+| AC5 | Consent for verification checks is captured **before any adapter call is made** | `M4-I1`, `M1-I15` |
+| AC6 | Category selection drives which attribute set the profile requests | `M4-I1` |
+| AC7 | A resume upload produces a parsed profile the candidate **reviews and corrects rather than accepts blindly** | `M4-I2`, `M4-I20` |
+| AC8 | A candidate without a resume can complete a profile by hand | `M4-I2` |
+| AC9 | Parse failure falls back to manual entry with the file retained | `M4-I2`, `M4-I20` |
+| AC10 | Completeness is expressed against **what ranking actually needs**, not an arbitrary percentage | `M4-I2` |
+| AC11 | Uploaded documents are stored with residency and retention applied | `M4-I2` → `M0-I6`, `M4-I27` |
+| AC12 | Nurse presents specialty and acuity; doctor presents specialty, case-mix and grade; allied presents discipline, equipment and technique | `M4-I3` |
+| AC13 | Attribute options come from configuration, **not a hardcoded list** | `M4-I3`, `AS-04` |
+| AC14 | A value outside the configured taxonomy is flagged for review rather than silently accepted | `M4-I3` |
+| AC15 | The captured set is exactly what M6 reads for the category weight set | `M4-I3`, `M6-I7` |
+| AC16 | Partial completion is saved and resumable | `M4-I3` |
+| AC17 | A candidate sees only jobs matching their category and verified credential state | `M4-I4` |
+| AC18 | Applying creates an `Application` consumed by M6 and M7 | `M4-I4` |
+| AC19 | An incomplete profile is prompted to complete rather than blocked without explanation | `M4-I4` |
+| AC20 | Client identity disclosure follows the per-client preference | `M4-I4`, `OI-HS-13` |
+| AC21 | Accepting a shift assigns it to a named candidate with a **timestamped confirmation** | `M4-I5` |
+| AC22 | A shift clashing with an already-accepted shift is blocked or warned | `M4-I5` |
+| AC23 | A shift already filled is removed from the list **without an error state** | `M4-I5` |
+| AC24 | Confirmation on either app or WhatsApp **reconciles to one record** | `M4-I5`, `A14` |
+| AC25 | Shift discovery respects the travel radius held on the availability record | `M4-I5`, `A3` |
+| AC26 | Application stage reflects the M7 selection state **without exposing internal rejection reasons** | `M4-I6` |
+| AC27 | An interview slot proposed in M7 surfaces here for confirmation | `M4-I6` |
+| AC28 | An offer delivered over WhatsApp is also visible and actionable here | `M4-I6` |
+| AC29 | Trial check-in prompts at day 0, 7, 30, 60 and 90 appear here as one of the A6 channels | `M4-I6` |
+| AC30 | **A check-in records a location stamp without enforcing a boundary** | `M4-I7` |
+| AC31 | Geo-fencing is not enforced in Release 1, but the field exists so enforcement can be specified later | `M4-I7`, `M12-I5` |
+| AC32 | A check-in taken **without connectivity syncs when the device reconnects, with the original timestamp preserved** | `M4-I7`, `M8-I14` |
+| AC33 | A missed check-in raises an exception in M8 rather than silently recording absence | `M4-I7` |
+| AC34 | **There is no alternative attendance route** — this is a hard dependency of the contractual invoice chain | `M4-I7` |
+| AC35 | Attendance feeds the timesheet in M8 at shift granularity | `M4-I7` |
+| AC36 | The required document set differs by candidate category | `M4-I8` |
+| AC37 | A poor-quality capture is prompted for re-capture **before it reaches the OCR queue** | `M4-I8` |
+| AC38 | A rejected document can be re-uploaded without restarting verification | `M4-I8` |
+| AC39 | An expiring credential prompts re-upload ahead of expiry | `M4-I8`, `M4-I25` |
+| AC40 | An opt-out is respected by the cadence engine **on the next selection, not the next cycle** | `M4-I9`, `D29` |
+| AC41 | A candidate who opts out of all channels is still reachable for statutory or contractual messages, which are distinguished | `M4-I9` |
+| AC42 | The per-user notification log matches what the delivery log shows | `M4-I9`, `M5-I3` |
+| AC43 | An availability response returns **the same structured payload as the WhatsApp interactive template** | `M4-I10`, `A14` |
+| AC44 | Confirming resets availability confidence and updates the last-confirmed timestamp | `M4-I10`, `M5-I10` |
+| AC45 | Base A expresses availability as a notice period; Base B as time windows within a travel radius | `M4-I10` |
+| AC46 | The question set is configurable per segment, **not hardcoded** | `M4-I10` |
+| AC47 | A response through the app and one through WhatsApp reconcile to one record | `M4-I10`, `M5-I16` |
+| AC48 | Low-confidence CV fields are visually distinguished in the review step | `M4-I20` |
+| AC49 | The parser handles the formats actually received, evidenced against a real sample set | `M4-I20` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-08` | Native iOS and Android, or cross-platform, and the store release cycle it implies | **Confirmed: React Native + Expo**, EAS Build and Submit, OTA for JS-only changes. Store review remains calendar time no build capacity removes; a placeholder build goes through review early to retire the risk. | `M4-D3` |
+| `OI-HS-13` | Does the candidate see which hospital or provider a role is with? | **Per-client preference**, defaulting to disclosed. Straightforward now, awkward to retrofit once listings are live. | `M4-I4`, `M4-I5` |
+| `OI-A-08` | Free-text fallback in A14 — no accuracy threshold, confidence handling or human-review path | App responses are **structured and never parsed**, so the app path is unaffected. The risk lives in `03-06`'s WhatsApp and voice paths. | `M4-I10` |
+| `OI-HS-02` | Erasure against the retained pool | `AS-22`; the app exposes a request, decided in `02-12` | `M4-I1`, `M4-I8` |
+| `OI-HS-31` **[raised here]** | **Will candidates install the app?** Shift attendance has no other route | Untested. One of the three assumptions the gates exist to settle; measured at gate G4, week 16, on the in-house nurse pilot. | The entire contractual invoice chain |
+| `OI-HS-32` **[raised here]** | App language coverage — candidates are contacted by voice and WhatsApp in several Indian languages, but the app is English-only in Release 1 | No string is inlined; the message catalogue makes translation a content exercise. Flagged rather than assumed away, because the base being contacted in Hindi or Tamil may not use an English app. | `M4-I1`, adoption |

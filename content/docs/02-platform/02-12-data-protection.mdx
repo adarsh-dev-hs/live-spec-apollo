@@ -1,0 +1,214 @@
+---
+title: "02-12 Data protection"
+description: "Handling personal and health-related data about candidates in a way that meets Indian data protection law: consent captured before anything is stored and before any verification…"
+---
+
+**Package** `@apollo/data-protection` · **Schema** `dp` · **Plan** F13 · **Effort** ~9.0pd · **Risk** High `COMP` · **Build in** Phase 2
+
+## 1. Purpose
+
+Handling personal and health-related data about candidates in a way that meets Indian data protection
+law: consent captured before anything is stored and before any verification check runs, everything kept
+in the Mumbai region including backups, and a retention period defined and actually applied per data
+type. First needed the moment candidate personal data is captured — which is candidate sign-up in
+Phase 2, not Phase 6 when someone remembers compliance.
+
+## 2. Scope
+
+### In scope
+
+- Consent capture, versioned notices, and retrievable evidence
+- Separate consent for verification checks, verified **before any adapter call is dispatched**
+- Consent withdrawal, honoured forward, distinguishing statutory and contractual messages
+- Residency enforcement and the test suite that holds it
+- Retention policy per data type, and the sweep that applies it
+- Erasure request handling — intake, decision, execution, evidence
+- The redaction rules every log line and event payload obeys
+
+### Explicitly out of scope
+
+- Consent *screens*. The app sign-up consent step is `03-05` (`M4-I1`); the document upload consent is
+  `03-04`. This component stores, verifies and enforces.
+- Encryption of sensitive financial columns — implemented here as a helper, but the columns belong to
+  `03-15` and `03-17`.
+- Data processing agreements with suppliers. Legal paperwork (`X18`), not code.
+
+### Explicitly not built
+
+- A candidate-facing privacy dashboard beyond viewing consents and requesting erasure.
+- Automated regulatory reporting or breach notification. The platform answers *what was accessed, by
+  whom, when* (`02-02`); notification is Apollo's duty.
+- Consent for the **migrated CPAL base**. No consent basis has been established for those records and
+  it cannot be manufactured — raised under `OI-HS-02` and blocking cadence contact to migrated
+  candidates.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M4-I27` | F13 | Consent, residency, retention | XL | 5.0 |
+
+Required by `M0-I6` (residency of files), `M1-I5` (residency of deployment), `M1-I15` (consent before
+a check), `M4-I1`, `M4-I8`, `M4-I24`, `M5-I12` (recordings), `M9-I13` (finance retention),
+`M11-I1` (bank details).
+
+## 4. Dependencies
+
+**Must exist first:** `02-01`, `02-02`, `02-04`.
+
+**Consumed by:** `03-04` (checks refuse without consent), `03-05` (sign-up), `02-13` (adapters verify
+consent before dispatch), `03-06` (recordings), `03-11` (finance retention), `03-15` (bank details).
+
+**External:** `X18` data processing agreements — a chain, and each new supplier adds a link. **No
+supplier may be called with real candidate data until its DPA is in place**, which affects three
+unnamed suppliers (`OI-HS-07`) and two unconfirmed ones.
+
+## 5. Data model
+
+```sql
+CREATE TABLE dp.consent_notice (          -- versioned; the text that was actually shown
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    code text NOT NULL,                   -- 'data_processing' | 'verification_checks'
+                                          -- | 'marketing_contact' | 'voice_recording'
+    version integer NOT NULL,
+    locale text NOT NULL DEFAULT 'en-IN',
+    body text NOT NULL,
+    effective_from timestamptz NOT NULL,
+    UNIQUE (code, version, locale)
+);
+
+CREATE TABLE dp.consent (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    subject_type text NOT NULL CHECK (subject_type IN ('candidate','client_contact','client_user')),
+    subject_id uuid NOT NULL,
+    notice_id uuid NOT NULL REFERENCES dp.consent_notice(id),
+    granted boolean NOT NULL,
+    granted_at timestamptz NOT NULL DEFAULT now(),
+    withdrawn_at timestamptz,
+    channel text NOT NULL,                -- 'app' | 'whatsapp' | 'ops_entry' | 'migration'
+    evidence jsonb NOT NULL,              -- ip, device, template id, the exact wording version
+    UNIQUE (subject_type, subject_id, notice_id)
+);
+CREATE INDEX ON dp.consent (subject_type, subject_id) WHERE withdrawn_at IS NULL;
+
+CREATE TABLE dp.retention_policy (
+    data_type text PRIMARY KEY,           -- 'candidate_record' | 'candidate_document' | 'inbound_payload'
+                                          -- | 'voice_recording' | 'billing_evidence' | 'audit_entry'
+    retention text NOT NULL,              -- ISO 8601 duration, or 'indefinite'
+    basis text NOT NULL,                  -- why: statutory, contractual, business
+    action_on_expiry text NOT NULL CHECK (action_on_expiry IN ('delete','pseudonymise','archive')),
+    owner_component text NOT NULL,
+    open_item text                        -- 'OI-HS-02' | 'OI-HS-14' where unresolved
+);
+
+CREATE TABLE dp.erasure_request (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    subject_type text NOT NULL, subject_id uuid NOT NULL,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    requested_via text NOT NULL,
+    status text NOT NULL DEFAULT 'received' CHECK (status IN
+      ('received','under_review','approved','executed','refused')),
+    decision_reason text,                 -- e.g. billing evidence retained under AS-23
+    decided_by uuid, decided_at timestamptz,
+    executed_at timestamptz,
+    evidence jsonb                        -- what was pseudonymised, what was retained and why
+);
+
+CREATE TABLE dp.residency_assertion (     -- what the residency test suite checks against
+    resource text PRIMARY KEY,            -- 'rds' | 'documents_bucket' | 'redis' | 'ses' | 'whatsapp_bsp' …
+    region text NOT NULL,
+    verified_at timestamptz NOT NULL,
+    note text
+);
+```
+
+## 6. State machines
+
+### `Consent`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | subject grants | `granted` | Recorded **before** the personal data it covers is stored |
+| `granted` | subject withdraws | `withdrawn` | Honoured forward; statutory and contractual messages remain sendable and are distinguished |
+| `withdrawn` | subject re-grants | `granted` | New row version; the withdrawal remains evidenced |
+
+### `ErasureRequest`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | request received | `received` | Acknowledged within the statutory window |
+| `received` | reviewed | `under_review` | Checks for billing evidence and statutory retention |
+| `under_review` | approved | `approved` → `executed` | **Pseudonymises** rather than deletes (`AS-22`); billing evidence retained (`AS-23`) |
+| `under_review` | refused | `refused` | Reason recorded and communicated |
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/consents` | candidate, or `candidate:manage` | Record consent against a notice version |
+| `POST` | `/v1/consents/:id/withdraw` | candidate | Withdraw |
+| `GET` | `/v1/consents?subjectType=&subjectId=` | `candidate:read` | Consent state and evidence |
+| `GET` | `/v1/consents/notices/:code` | public | The current notice text, for the app and link pages |
+| `POST` | `/v1/erasure-requests` | candidate | Raise a request |
+| `GET`/`PATCH` | `/v1/erasure-requests` | `dp:manage` | Review and decide |
+| `GET` | `/v1/retention-policies` | `dp:read` | The register, including the two unresolved rows |
+
+In-process, and the reason this component exists at all:
+
+```ts
+// 02-13 calls this before every adapter dispatch; it throws if consent is absent
+await dp.assertConsent({ subjectType: 'candidate', subjectId, noticeCode: 'verification_checks' })
+```
+
+## 8. Events and jobs
+
+**Events emitted:** `dp.consent.granted` · `.withdrawn` · `dp.erasure.requested` · `.executed` ·
+`dp.retention.applied`.
+
+**Events subscribed:** `candidates.candidate.created` (assert a consent exists),
+`files.document.available` (attach a retention policy).
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `dp.retention-sweep` | weekly | Applies each policy: delete, pseudonymise or archive |
+| `dp.erasure-execute` | on approval | Pseudonymises the record, deletes identity documents, **retains billing evidence**, writes the evidence bundle |
+| `dp.residency-verify` | daily | Re-asserts every resource region; a drift pages |
+| `dp.consent-gap-report` | weekly | Lists candidates holding data without a matching consent — the migrated base will appear here (`OI-HS-02`) |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Consent panel — what this candidate consented to, when, which notice version | inside `/candidates/:id` | `M4-I27` |
+| Erasure requests — queue, review, decision, evidence | `/admin/data-protection/erasure` | `M4-I27` |
+| Retention register — each data type, period, basis, and the open items against it | `/admin/data-protection/retention` | `M4-I27` |
+| Consent gap report | `/admin/data-protection/gaps` | `OI-HS-02` |
+| Candidate-facing consent screen and privacy view | app | `M4-I1` (owned by `03-05`, backed here) |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Consent is captured before personal data is stored, and before any verification check is run | `M4-I27`, `M4-I1` |
+| AC2 | Consent evidence is retrievable later if challenged, including the exact notice version shown | `M4-I27` |
+| AC3 | No personal data leaves the Mumbai region, **including in backups** | `M4-I27`, `M1-I5` |
+| AC4 | A retention period is defined per data type and **actually applied**, not merely documented | `M4-I27` |
+| AC5 | An adapter dispatch without a valid verification consent throws rather than calling the registry | `M1-I15`, `M4-I24` |
+| AC6 | Withdrawal stops cadence contact on the next selection while statutory and contractual messages still send | `M4-I9`, `M5-I2` |
+| AC7 | The residency suite fails the build if any configured endpoint, bucket, replica or provider is outside `ap-south-1` | `01-08` |
+| AC8 | No log line or event payload contains personal data beyond identifiers | `01-10`, `02-11` |
+| AC9 | An erasure request produces a decision, an execution and an evidence bundle stating what was retained and why | `M4-I27`, `OI-HS-02` |
+| AC10 | Billing evidence survives pseudonymisation, because the invoice must remain defensible | `M9-I13`, `OI-HS-14` |
+| AC11 | Candidates holding data without a matching consent are reported, not silently tolerated | `OI-HS-02` |
+| AC12 | Bank details and statutory identifiers are encrypted at column level and every read is audited | `M11-I1`, `01-10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-02` | A subject erasure request and an indefinite Retained Pool cannot both be honoured without a defined policy | `AS-22` — erasure **pseudonymises**: identity fields replaced with a one-way token, identity documents deleted, operational history retained. Needs Apollo legal to accept or replace it. | `F13`, `M4-D3`, and cadence contact to the migrated base |
+| `OI-HS-14` | Finance retention for invoices and billing trigger records against DPDP candidate retention | `AS-23` — `RetentionRecord` and `Invoice` retain recipient and placement identifiers plus snapshotted terms, and survive pseudonymisation. Otherwise the invoice is not defensible. | `M9-I13` |
+| `OI-HS-28` **[raised here]** | Consent basis for the migrated CPAL base — those candidates never consented through this platform | Migrated candidates are flagged `consent_basis = 'migrated_unverified'` and are **excluded from cadence contact** until Apollo confirms the basis. Visible on the consent gap report rather than assumed. | `03-06` cadence over the migrated base |
+| `X18` | DPAs with every supplier | No supplier is called with real candidate data before its DPA is signed; sandbox and synthetic data until then | `03-04` verification, `03-06` voice |

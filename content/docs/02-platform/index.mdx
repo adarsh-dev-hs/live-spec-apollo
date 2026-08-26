@@ -1,48 +1,52 @@
 ---
-title: "Platform"
-description: "Shared components. Built once, depended on by two or more modules."
+title: "02 Platform"
+description: "15 documents in 02 Platform."
 ---
 
-This section contains 13 documents.
-
 <Cards>
-  <Card title="P01 · Identity and Access" href="/docs/02-platform/02-01-identity-and-access">
-  How anyone gets into the platform and what they may reach once inside. The client's deliverable list asks for "role-based access control" as a phrase but never says how anyone…
+  <Card title="02-01 Identity and access" href="/docs/02-platform/02-01-identity-and-access">
+    How anyone gets into the platform and what they are allowed to reach, for three separate populations — Apollo staff, candidates and (from Phase 6) client users.
   </Card>
-  <Card title="P02 · Audit Trail" href="/docs/02-platform/02-02-audit-trail">
-  One place that records who did what and when. Five milestones need this — M3 status changes, M6 overrides, M7 selection decisions and link responses, M8 trial records, M9 billing…
+  <Card title="02-02 Audit trail" href="/docs/02-platform/02-02-audit-trail">
+    One place that records who did what and when. Five milestones need it — M3 status changes, M6 overrides, M7 selection decisions and link responses, M8 corrections, M9 invoice…
   </Card>
-  <Card title="P03 · Settings and Reference Lists" href="/docs/02-platform/02-03-settings-and-lists">
-  One admin area for every configurable list and waiting period in the platform. The plan counts at least nine of them; without a shared home they become nine separate screens built…
+  <Card title="02-03 Settings and reference data" href="/docs/02-platform/02-03-settings-and-reference-data">
+    One admin area for every configurable list and waiting period in the platform. There are at least nine; without a shared home they become nine separate screens built by five…
   </Card>
-  <Card title="P04 · File Storage" href="/docs/02-platform/02-04-file-storage">
-  Where every uploaded file lives: CVs, registration certificates, ID scans, WhatsApp voice notes, signed offers, invoices, payslips, spreadsheet uploads, attendance imports…
+  <Card title="02-04 File storage" href="/docs/02-platform/02-04-file-storage">
+    Where every uploaded file in the platform lives: CVs, registration certificates, ID scans, WhatsApp voice notes, signed offers, statutory forms, invoices and payslips.
   </Card>
-  <Card title="P05 · Design System and Component Library" href="/docs/02-platform/02-05-design-system">
-  The shared visual language and the components built from it. Five different surfaces exist in this plan — if each is designed separately the work is done five times and it looks…
+  <Card title="02-05 Design system" href="/docs/02-platform/02-05-design-system">
+    The shared visual language and the components built from it. There are five surfaces in this plan — Ops console, candidate app, WhatsApp templates, voice scripts and client link…
   </Card>
-  <Card title="P06 · List Engine" href="/docs/02-platform/02-06-list-engine">
-  The shared table component every Ops screen uses. Around twenty screens in this plan are lists; building filtering and paging separately in each is the same work twenty times.
+  <Card title="02-06 Console shell" href="/docs/02-platform/02-06-console-shell">
+    The page frame every Ops screen sits inside: navigation, header, global search, user menu, and the application of role-based access to every route.
   </Card>
-  <Card title="P07 · Outbound Messaging" href="/docs/02-platform/02-07-outbound-messaging">
-  The plumbing underneath every message the platform sends. The client's D10 covers templates and preferences; the queue, retries and delivery receipts underneath are assumed but…
+  <Card title="02-07 List engine" href="/docs/02-platform/02-07-list-engine">
+    The shared table every Ops list screen uses. Around twenty screens in this plan are lists; building filtering, sorting, paging, column choice, saved views and export separately in…
   </Card>
-  <Card title="P08 · Inbound Message Pipeline" href="/docs/02-platform/02-08-inbound-pipeline">
-  Everything that arrives at the platform from outside, on any channel, in any shape, lands here first. Receives on every channel, writes the InboundRecord, resolves the sender to a…
+  <Card title="02-08 Inbound pipeline" href="/docs/02-platform/02-08-inbound-pipeline">
+    The plumbing under every message that arrives from outside: receive it on any channel, write down exactly what was sent, work out which client or candidate sent it, decide what…
   </Card>
-  <Card title="P09 · Event Store and Projections" href="/docs/02-platform/02-09-event-store-and-projections">
-  Every module writes an event as things happen, and the reports in M9 read those events later.
+  <Card title="02-09 Outbound messaging" href="/docs/02-platform/02-09-outbound-messaging">
+    Everything the platform sends and the plumbing under it: templates per channel and purpose, triggers binding an event to a message, one sending path across WhatsApp, SMS, email and…
   </Card>
-  <Card title="P10 · Client Link Tokens" href="/docs/02-platform/02-10-client-link-tokens">
-  One tokenised link mechanism, instantiated by configurable type, reached without login or account provisioning, delivered through the channel the client already uses.
+  <Card title="02-10 Job runtime and scheduler" href="/docs/02-platform/02-10-job-runtime">
+    One place that runs deferred work: queues with per-class concurrency, retry policy, dead letters an operator can see and re-queue, scheduled jobs, resumable batches, and a record…
   </Card>
-  <Card title="P11 · Approval Engine (Maker-Checker)" href="/docs/02-platform/02-11-approval-engine">
-  The shared request-and-approve mechanism behind every change that needs a second person. Nobody can change their own pay; nobody can approve their own request.
+  <Card title="02-11 Event spine" href="/docs/02-platform/02-11-event-spine">
+    Every module writes an event as things happen, and the reports in M9 read those events later.
   </Card>
-  <Card title="P12 · External Adapter Framework" href="/docs/02-platform/02-12-adapter-framework">
-  Every external system sits behind an interface owned by us. A port defines what we need; an adapter implements it against a specific supplier; a fake implements it for tests and…
+  <Card title="02-12 Data protection" href="/docs/02-platform/02-12-data-protection">
+    Handling personal and health-related data about candidates in a way that meets Indian data protection law: consent captured before anything is stored and before any verification…
   </Card>
-  <Card title="P13 · Job and Scheduler Runtime" href="/docs/02-platform/02-13-job-runtime">
-  The BullMQ wiring, scheduler registration, idempotency and dead-letter handling that eleven other components assume exists.
+  <Card title="02-13 Market adapter layer" href="/docs/02-platform/02-13-market-adapter-layer">
+    Three interfaces — identity, certification, qualification — that any country's registries fit behind, returning green, amber or red on the same shape whichever registry answered,…
+  </Card>
+  <Card title="02-14 Client link surfaces" href="/docs/02-platform/02-14-client-link-surfaces">
+    The entire client relationship in Release 1. There is no client login anywhere until Phase 6, so every interaction a hospital has with the platform is a tokenised link sent over…
+  </Card>
+  <Card title="02-15 Environments and observability" href="/docs/02-platform/02-15-environments-and-observability">
+    Four environments, a way to move a release between them, and enough monitoring to know when something has broken before a user tells us.
   </Card>
 </Cards>

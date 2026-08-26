@@ -1,0 +1,143 @@
+---
+title: "02-15 Environments and observability"
+description: "Four environments, a way to move a release between them, and enough monitoring to know when something has broken before a user tells us."
+---
+
+**Package** `infra`, `.github/workflows`, `@apollo/observability` · **Schema** `n/a` · **Plan** F10, D11 · **Effort** ~20.0pd · **Risk** Medium `EXT` · **Build in** Phase 1
+
+## 1. Purpose
+
+Four environments, a way to move a release between them, and enough monitoring to know when something
+has broken before a user tells us. Plus the deployment of the platform onto Apollo's own AWS account in
+Mumbai, with the credential and on-call boundary settled before the first deployment rather than after
+it. This is the D11 obligation and the F10 prerequisite, built as one thing because they are one thing.
+
+## 2. Scope
+
+### In scope
+
+- Terraform modules and one root stack per environment: `dev`, `qa`, `uat`, `prod`
+- Docker images for `api`, `worker` and the four `edge-*` Lambda handlers
+- GitHub Actions pipeline: verify on PR, build and publish on merge, promote with approvals
+- Deployment to **Apollo's own AWS account** in `ap-south-1`, with rollback to the prior release
+- Monitoring, alerting and the on-call routing described in `01-09` §6
+- Backups, point-in-time recovery, and a **rehearsed and evidenced** restore before go-live
+- Anonymisation of production data for the three non-production environments
+
+### Explicitly out of scope
+
+- Go-live itself, legacy retirement and hypercare — `05-05` (`M1-I9`).
+- The migration that must reconcile before cutover — `03-13`.
+- UAT support and documentation — `05-05` (`M1-I6`, `M1-I7`, `M1-I8`).
+- Application-level observability decisions (what to log, what to trace). Those are `01-02` and
+  `01-09`; this provisions the collectors.
+
+### Explicitly not built
+
+- Multi-region or cross-region replication. DPDP residency argues against it and RPO/RTO are unset.
+- A Kubernetes platform. Two EC2 Auto Scaling Groups and four Lambdas is the whole compute surface.
+- Blue/green or canary deployment. Rolling with health checks, on a product with 22 internal users and
+  a candidate app.
+- Self-service environment creation.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M1-I5` | D11 | Deploy to Apollo's AWS account, approved pipeline, rollback | XXL | 8.0 |
+| `M1-I16` | F10 | Four environments, pipeline, monitoring, backup and restore | XXL | 8.0 |
+
+## 4. Dependencies
+
+**Must exist first:** nothing in the codebase. This and `02-05` are the two Phase 1 components with no
+prerequisite.
+
+**Consumed by:** everything. Nothing can be built or tested without an environment.
+
+**External:** `X07` AWS account and billing ownership (**month 1** — deciding after the environments
+exist means rebuilding them; a reseller changes how accounts are provisioned). `X05` DNS subdomain
+delegation. `X03` SES domain records and production access. `OI-HS-04` credential and on-call boundary.
+`OI-HS-12` recovery objectives.
+
+## 5. Data model
+
+**N/A** — infrastructure. Two operational tables belong to the components they serve: `jobs.job_run`
+(`02-10`) and `dp.residency_assertion` (`02-12`). What this component holds is Terraform state (S3 with
+DynamoDB locking) and the deployment record in GitHub.
+
+## 6. State machines
+
+### Release
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | merge to `main` | `built` | Image tagged with the git SHA; **never rebuilt per environment** |
+| `built` | migrate + deploy `dev` | `in_dev` | Migrations run **before** the new containers start |
+| `in_dev` | smoke + E2E gate journeys pass | `in_qa` | Automatic |
+| `in_qa` | manual promote (GitHub Environment approval) | `in_uat` | Apollo-visible approval |
+| `in_uat` | approved release | `in_prod` | Rolling, one instance at a time, halted on health-check failure |
+| `in_prod` | rollback | previous SHA `in_prod` | Redeploy the prior image; **forward-only migrations mean no un-migration**, which is what makes rollback lossless |
+
+## 7. API surface
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/healthz` | Liveness — process is up |
+| `GET` | `/readyz` | Readiness — database ping, Redis ping, migrations current. The ALB uses this. |
+| `GET` | `/version` | Git SHA, build time, migration version |
+| `GET` | `/metrics` | Prometheus-format metrics scraped into CloudWatch |
+
+No business API. The pipeline's interface is GitHub Actions workflows, not HTTP.
+
+## 8. Events and jobs
+
+**Events emitted:** `platform.release.deployed` (environment, SHA, actor) — recorded so a defect can be
+correlated with a release without reading a chat log.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `platform.backup-verify` | daily | Confirms the latest snapshot exists and is in region |
+| `platform.restore-rehearsal` | monthly, and **before go-live** | Restores to a scratch instance, runs a data-integrity check, records the evidence |
+| `platform.anonymise-refresh` | on demand | Refreshes `uat` from a production snapshot **through the anonymiser** |
+| `dp.residency-verify` | daily (owned by `02-12`) | Re-asserts every resource region |
+
+## 9. Frontend
+
+| Screen | Route | Note |
+|---|---|---|
+| System health | `/admin/system` | Version per environment, migration state, queue depths, dead-letter counts, last backup, last restore rehearsal |
+
+One screen, admin only. Dashboards live in CloudWatch; this exists so an Apollo administrator can
+answer "is it running and when was it last backed up" without an AWS login.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A release deploys to the client-owned account through an approved pipeline | `M1-I5` |
+| AC2 | **No Hiresense-held credential is required at runtime** once handover completes | `M1-I5` |
+| AC3 | Rollback to the prior release is possible without data loss | `M1-I5` |
+| AC4 | DPDP residency holds — no personal data leaves `ap-south-1`, backups included | `M1-I5`, `M4-I27` |
+| AC5 | The credential and on-call boundary is agreed **before first deployment** | `M1-I5`, `OI-HS-04` |
+| AC6 | A build moves from development through to production **without hand-editing configuration** | `M1-I16` |
+| AC7 | A failure in production raises an alert rather than being found by a user | `M1-I16` |
+| AC8 | A restore to a chosen point in time has been **rehearsed and evidenced before go-live** | `M1-I16` |
+| AC9 | Backups run on a schedule and the restore evidence is retained | `M1-I16` |
+| AC10 | `dev`, `qa`, `uat` and `prod` are provisioned consistently, with **anonymised data in the non-production ones** | `M1-I16` |
+| AC11 | Recovery targets are agreed with Apollo — currently unstated | `M1-I16`, `OI-HS-12` |
+| AC12 | Whose AWS account this runs in, and who is on call, is confirmed | `M1-I16`, `OI-HS-04` |
+| AC13 | Every merge runs the five non-negotiable suites (scope, append-only, residency, PII-in-logs, criteria-diff) before an image is built | `01-08` |
+| AC14 | An image is built once and promoted; the git SHA is the release identity across all four environments | `01-09` |
+| AC15 | A Lambda handler failure or throttle pages, because a throttled webhook silently loses inbound demand | `01-09` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-04` | Does "client-hosted AWS Mumbai" mean an Apollo-owned account rather than a Hiresense-managed one? | Apollo-owned, with GitHub Actions federating in by OIDC and no long-lived keys anywhere. Changes who holds credentials, who is on call and who may approve a release. | `F10`, `M1-D11` |
+| `OI-HS-12` | RPO, RTO and backup retention are not stated anywhere | `AS-20` 35-day retention, `AS-21` RPO 15 min / RTO 4 h. **Without agreed targets the restore rehearsal has no pass condition**, so AC8 is currently tested against an assumption. | `M1-C03`, `F10` |
+| `X07` | AWS account and billing ownership, including whether a reseller is involved | Apollo-owned, direct. Deciding after the environments exist means rebuilding them, so this is month 1. | `M1-I5` |
+| `OI-M3-14` | No latency or load targets ⇒ no basis for instance sizing | Sized to the working budgets in `01-03` §9 and revisited when targets are agreed | Instance sizing |
+| `OI-HS-30` **[raised here]** | Who is on call outside Apollo business hours, and what is the escalation path? | Alerts route to a Hiresense rota through hypercare, transferring to Apollo IT at a date set in `05-05`. Named rather than assumed, because `OI-HS-04` decides it. | Go-live readiness |

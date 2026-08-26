@@ -1,27 +1,55 @@
 ---
-title: "Integrations"
-description: "Every external system the platform touches."
+title: "04 Integrations"
+description: "16 documents in 04 Integrations."
 ---
 
-This section contains 6 documents.
-
 <Cards>
-  <Card title="04-01 · Integration Register" href="/docs/04-integrations/04-01-integration-register">
-  Every outside system the platform touches.
+  <Card title="04-00 Integration register" href="/docs/04-integrations/04-00-integration-register">
+    Every outside system the platform touches. Half of them have no named supplier. Each unnamed supplier is an unpriced integration and a failure mode nobody can test against.
   </Card>
-  <Card title="04-02 · WhatsApp Business API" href="/docs/04-integrations/04-02-whatsapp">
-  Used by 03-03, 03-08, 03-10, 03-11, 02-10, 02-07, 02-08, 03-19
+  <Card title="04-01 WhatsApp Business Platform" href="/docs/04-integrations/04-01-whatsapp">
+    WhatsApp carries more of this platform's traffic than every other channel combined: inbound requisitions as text and voice notes, the missing-field follow-up, cadence availability…
   </Card>
-  <Card title="04-03 · Outbound Voice and Speech-to-Text" href="/docs/04-integrations/04-03-voice-and-transcription">
-  Two related but distinct capabilities, possibly from one supplier and possibly from two — which is itself an open question.
+  <Card title="04-02 SMS (DLT-registered)" href="/docs/04-integrations/04-02-sms">
+    The fallback channel and the primary OTP route. SMS reaches a candidate who has not installed the app and has not replied on WhatsApp.
   </Card>
-  <Card title="04-04 · Document OCR and Electronic Signature" href="/docs/04-integrations/04-04-document-ocr-and-esignature">
-  Two unrelated capabilities from the same open item.
+  <Card title="04-03 Email ingestion and sending" href="/docs/04-integrations/04-03-email">
+    Email is how many clients already send vacancies: a message, often with a spreadsheet attached, to someone at Apollo.
   </Card>
-  <Card title="04-05 · Identity and Registry Verification" href="/docs/04-integrations/04-05-identity-and-registry-verification">
-  Prove that a candidate is who they say they are and holds the registration they claim.
+  <Card title="04-04 Outbound voice" href="/docs/04-integrations/04-04-outbound-voice">
+    A5 calls candidates who have not responded on any other channel, asks whether they are still available, and writes the answer back.
   </Card>
-  <Card title="04-06 · Payroll Engine and Finance System" href="/docs/04-integrations/04-06-payroll-and-finance">
-  Neither is a system of record for us. We do not calculate pay, and we are not the accounting book of record. Both integrations are about handing correct data to a system that owns…
+  <Card title="04-05 Speech-to-text" href="/docs/04-integrations/04-05-speech-to-text">
+    Clients send vacancies as WhatsApp voice notes. This turns the audio into text so it can be parsed to the same requisition schema as WhatsApp text — and keeps the audio playable so…
+  </Card>
+  <Card title="04-06 AI parsing and intent classification" href="/docs/04-integrations/04-06-ai-parsing-and-classification">
+    Four jobs done by one model layer: decide whether an inbound message is a demand or a candidate response, extract requisition fields from free text and transcripts, read a CV into…
+  </Card>
+  <Card title="04-07 Client HRMS / ATS connectors" href="/docs/04-integrations/04-07-client-hrms-ats">
+    Some clients push vacancies straight from their own HR or recruitment system rather than emailing them.
+  </Card>
+  <Card title="04-08 Client spreadsheet formats" href="/docs/04-integrations/04-08-client-spreadsheets">
+    Several clients send their vacancies as a spreadsheet in their own format — different column names, different order, sometimes several vacancies in one file.
+  </Card>
+  <Card title="04-09 Credential registries and verification aggregator" href="/docs/04-integrations/04-09-credential-registries">
+    The outside systems that say whether a healthcare professional is who they claim to be and holds the registration they claim: the nursing councils via INC/NUID and NRTS, the NMC…
+  </Card>
+  <Card title="04-10 Document OCR" href="/docs/04-integrations/04-10-document-ocr">
+    Reads registration certificates and identity documents so the verification team is not retyping them.
+  </Card>
+  <Card title="04-11 Electronic signature" href="/docs/04-integrations/04-11-electronic-signature">
+    Gets an offer signed. Without it an accepted offer produces no signed document, and the permanent chain has no joining event — which means no placement, no trial, no day-90 record…
+  </Card>
+  <Card title="04-12 App stores (Apple and Google)" href="/docs/04-integrations/04-12-app-stores">
+    Publishing the candidate app. This is the only route by which shift attendance reaches the platform, so it sits directly on the contractual invoice chain — no app, no attendance,…
+  </Card>
+  <Card title="04-13 Finance system" href="/docs/04-integrations/04-13-finance-system">
+    Where raised invoices, credit notes and open receivables go. Nobody has said which system it is.
+  </Card>
+  <Card title="04-14 Payroll engine" href="/docs/04-integrations/04-14-payroll-engine">
+    The third-party engine that calculates pay. We send inputs and take results back; we do not calculate pay. Hirecraft and PayBooks are the candidate engines; neither is chosen.
+  </Card>
+  <Card title="04-15 Legacy CPAL" href="/docs/04-integrations/04-15-legacy-cpal">
+    The source system for the A10 migration: Apollo's existing candidate data, held in CPAL and current tooling.
   </Card>
 </Cards>

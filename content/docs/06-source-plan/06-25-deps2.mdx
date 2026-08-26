@@ -1,0 +1,574 @@
+---
+title: "06-25 Dependencies"
+description: "The 22 accounts, contracts, registrations and access rights Apollo must obtain, by month and by track."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+Everything the platform needs from outside the build team, and what specifically is required from Apollo for each. These are separate from the open items, which are decisions about what to build; these are accounts, contracts, registrations and access that must exist before a build can start or a supplier can be called.
+
+> **Start these in week one.** Five things should start in week one regardless of when their milestone begins: Meta business verification for WhatsApp, DLT registration for SMS, the verification aggregator contract, the two app store accounts, and the decision on whether the console federates to Apollo's identity provider. The first four are pure waiting on someone else's timetable and no amount of delivery capacity shortens them. The fifth changes what gets built, so it is cheapest to answer before anything is built at all.
+
+| Measure | Value | Detail |
+|---|---|---|
+| Dependencies | **22** | Almost all need someone at Apollo, not the delivery team. |
+| Needed by month 2 | **13** | Procurement and registration lead times sit inside this. |
+| Suppliers unnamed | **3** | Cannot be sized until Apollo names them. |
+| Via Apollo’s clients | **3** | Two hops. The slowest track. |
+| Tracks | **8** | Each moves at a different speed. |
+
+> Most of these are not technical work. They are accounts, contracts, registrations and decisions that have to exist before a build can start or a supplier can be called, and almost all of them need someone at Apollo rather than someone on the delivery team. The items marked as coming through Apollo's clients are the slowest, because they need Apollo to go and ask their own hospital clients, which is two hops rather than one.
+
+## Register
+
+#### X06 — Corporate single sign-on
+
+`Month 1` · `Access & identity` · `Apollo IT`
+
+**First needed for M0-I1 sign in.** This changes what M0 builds. Email and password is a small build; federating to a corporate identity provider is a different one, and retrofitting it after ninety users are live is worse than either. Decide before M0 starts.
+
+##### Required from Apollo
+
+- Decide whether the Ops and Admin console must federate to Apollo's identity provider
+- If so, name the provider and supply the federation configuration
+
+##### Who has to act
+
+Apollo IT
+
+##### Track
+
+Access & identity
+
+##### Related open item
+
+-
+
+#### X07 — AWS account and billing ownership
+
+`Month 1` · `Access & identity` · `Apollo IT`
+
+**First needed for M1-I5 deploy to Apollo's AWS account.** Determines how the pipeline is built and who can press release. Deciding after the environments exist means rebuilding them. The billing route matters because a reseller changes how accounts are provisioned.
+
+##### Required from Apollo
+
+- Confirm the platform runs in an Apollo-owned account
+- Confirm whether billing is direct, through an enterprise agreement, or through a reseller
+- Agree who holds credentials and who approves a deployment
+- Agree who is on call when production breaks
+- State the recovery targets and the backup retention period
+
+##### Who has to act
+
+Apollo IT
+
+##### Track
+
+Access & identity
+
+##### Related open item
+
+OI-HS-04, OI-HS-12
+
+#### X18 — Data processing agreements
+
+`Month 1` · `Legal & security` · `Apollo legal with Hiresense`
+
+**First needed for Any handling of candidate data.** Every named supplier on this list processes personal data on Apollo's behalf. The paperwork is straightforward but it is a chain, and each new supplier adds a link.
+
+##### Required from Apollo
+
+- Agreement between Apollo and Hiresense
+- Agreements covering each sub-processor - the aggregator, the messaging provider, the voice and transcription suppliers, the cloud provider
+
+##### Who has to act
+
+Apollo legal with Hiresense
+
+##### Track
+
+Legal & security
+
+##### Related open item
+
+OI-HS-02
+
+#### X20 — Legacy ATS data access
+
+`Month 1` · `Data & systems` · `Apollo`
+
+**First needed for M1-I10 data profiling, M1-I11 migration pipeline.** The single largest unpriced item in the six months. Until profiling runs we do not know how many records there are, how complete they are or how many duplicates exist, so none of the migration can be estimated.
+
+##### Required from Apollo
+
+- Read access, or a full data export
+- Someone who can answer what the fields mean
+- The agreed cut-over approach
+- Confirm whether the system called CPAL in the specification and Ceipal in Apollo's own list are the same system
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Data & systems
+
+##### Related open item
+
+OI-A-02, OI-A-03
+
+#### X05 — DNS subdomain delegation
+
+`Month 2` · `Access & identity` · `Apollo IT`
+
+**First needed for M1-I5 deployment, M7-I14 client link mechanism.** The A13 client links are sent to hospitals by WhatsApp and email. They need a public address on an Apollo domain that looks legitimate to the recipient, which means the subdomain has to be settled before those links are ever issued.
+
+##### Required from Apollo
+
+- Subdomains for each environment - development, QA, UAT and production
+- A subdomain for the client link pages
+- TLS certificates, or delegation so they can be issued automatically
+
+##### Who has to act
+
+Apollo IT
+
+##### Track
+
+Access & identity
+
+##### Related open item
+
+-
+
+#### X10 — Third-party billing ownership
+
+`Month 2` · `Access & identity` · `Apollo`
+
+**First needed for Every metered supplier.** These are consumption charges passed through at cost under the SOW. If the accounts sit with Hiresense the cost has to be recharged; if with Apollo they need setting up before the first call is made. Either way it should be deliberate rather than discovered at the first invoice.
+
+##### Required from Apollo
+
+- Decide who holds the account and payment method for each metered supplier
+- Covers WhatsApp conversations, SMS, voice minutes, transcription, document reading, verification checks, electronic signature and AI inference
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Access & identity
+
+##### Related open item
+
+OI-HS-05
+
+#### X12 — Google Play Console
+
+`Month 2` · `App stores` · `Apollo`
+
+**First needed for M4-I1 candidate app sign up.** The candidate app is the only route by which shift attendance reaches the platform, so it sits on the contractual invoice chain. The account must be Apollo's, which means the paperwork is theirs to complete.
+
+##### Required from Apollo
+
+- Apollo-owned developer account
+- Hiresense granted release access to it
+- Identity verification completed
+- Data Safety declaration
+- A hosted privacy policy the store listing can point at
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+App stores
+
+##### Related open item
+
+OI-HS-08
+
+#### X13 — Apple App Store Connect
+
+`Month 2` · `App stores` · `Apollo`
+
+**First needed for M4-I1 candidate app sign up.** Organisation enrolment needs a D-U-N-S number in Apollo's legal name, obtained from Dun & Bradstreet, which is not instant. First submission is reviewed more slowly than later updates. Getting a placeholder build through review early removes this risk entirely.
+
+##### Required from Apollo
+
+- Apollo-owned Developer Program membership as an organisation, which requires a D-U-N-S number
+- Hiresense granted access
+- Privacy labels completed
+- A hosted privacy policy the store listing can point at
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+App stores
+
+##### Related open item
+
+OI-HS-08
+
+#### X14 — Background verification aggregator
+
+`Month 2` · `Verification` · `Apollo`
+
+**First needed for M1-I15 verification supplier, all of M4 verification.** Every credential and identity check in M4 runs through this. Contracting and customer onboarding take weeks before a single call can be made. Sandbox access is what unblocks the build; production access can follow later.
+
+##### Required from Apollo
+
+- Choose the aggregator and sign the contract
+- Complete Apollo's own KYC as their customer
+- Sandbox credentials first, then production
+- Confirm coverage of nursing council, Aadhaar via DigiLocker, EPFO, PAN and court records
+- Confirm per-check pricing
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Verification
+
+##### Related open item
+
+OI-HS-06, OI-A-01
+
+#### X15 — DigiLocker and Aadhaar access
+
+`Month 2` · `Verification` · `Apollo`
+
+**First needed for M4-I22 verification checks.** Aadhaar access is regulated and the consent framework is not a technical detail. Whether it comes through the aggregator or directly changes both the build and the compliance position.
+
+##### Required from Apollo
+
+- Confirm the access route - through the aggregator, or directly
+- Confirm the consent framework for Aadhaar-based checking
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Verification
+
+##### Related open item
+
+OI-A-01
+
+#### X16 — Council and registry access
+
+`Month 2` · `Verification` · `Apollo with Hiresense`
+
+**First needed for M1-I14 India registry adapters.** Several councils have no API at all and resolve to a person checking a document. Which ones, and who does that checking, needs settling before M4 verification is built rather than discovered during it.
+
+##### Required from Apollo
+
+- Confirm which councils the aggregator covers and which need a direct route
+- Obtain Apollo's own credentials or membership where a council requires it
+- Agree the manual checking process for councils with no API
+
+##### Who has to act
+
+Apollo with Hiresense
+
+##### Track
+
+Verification
+
+##### Related open item
+
+OI-A-01
+
+#### X27 — Which client HR systems, and how many
+
+`Month 2` · `Via Apollo's clients` · `Apollo business development, then their hospital clients`
+
+**First needed for M3-I27 client HR system feed.** Two hops, not one. Apollo asks their client, the client's IT team agrees, and only then can we size the work. Every system is a separate connector, so this blocks the estimate as well as the build.
+
+##### Required from Apollo
+
+- Identify which hospital clients will push requisitions from their own system
+- Get each client's IT team to agree to send data out
+- Obtain the payload format and test credentials from each
+
+##### Who has to act
+
+Apollo business development, then their hospital clients
+
+##### Track
+
+Via Apollo's clients
+
+##### Related open item
+
+OI-M3-03
+
+#### X28 — Client spreadsheet format samples
+
+`Month 2` · `Via Apollo's clients` · `Apollo fulfilment, then their hospital clients`
+
+**First needed for M3-I6 spreadsheet mapping.** Each format needs its own column mapping and its own sample to test against. Real files, not idealised ones - the value of A1 is that it takes what clients already send.
+
+##### Required from Apollo
+
+- Identify how many distinct spreadsheet layouts clients send
+- Collect a real sample file for each
+- Confirm whether a client sends several vacancies in one file
+
+##### Who has to act
+
+Apollo fulfilment, then their hospital clients
+
+##### Track
+
+Via Apollo's clients
+
+##### Related open item
+
+OI-M3-04
+
+#### X01 — WhatsApp Business Platform
+
+`Month 3` · `Messaging` · `Apollo`
+
+**First needed for M3-I25 WhatsApp inbound and follow-up.** The longest lead time in the plan and the only one that is pure waiting. Business verification and template approval run on Meta's timetable. Templates are needed by M3 follow-ups, M5 contact schedules, M7 offers and links, and M8 check-ins, so the approval queue is long and each unapproved template blocks a flow.
+
+##### Required from Apollo
+
+- Meta Business verification in Apollo's legal name
+- WhatsApp Business Account
+- Verified sender number, and the display name approved
+- Contract with a Business Solution Provider - Gupshup, Karix or Twilio
+- Message template approvals, and re-approval on every wording change
+- Confirmed per-conversation pricing so running cost can be modelled
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Messaging
+
+##### Related open item
+
+OI-HS-05, OI-HS-07
+
+#### X02 — SMS - DLT registration
+
+`Month 3` · `Messaging` · `Apollo`
+
+**First needed for M3-I31 message sending.** India-specific and easy to miss. Without DLT registration no SMS is delivered at all, and every template is registered separately, so this has the same shape of delay as WhatsApp approval.
+
+##### Required from Apollo
+
+- Entity registration on a DLT platform
+- Sender ID registration
+- Template registration for every SMS the platform sends
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Messaging
+
+##### Related open item
+
+-
+
+#### X03 — Email sending domain
+
+`Month 3` · `Messaging` · `Apollo IT`
+
+**First needed for M3-I26 email inbound, M3-I31 message sending.** SES starts sandboxed and only sends to verified addresses until the production request is granted, which is a written request with a review. Missing DNS records send platform email to spam, which looks like a product failure rather than a configuration one.
+
+##### Required from Apollo
+
+- DNS records on the sending domain - SPF, DKIM and DMARC
+- SES production access request, since new accounts start in sandbox
+- The monitored mailbox or forwarding address for inbound requisitions
+
+##### Who has to act
+
+Apollo IT
+
+##### Track
+
+Messaging
+
+##### Related open item
+
+OI-M3-13
+
+#### X04 — Outbound voice and calling regulation
+
+`Month 3` · `Messaging` · `Apollo`
+
+**First needed for M5-I17 voice provider.** A5 calls candidates who have not answered on any other channel. Calling twelve hundred people in India has a regulatory layer beyond the technical one, and the supplier is not named anywhere in the client specification.
+
+##### Required from Apollo
+
+- Name the voice supplier
+- Obtain the calling number, with its telecom KYC completed
+- Confirm how DND and TRAI scrubbing is handled for calls to candidates
+- Confirm Indian language coverage and per-minute pricing
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Messaging
+
+##### Related open item
+
+OI-A-09
+
+#### X25 — Speech-to-text supplier
+
+`Month 3` · `Supplier` · `Apollo`
+
+**First needed for M3-I24 voice note transcription.** Language coverage has to be proven against voice notes recorded in a hospital corridor, not studio samples. If it is the same supplier as outbound voice we build one integration; if not, two.
+
+##### Required from Apollo
+
+- Name the supplier
+- Confirm it handles the Indian languages clients actually send voice notes in
+- Decide whether this is the same supplier as the outbound voice layer
+- Confirm per-minute pricing
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Supplier
+
+##### Related open item
+
+OI-M3-05
+
+#### X22 — UAT participants and go-live window
+
+`Month 4` · `Data & systems` · `Apollo operations`
+
+**First needed for M1-I8 UAT support.** UAT is Apollo-run and Hiresense-supported. Recruiters testing while also carrying fifteen to sixteen vacancies each will not happen unless the time is protected in advance.
+
+##### Required from Apollo
+
+- Name who from the twenty-two recruiters will test, and protect their time
+- Agree severity definitions and turnaround expectations before testing starts
+- Agree the go-live window and the parallel-run period
+
+##### Who has to act
+
+Apollo operations
+
+##### Track
+
+Data & systems
+
+##### Related open item
+
+-
+
+#### X26 — Electronic signature supplier
+
+`Month 4` · `Supplier` · `Apollo`
+
+**First needed for M7-I18 electronic signature.** Without it an accepted offer produces no signed document, and the permanent chain has no joining event.
+
+##### Required from Apollo
+
+- Name the supplier
+- Confirm the signature is valid for Indian employment offers
+- Confirm per-envelope pricing
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Supplier
+
+##### Related open item
+
+OI-HS-07
+
+#### X29 — Client link recipients
+
+`Month 4` · `Via Apollo's clients` · `Apollo business development, then their hospital clients`
+
+**First needed for M7-I12 link recipients, M9-I14 billing evidence.** The day-90 answer must be timestamped against an identified person for the invoice to be defensible in a billing query. Without a recipient model there is no defensible trigger.
+
+##### Required from Apollo
+
+- Decide whether recipients are held per client, per site, per requisition or per placement
+- Collect the named person and contact details at each client
+- Confirm each client is content to answer the day-90 question by link
+
+##### Who has to act
+
+Apollo business development, then their hospital clients
+
+##### Track
+
+Via Apollo's clients
+
+##### Related open item
+
+OI-A-12
+
+#### X23 — Payroll engine
+
+`Month 6` · `Supplier` · `Apollo`
+
+**First needed for M13-I5 payroll engine.** Last milestone, but the contract and field specification are needed well before build. We send inputs and take results back; we do not calculate pay.
+
+##### Required from Apollo
+
+- Choose the engine - Hirecraft, PayBooks or another
+- Sign the contract
+- Obtain the input and output field specification
+- Obtain sandbox credentials
+
+##### Who has to act
+
+Apollo
+
+##### Track
+
+Supplier
+
+##### Related open item
+
+-
+
+## By the month it is first needed
+
+| Needed by | Dependencies |
+|---|---|
+| Month 1 | X06 Corporate single sign-on, X07 AWS account and billing ownership, X18 Data processing agreements, X20 Legacy ATS data access |
+| Month 2 | X05 DNS subdomain delegation, X10 Third-party billing ownership, X12 Google Play Console, X13 Apple App Store Connect, X14 Background verification aggregator, X15 DigiLocker and Aadhaar access, X16 Council and registry access, X27 Which client HR systems, and how many, X28 Client spreadsheet format samples |
+| Month 3 | X01 WhatsApp Business Platform, X02 SMS - DLT registration, X03 Email sending domain, X04 Outbound voice and calling regulation, X25 Speech-to-text supplier |
+| Month 4 | X22 UAT participants and go-live window, X26 Electronic signature supplier, X29 Client link recipients |
+| Month 6 | X23 Payroll engine |

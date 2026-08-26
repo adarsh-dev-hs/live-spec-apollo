@@ -1,0 +1,113 @@
+---
+title: "04-06 AI parsing and intent classification"
+description: "Four jobs done by one model layer: decide whether an inbound message is a demand or a candidate response, extract requisition fields from free text and transcripts, read a CV into…"
+---
+
+**Package** `@apollo/integration-ai` · **Schema** `inbound`, `demand`, `candidates` · **Plan** A1, A14, D3 · **Effort** ~17.5pd · **Risk** High `MODEL` · **Build in** Phase 3
+
+## 1. Purpose
+
+Four jobs done by one model layer: decide whether an inbound message is a demand or a candidate
+response, extract requisition fields from free text and transcripts, read a CV into profile fields, and
+turn a free-text or spoken availability answer into a structured payload.
+
+Accuracy here **directly sets the manual-entry queue load**, which is an operational figure as much as a
+technical one — and the confidence threshold is agreed **once, shared across A1 and A14**, not tuned per
+consumer.
+
+## 2. Scope
+
+**In scope:** the model interface and prompt/schema definitions; intent classification with a shared
+threshold; field extraction to the requisition schema; CV extraction with **per-field confidence**;
+availability answer extraction; inference cost recording; the fixture set that measures accuracy.
+
+**Explicitly out of scope:** the pipeline that routes results (`02-08`); the queues where humans fix
+things (`03-02`, `03-06`); spreadsheet mapping, which is deterministic (`04-08`); HRMS payloads, which
+are already structured and **skip parsing entirely**.
+
+**Explicitly not built:** **retraining or continuous learning** — a configured threshold is applied;
+model-driven ranking (`03-07` is deterministic scoring); a prompt-editing UI.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I20` | A1 | Parsers — field extraction | XL | 5.0 |
+| `M3-I21` | A1 | Message type detection | XL | 5.0 |
+| `M4-I20` | D3 | CV reading | XL | 5.0 |
+| `M5-I13` | A5 | Voice answer extraction | XL | (in `03-06`) |
+
+## 4. Dependencies
+
+**Must exist first:** `02-08`, `02-03` (the threshold lives here as a setting), `03-04` (the category
+attribute schema extraction targets), `02-10`.
+
+**Consumed by:** `02-08`, `03-02`, `03-05`, `03-06`.
+
+**External:** an inference provider, **not named**. Must process in `ap-south-1` (`01-10`) — which
+narrows the field considerably and is a selection criterion, not a preference.
+
+## 5. Data model
+
+No tables. `inbound.classification` records confidence and who decided; `demand.parse_result` records
+extraction with per-field confidence and **unmapped content retained**; `candidates.cv_parse` records
+the machine value alongside what the candidate corrected, **so accuracy is measurable**.
+
+```ts
+interface AiProvider {
+  classifyIntent(i: { text: string; registeredIntents: string[] })
+    : Promise<{ intent: string; confidence: number; costUnits: number }>
+  extractFields(i: { text: string; targetSchema: JsonSchema })
+    : Promise<{ values: Record<string, unknown>; fieldConfidence: Record<string, number>;
+                unmapped: Record<string, unknown>; costUnits: number }>
+}
+```
+
+## 6. State machines
+
+**N/A** — stateless calls. The states they drive belong to `02-08`'s `InboundRecord` and `03-06`'s
+`AvailabilityResponse`. One rule governs all four uses: **below the shared threshold, a human decides;
+nothing is written back on low confidence.**
+
+## 7. API surface
+
+In-process only: `ai.classifyIntent()`, `ai.extractFields()`. No public endpoint, and no module calls a
+model directly.
+
+## 8. Events and jobs
+
+`inbound.classify`, `demand.parse`, `candidates.parse-cv`, `engagement.extract-voice-answer` — all on
+the `provider` queue class with inference cost recorded per call.
+
+## 9. Frontend
+
+**N/A** — the threshold is edited in `02-03`; correction happens in `03-02`'s manual entry queue,
+`03-04`'s document review, `03-05`'s CV review and `03-06`'s reply review.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | The same requirement on all five live channels produces requisition objects **differing only in source channel and raw payload** | `M3-I20` |
+| AC2 | **An HRMS payload skips parsing** and enters at completeness scoring | `M3-I20` |
+| AC3 | Parser failure routes the record to `unparseable` **with payload intact** | `M3-I20` |
+| AC4 | Unmapped content is **retained on the raw payload**, never discarded | `M3-I20` |
+| AC5 | A demand intent above threshold moves `identified → parsed` | `M3-I21` |
+| AC6 | Confidence below threshold moves `identified → unparseable` | `M3-I21` |
+| AC7 | **A candidate response is not classified as demand, and vice versa** | `M3-I21` |
+| AC8 | **The threshold is configurable and shared across A1 and A14, not tuned per consumer** | `M3-I21`, `AS-03` |
+| AC9 | A parsed CV produces a profile the candidate **reviews and corrects rather than accepts blindly** | `M4-I20` |
+| AC10 | **Low-confidence fields are visually distinguished** in the review step | `M4-I20` |
+| AC11 | The original machine value is retained after correction, **so accuracy is measurable** | `M4-I14`, `M4-I20` |
+| AC12 | The parser handles the formats actually received, **evidenced against a real sample set** | `M4-I20` |
+| AC13 | Inference cost is recorded per call and attributed to a cause | `OI-HS-05` |
+| AC14 | No personal data is sent to a provider outside `ap-south-1` | `01-10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-06` | **Confidence threshold and free-text fallback, agreed once across A1 and A14** | `AS-03` — one value in `02-03`, starting at 0.80. **It sets the rate at which items land in the manual-entry queue**, which is an operational load figure as much as a technical one. | `M3-I21`, `M5-A14` |
+| `OI-A-08` | No accuracy threshold, confidence handling or human-review path for parsed availability responses | Below threshold → review; **a misparsed response would otherwise reset confidence wrongly and the candidate drops out of cadence silently** | `M5-A14`, `M5-A3` |
+| `OI-HS-53` **[raised here]** | **Which inference provider, and can it process in `ap-south-1`?** No client document names one, and residency rules out several obvious choices | Behind the interface above. Residency is a hard filter, not a preference — a provider that cannot process in-region fails `01-10` whatever it costs. | `M3-I20`, `M3-I21`, `M4-I20` |
+| `OI-HS-54` **[raised here]** | How is accuracy measured and reported? | Correction rates are logged (`M4-I14`) and misclassification is visible via `M3-I17`'s reclassification records. **No accuracy target is stated anywhere**, so there is no pass condition — only a trend. | `M3-I21` |

@@ -1,5 +1,6 @@
 {
-  "title": "Standards",
+  "title": "01 Standards",
+  "icon": "Ruler",
   "pages": [
     "index",
     "01-01-repository-layout",
@@ -12,7 +13,5 @@
     "01-08-testing-and-quality",
     "01-09-infrastructure-and-deployment",
     "01-10-security-and-data-protection"
-  ],
-  "icon": "Ruler",
-  "description": "House rules. Every component spec assumes these."
+  ]
 }

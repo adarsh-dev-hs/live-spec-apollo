@@ -1,106 +1,77 @@
 ---
-title: "00-06 · Glossary"
+title: "00-06 Glossary"
+description: "Terms used precisely across these docs. Where the client and the engineering docs use different words for the same thing, both are given."
 ---
 
----
+**Package** `n/a` · **Schema** `n/a` · **Plan** all · **Effort** — · **Risk** — · **Build in** Phase 0
 
-## Plan identifiers
+Terms used precisely across these docs. Where the client and the engineering docs use different words
+for the same thing, both are given.
 
-| Form | Meaning | Example |
-|---|---|---|
-| `M<n>-I<k>` | Engineering index — one per buildable item in the delivery plan. The reference used in tickets and tests. | `M3-I12` = Fulfilment board |
-| `M<n>` | Milestone. M0 foundations, M1–M9 Release 1, M10–M15 Release 2. | `M3` = Demand Intake & Allocation |
-| `D<n>` | Apollo's own deliverable number, carried unchanged | `D2` = Demand management |
-| `A<n>` | Apollo deliverable added at the revision | `A13` = Client link surfaces |
-| `F<nn>` | Platform prerequisite Hiresense identified; not in Apollo's list | `F03` = Role & permission model |
-| `OI-…` | Open decision. Prefix says the source: `OI-A-` (Part A), `OI-M3-` (Part B M3 chapter), `OI-HS-` (Hiresense-raised) | `OI-A-13` = guarantee period |
-| `AS-<nn>` | Working assumption held until an open item closes | `AS-01` |
-| `P<nn>` / `B<nn>` | **This documentation's** component IDs — platform and business | `P10` = client link tokens |
-
----
-
-## Business terms
+## Business
 
 | Term | Meaning |
 |---|---|
-| **Base A / Base B** | The two supply bases. Base A = permanent placement candidates. Base B = the shift pool, employed by Apollo, contacted every 3–4 days. |
-| **Acuity** | How intensive the nursing care is (ICU vs general ward). A nurse attribute and a requisition attribute. |
-| **Allied health** | Physiotherapists, radiographers, lab technicians, pharmacists — the third candidate category alongside nurses and doctors. |
-| **Case-mix** | A doctor attribute: the profile of conditions they routinely handle. |
-| **Challan** | An Indian statutory payment/remittance form (PF, ESIC). We produce them; someone else files them. |
-| **Contractual** | Apollo's word for the shift-staffing business (Flow B). Apollo employs the worker. Contrast with *permanent*. |
-| **CPAL** | Apollo's existing legacy candidate tool. Source of the A10 migration; retired once the platform reconciles. |
-| **Deemed approval / deemed confirmation** | When a client never replies, the platform treats the answer as given after a configurable waiting period, so revenue does not stall. |
-| **Demand** | A client's requirement. Becomes a `Requisition`. |
-| **Dunning** | Chasing overdue invoices on a schedule. M15. |
-| **Fulfilment board** | The operational heart of demand management: live demand, ageing and fill in one view. Highest-traffic screen in the platform. |
-| **Guarantee period** | How long Apollo guarantees a replacement if a permanent placement leaves. **Open (`OI-A-13`)** — if it runs past day 90, credit notes move into Release 1. |
-| **Maker-checker** | Two-person control: the person who raises a change can never be the person who approves it. |
-| **MIS pack** | Monthly management information pack for Apollo leadership. Generated on a schedule, not assembled by hand. |
-| **Pendency** | How long a verification case has been waiting. Tracked and reported. |
-| **Permanent** | The placement-fee business (Flow A). The client employs the person; Apollo bills 5–6% of salary at day 90. |
-| **Preceptor** | The senior clinician mentoring a new joiner. Asked about in trial check-ins — its absence predicts drop-out. |
-| **Requisition** | The normalised demand record. One schema regardless of which of five channels it arrived on. |
-| **Retained pool** | Candidates kept on file indefinitely. Conflicts with DPDP erasure rights (`OI-HS-02`). |
-| **Shift demand line** | One row per shift, expanded from a shift template. Contract staffing only. |
-| **Site-resident recruiter** | One of 15 recruiters based at a hospital. They capture requirements verbally — this is a primary path, not an edge case. (7 more are "floating".) |
-| **TDS** | Tax Deducted at Source. Indian clients withhold tax when paying an invoice, so gross and net must both be visible. M15. |
-| **Trial period** | The 90 days after joining. Check-ins at day 0, 7, 30, 60, 90. Day 90 is the billing trigger. |
-| **UAN** | Universal Account Number — the portable PF identifier. Transferred during associate onboarding. |
-| **Verbal capture** | A recruiter typing in a requirement given to them in person or by phone. A first-class intake path. |
+| **Apollo** | Apollo Knowledge Services, the client. Also the platform's package scope `@apollo/*`. |
+| **Hiresense** | The delivery team. |
+| **Base A** | The permanent supply base. Availability is a **notice period**. Contacted on a long cycle. |
+| **Base B** | The shift supply base. Availability is **time windows within a travel radius**. Contacted every 3–4 days across the whole base. |
+| **Supply segment** | A candidate category × a supply base. Three categories × two bases = **six segments**, each with its own cadence, question set, decay schedule and ranking weights. |
+| **Candidate category** | `nurse` \| `doctor` \| `allied_health`. Reference data (`02-03`), never a code branch. |
+| **Care setting** | `hospital` \| `home_healthcare`. A dimension on client, site and requisition. Home healthcare has no department, no preceptor and no fixed workplace. |
+| **Associate** | A Base B candidate who is actually working shifts for Apollo — i.e. has an `AssociateProfile` (`03-15`). |
+| **Requisition** | One client demand record, whatever channel it arrived on. Carries category, care setting, positions, rate reference, completeness and owner. |
+| **Shift demand line** | One shift on a contractual requisition, generated from a shift template. Ranked and filled individually. |
+| **Owner vs allocation** | The **owner** is one accountable Apollo user. **Allocation** is which recruiters were put on it at the morning call — a record of a human decision, never a system assignment (until `03-18`). |
+| **Verbal capture** | A site-resident recruiter typing in a requirement a client told them in person. A normal path, not an edge case — 15 of 22 recruiters sit inside hospitals. |
+| **Retained pool** | Candidates kept indefinitely rather than deleted, including those whose verification came back red. In tension with DPDP erasure (`OI-HS-02`). |
+| **Privileging** | Permission a specific hospital grants a specific doctor to practise there. Separate from council registration, required before joining, and applies to doctors only (`M8-I10`). |
+| **Preceptor** | The nurse supervising a new placement during the trial. Does not exist in home healthcare. |
+| **Trial period** | Day 0 → day 90 after joining, with check-ins at 0, 7, 30, 60 and 90. |
+| **Deemed confirmation** | Retention treated as confirmed because the client did not answer the day-90 link within the per-client window. As valid an invoice input as an explicit answer. |
+| **Deemed approval** | The same rule for timesheets. |
+| **Guarantee period** | How long Apollo must replace a departed permanent placement. If it runs past day 90, credit and debit notes come back into Release 1 (`OI-A-13`). |
+| **CTC** | Cost to company — the annual salary the 5–6% permanent placement fee is calculated on. |
+| **CPAL** | The legacy tool Apollo's candidate data lives in today, migrated and retired in `03-13`. |
+| **LMS** | Apollo's own learning system, built by another team. Outside scope; no Release 1 deliverable depends on it (`OI-HS-15`). |
+| **Morning call** | The daily fulfilment meeting where recruiter allocation is decided. |
 
----
-
-## Regulatory & external
+## Plan and traceability
 
 | Term | Meaning |
 |---|---|
-| **DPDP** | Digital Personal Data Protection Act, India. Drives residency (ap-south-1 only), consent before verification, retention policy and erasure. |
-| **DigiLocker** | Indian government document wallet. Route to Aadhaar verification. |
-| **EPFO** | Employees' Provident Fund Organisation. Employment history checks and PF. |
-| **ESIC** | Employees' State Insurance Corporation. Statutory reports in M13. |
-| **INC / NUID** | Indian Nursing Council / Nurses Unique ID — nursing registration. |
-| **NMC** | National Medical Commission, plus state medical councils — doctor registration. |
-| **PF** | Provident Fund. Statutory deduction and reporting. |
-| **BSP** | Business Solution Provider — the intermediary for WhatsApp Business API. Approves message templates, which takes weeks. |
-| **D-U-N-S** | Business identifier Apple requires for organisation developer enrolment. |
+| **`M<n>`** | Milestone. M0 foundations, M1–M9 the client's Release 1, M10–M15 Release 2. |
+| **`M<n>-I<k>`** | The engineering index — one per buildable item. `M3-I12` is the fulfilment board. |
+| **`D<n>` / `A<n>`** | The client's own deliverable number, carried unchanged. `D` = original or moved; `A` = added at revision. |
+| **`F<nn>`** | A platform prerequisite Hiresense identified that the client's list assumes but never names. |
+| **`OI-…`** | An open decision. `OI-A-…` from Part A, `OI-M3-…` from the Part B M3 chapter, `OI-HS-…` raised by Hiresense. |
+| **`AS-<nn>`** | A working assumption held until an open item closes. |
+| **`X<nn>`** | An external dependency — an account, contract, registration or access that must exist before build. |
+| **Estimate blocker** | One of the 7 open items that must close before a fixed price can be committed. |
+| **Effort band** | XS 0.5 · S 1.0 · M 2.0 · L 3.0 · XL 5.0 · XXL 8.0 person-days of **build** only. |
+| **Confidence** | High = spec complete. Medium = an assumption covers a gap. Low = an open decision could change **what** gets built. 97 of 208 items are Low. |
+| **Risk driver** | `EXT` external dependency · `SPEC` unresolved specification · `SHARED` shared component · `DATA` data volume/migration · `MODEL` accuracy-dependent · `COMP` compliance · `XMOD` cross-module contract. |
 
----
+## Technical
 
-## Technical terms as used here
-
-| Term | Meaning in this codebase |
+| Term | Meaning |
 |---|---|
-| **Component** | One implementable unit with one spec file, one package, its own tables. 34 of them. |
-| **Module** | Backend package under `packages/modules/`. Owns its tables; exposes a router, service interface, events, jobs, permissions. |
-| **Platform component** | A module used by two or more business modules. Built first. |
-| **Port / Adapter** | Port = our interface for an external system. Adapter = the implementation against a specific supplier. Every port has a fake for tests and a manual fallback for reality. |
-| **Outbox** | Table written inside the business transaction; a relay publishes from it. Guarantees an event is never lost or emitted for a rolled-back change. |
-| **Projection** | A reporting table derived from `event_store` by replaying events. Rebuildable from scratch. |
-| **Temporal lookup** | Resolving a value *as at a date* rather than now. Rate cards and contract terms. Getting this wrong is a billing error. |
-| **Scope resolver** | The layer that limits a query to the rows the current user may see (their sites, their client). Row-level, not screen-level. |
-| **Deemed window** | A configurable waiting period after which a non-response is treated as an answer. |
-| **Thin slice** | A deliverable partly in Release 1, remainder in Release 2 (D14, D22, D25). Both halves have specs; the R1 half must not be built in a way that blocks the R2 half. |
-| **Link type** | One of four configured instances of the single tokenised client-link mechanism. Only day-90 and timesheet approval may trigger billing. |
-
----
-
-## Naming conventions quick reference
-
-| Thing | Convention | Example |
-|---|---|---|
-| Package | `@apollo/<kebab>` | `@apollo/requisitions` |
-| Postgres schema | lower snake | `demand` |
-| Table | lower snake, **singular** | `requisition_version` |
-| Column | lower snake | `deemed_approved_at` |
-| Enum type | `<table>_<column>_enum` | `requisition_status_enum` |
-| API route | `/api/v1/<kebab-plural>` | `/api/v1/requisitions` |
-| Event | `<module>.<entity>.<past-tense>` | `demand.requisition.closed` |
-| Queue | `<module>.<verb>` | `intake.parse` |
-| Permission | `<module>.<resource>.<action>` | `demand.requisition.close` |
-| Setting key | `<module>.<name>` | `demand.follow_up_window_days` |
-| Feature flag | `ff.<module>.<name>` | `ff.attendance.geofence_enforcement` |
-| React component | PascalCase | `FulfilmentBoard.tsx` |
-| Hook | `use<Thing>` | `useRequisition.ts` |
-| Test | `<subject>.test.ts` | `requisition.service.test.ts` |
-
+| **Component** | The unit these docs are organised by: one spec, one implementation session, one owning package. |
+| **Realm** | An identity population. Three exist and never mix: `staff`, `candidate`, `client_user`. A fourth pseudo-realm, `link`, is a single-record token principal with no account. |
+| **Principal** | The authenticated subject on a request: realm, id, roles, and data scope. |
+| **Client link** | A tokenised, unguessable, expiring URL reaching exactly one record and one action, with **no login and no account provisioning**. Four types (`02-14`). |
+| **Billing trigger** | The evidence that permits an invoice: a `RetentionRecord` (permanent) or an approved `Timesheet` (contractual). Only the day-90 link type may produce the former. |
+| **Freshness score / availability confidence** | A per-candidate value that decays on a per-segment schedule and resets on a confirmed response. Written by `03-06`, stored on the candidate record, read by `03-07`. |
+| **Inbound stack** | The shared receive → queue → resolve sender → classify intent → retry pipeline (`02-08`), built once under A1 and consumed by A14 and the LMS path. |
+| **Intent registration** | How a second consumer attaches to the inbound stack without modifying it (`M3-I29`). Its acceptance test *is* A14 registering. |
+| **Outbox** | The table an event is written to inside the business transaction, then published by the worker. Guarantees the event exists if the change did. |
+| **Mart** | A reporting table materialised from the event spine, never queried from operational tables (`M9-I17`). |
+| **Adapter** | An implementation of one of the three market interfaces — identity, certification, qualification — returning green/amber/red on a common schema whatever the registry did (`02-13`). |
+| **Traffic-light outcome** | `green` verified · `amber` flagged, needs a human · `red` rejected. Uniform across every registry and check type. |
+| **Manual fallback** | What an adapter resolves to when a registry has no API or is down: document plus a person, behind the **same interface**. |
+| **Deployable** | `api`, `worker`, `console`, `links`, `portal`, `mobile`. See `00-02`. |
+| **Append-only** | No `UPDATE`, no `DELETE`, enforced by table grants. Applies to `AuditEntry`, `StatusTransition`, `AllocationRecord`, `RecruiterOverride`, `PlatformEvent`, `RetentionRecord`. |
+| **DPDP** | India's Digital Personal Data Protection Act. Drives consent capture, Mumbai residency and retention (`02-12`). |
+| **DLT registration** | Indian telecom registration required before an SMS template can be sent. |
+| **BSP** | WhatsApp Business Solution Provider — carries every message and must approve each template before use. |
+| **`ap-south-1`** | AWS Mumbai. No personal data leaves it, backups included. |

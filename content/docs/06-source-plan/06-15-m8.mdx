@@ -1,0 +1,507 @@
+---
+title: "06-15 M8 — Placement, Trial & Shift Attendance"
+description: "Once someone accepts an offer, this module tracks them joining and then checks in on them at day 0, 7, 30, 60 and 90. The candidate is asked whether they are being paid on time, whether…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M8 · D7, A6, D22 (thin) · Months 5–6*
+
+`Release 1` · `17 items` · `96 conditions` · `104.0pd` · `12 high risk` · `Ops/Admin, Candidate App, Client link`
+
+Once someone accepts an offer, this module tracks them joining and then checks in on them at day 0, 7, 30, 60 and 90. The candidate is asked whether they are being paid on time, whether they have a preceptor, and whether their accommodation is sorted. The client is asked at day 30 and 60 how it is going, and at day 90 whether the person is still there — that last answer is what lets Apollo invoice. Separately, for shift workers, this module collects attendance from the app check-ins and builds it into a timesheet, which the client then approves through a link.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D7 | Onboarding & joining | Original R1 | M8 — Placement, Trial & Shift Attendance |
+> | D22 | Time & attendance | Thin slice from R2 | M8 — Placement, Trial & Shift Attendance |
+> | A6 | Trial period tracking | New addition | M8 — Placement, Trial & Shift Attendance |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M8 — Placement, Trial & Shift Attendance. Reproduced without alteration.*
+>
+> Records joining confirmation with date tracking and drop-out capture with reasons, then tracks a configurable set of check-in events across day 0, 7, 30, 60 and 90 capturing attendance, salary payment timeliness, preceptor assignment and accommodation status, with client intent captured at day 60 and an auditable client-acknowledged record at day 90. It also carries shift-level attendance captured by check-in on the candidate app, and the timesheet, which now holds an approval state set by the client through an A13 link; leave categorisation, overtime treatment and the internal approval routing workflow remain in the later release.
+>
+> Deliverables: D7, A6, D22 (thin slice)
+>
+> Surfaces: Ops/Admin (trial dashboard, attendance and timesheet), Candidate App (shift check-in and candidate-side responses), outbound voice/WhatsApp for candidate-side check-ins, Client link surfaces for the day 30, 60 and 90 records and for timesheet approval.
+>
+> **CLOSED** — Shift attendance capture mechanism. Attendance is captured by check-in on the candidate app, replacing the Excel import in the original D22. Release 1 records a location stamp against each check-in without enforcing a boundary; geo-fencing moves off the exclusion list to a named Phase 2 item so the field exists when enforcement is specified. Pilot runs on in-house nurses.
+>
+> **CLOSED** — Client timesheet approval. Added. The timesheet carries an approval state set by the client through an A13 link type — the same mechanism as the day-90 confirmation, second instance. D25 invoices against an approved timesheet rather than raw attendance. A deemed-approval window is configurable per client in D13, with a platform-level default so an unconfigured client does not stall invoicing.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 5** — Per-category trial question sets under A6. Your own scope notes records that these differ by category.
+>
+> **Item 8** — Specialty privileging. A doctor placed at a hospital ordinarily requires privileges granted through that hospital's credentialing process, over and above council registration. There is no equivalent step in the nurse chain and nothing in the SOW covers it. We need to know whether it is in or out.
+>
+> **Item 11** — A homecare trial question set, and an attendance verification method appropriate to it. A6 captures preceptor assignment and accommodation, neither of which exists in a home. D22 records a location stamp without enforcing it, and geo-fencing enforcement only arrives in D23. In homecare, location is the only verification available, so unenforced is materially weaker there than in a facility.
+>
+> **Item 12** — An export or file handoff from the approved timesheet to a manual payroll process. Payroll sits at step ten of ten; until it is live, staff are paid by hand and the approved timesheet is the only clean handoff point.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+The check-in questions differ by candidate category, so they use the same category setup as M4. The client-facing parts of the trial run on the link mechanism built in M7.
+
+### Records this milestone owns
+
+- Placement — the person in the job: joining date, which vacancy, which contract. The 90-day clock hangs off this.
+- DropOut — someone who did not join or left early, with a reason. The position goes back to M3 as open.
+- TrialEvent — the day 0, 7, 30, 60 and 90 check-ins, on both the candidate and client side.
+- TrialResponse — the answers: attendance, whether pay arrived on time, preceptor, accommodation.
+- RetentionRecord — the day-90 answer, or the automatic version if the client never replied. This is the evidence behind the invoice.
+- ShiftAttendance — check-in and check-out, with where the phone was at the time (recorded, not enforced).
+- Timesheet — a period of shifts, with a state showing whether the client has approved it.
+
+### How records move
+
+- Placement: joined → in trial → trial survived, or trial ended with a reason
+- Placement: offered → dropped out with a reason (the position goes back to open in M3)
+- TrialEvent: scheduled → due → answered, escalated to a phone call, or missed
+- ShiftAttendance: expected → checked in → checked out. Or no show, or a problem raised → resolved.
+- Timesheet: building → built (not yet approved) → sent for approval → approved, or automatically treated as approved after the waiting period → invoiced
+
+### Not in this milestone
+
+- Paying the nurses. Payroll runs outside the platform for this whole period — that is milestone M13.
+- Requests and approvals for salary changes, advances and holds. Milestone M12.
+- Joining paperwork and statutory forms. Milestone M11.
+- Leave types, overtime rules and internal approval routing on timesheets. Milestone M15.
+- Blocking a check-in based on location. We store the location but do not act on it. Milestone M12.
+
+### Needs to exist first
+
+- M7 for the accepted offer and the link mechanism. M4 for the app, which is the only way attendance arrives.
+
+### What breaks without it
+
+- M9 needs the day-90 record to raise a permanent invoice, and the approved timesheet to raise a shift invoice. M3 needs the fill and drop-out counts.
+
+### Items — 17 to build · design 16.5pd, build 58.5pd, QA 29.0pd
+
+#### M8-I1 — Confirm joining
+
+`D7` · `Screen` · `L · 3.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Confirm someone has started. This opens the placement and starts the 90-day clock.
+
+##### Screens to build
+
+1. **Confirm joining**
+  - Records the date the candidate started
+  - Records the site and department they report to
+  - Creates the placement and starts the ninety-day clock
+
+##### Conditions it must satisfy
+
+- Joining is confirmed with date tracking and opens a placement record (Part A stage 14)
+- The joining event derives from offer acceptance in M7; without D20 there is no joining event at all (Part A dependency table)
+- The trial clock starts from the confirmed joining date, driving day 0, 7, 30, 60 and 90 events
+- A joining date change before day 0 reschedules the trial events
+- The placement cites the requisition so fill is tracked back in M3 (M3 step 10)
+- A doctor placement cannot be confirmed as joined until hospital privileging is recorded as granted (M8-I10)
+
+Index **M8-I1** · Client ref **D7** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I16, M8-I11, M3-I27**
+
+#### M8-I2 — Placements
+
+`D7` · `Screen` · `L · 4.0pd` · `AI High` · `Medium` · `SHARED` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead, Finance.** All live placements, their trial stage and whether they are close to billing.
+
+##### Screens to build
+
+1. **Placements**
+  - Lists placements with their candidate, client, joining date and trial day
+  - Filters by client, recruiter and trial stage
+  - Opens a placement
+2. **Record drop-out**
+  - Records that the candidate did not join or has left, with a reason
+  - Returns the position to open on the requisition
+
+##### Conditions it must satisfy
+
+- A placement shows its current trial day and next scheduled check-in
+- Billing trigger state is visible so finance can see what is approaching invoice
+- Finance can read placements without recruiter permissions (M0-I3)
+- The placement links to the offer, contract version and requisition it derives from
+- Placements approaching day 90 without a client recipient designated are flagged (OI-A-12)
+- Drop-out is captured with a reason and the requisition returns to fulfilment (Part A stage 14)
+- The position returns to open in M3 and the fill count decrements (M3 step 10)
+- A drop-out before day 90 means no retention record and therefore no permanent invoice
+- Drop-out reasons feed the M9 trial survival report
+- A replacement placement can be linked to the original for guarantee tracking (OI-A-13)
+
+Index **M8-I2** · Client ref **D7** · Band **L** · Design **1.5pd** · Build **4.0pd** · QA **1.5pd** · Total **7.0pd** · Confidence **Medium** · Open items **OI-A-12** · Linked items **M2-I14, M9-A7**
+
+#### M8-I3 — Trial dashboard
+
+`A6` · `Screen` · `XL · 5.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Fulfilment lead, Shalu (VP Fulfilment).** Every placement in its trial period, and which check-ins are done, due or missed.
+
+##### Screens to build
+
+1. **Trial dashboard**
+  - Lists placements in their trial with which check-ins are done, due or missed
+  - Shows the day 90 answers coming up
+  - Opens a placement
+
+##### Conditions it must satisfy
+
+- Check-in records are present at each configured event, candidate side and client side (Part A stage 15)
+- Day 30 and day 60 capture signal only; no billing trigger (Part A stage 15)
+- A missed check-in is distinguishable from a not-yet-due one
+- The day-90 pipeline is visible to finance ahead of the trigger firing
+- Without A6 there is no day-90 record, A7 has no trigger and D8 has nothing to invoice against (Part A dependency table)
+
+Index **M8-I3** · Client ref **A6** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **Medium** · Open items **-** · Linked items **M8-I11, M7-I11**
+
+#### M8-I4 — Check-in settings
+
+`A6` · `Config` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Set up which check-ins happen, on which days, with which questions per candidate category.
+
+##### Screens to build
+
+1. **Check-in settings**
+  - Lists the check-in events: day 0, 7, 30, 60 and 90
+  - Sets which questions each event asks, per candidate category
+  - Sets a different question set for home healthcare, which has no preceptor and no accommodation
+  - Sets which events go to the candidate and which to the client
+
+##### Conditions it must satisfy
+
+- The check-in event set is configurable, not hardcoded to five events (Part A M8)
+- Question sets differ by candidate category (Part A stage 15)
+- Standard questions cover attendance, salary payment timeliness, preceptor assignment and accommodation status (Part A stage 15)
+- Client-side events at day 30, 60 and 90 bind to the A13 link types, not a separate mechanism (M7-I8)
+- Non-response escalates to outbound voice per the configured rule (A5)
+
+Index **M8-I4** · Client ref **A6** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I8, M5-I6, M0-I5**
+
+#### M8-I5 — Candidate answers
+
+`A6` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Fulfilment lead, Quality.** What candidates are reporting: late pay, no preceptor, accommodation problems.
+
+##### Screens to build
+
+1. **Candidate answers**
+  - Lists what candidates reported at each check-in
+  - Shows attendance, whether pay arrived on time, whether a preceptor was assigned and whether accommodation is sorted
+  - Flags a negative answer for someone to act on
+
+##### Conditions it must satisfy
+
+- Responses capture attendance, salary payment timeliness, preceptor assignment and accommodation status (Part A stage 15)
+- A negative response on salary timeliness or accommodation escalates rather than being logged silently
+- Responses arriving by voice go through the same review path as A14 free text (OI-A-08)
+- Escalations are tracked to resolution, not just raised
+
+Index **M8-I5** · Client ref **A6** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **OI-A-08** · Linked items **M5-I13, M5-I7**
+
+#### M8-I6 — Trial outcome
+
+`A6` · `Screen` · `L · 3.0pd` · `AI High` · `High` · `XMOD` · `Low`
+
+**Who uses it: Fulfilment lead.** Did the person stay or leave, and did the client confirm at day 90.
+
+##### Screens to build
+
+1. **Trial outcome**
+  - Records the trial as survived or ended, with a reason if ended
+  - Shows whether the client answered at day 90 or the waiting period ran out
+  - Opens the record the invoice will be raised against
+
+##### Conditions it must satisfy
+
+- The trial ends either surviving or terminated with a reason (Part A stage 15)
+- A day-90 acknowledgement or a deemed-confirmation produces the auditable trigger record (Part A stage 16)
+- The deemed-confirmation countdown is visible before it expires, not only after
+- Termination before day 90 means no trigger and no permanent invoice
+- The guarantee period is visible, since a failure after day 90 inside a longer window changes the billing position (OI-A-13)
+
+Index **M8-I6** · Client ref **A6** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-13, OI-A-05** · Linked items **M8-I13, M9-A7**
+
+#### M8-I7 — Shift attendance
+
+`D22` · `Screen` · `L · 4.5pd` · `AI High` · `High` · `SHARED` · `Medium`
+
+**Who uses it: Fulfilment lead, Finance.** Every shift, expected and actual, built from app check-ins.
+
+##### Screens to build
+
+1. **Shift attendance**
+  - Lists each shift with who was expected, when they checked in and out, and where the phone was
+  - Filters by client, date and candidate
+  - Marks shifts with no check-in
+  - Marks a home healthcare check-in that was not at the visit address
+  - Corrects a time by hand, requiring a reason
+2. **Resolve a problem**
+  - Filters to shifts with a missed check-in or check-out
+  - Resolves one with a reason before the timesheet is built
+
+##### Conditions it must satisfy
+
+- Attendance is recorded at shift level against a check-in and a location stamp (Part A contractual stage 8)
+- The location stamp is recorded and not enforced; geo-fencing is a named Phase 2 item (Part A CLOSED item)
+- A no-show is distinguishable from a missing check-in
+- A manual correction requires a reason and is audited, since it affects an invoice (M0-I4)
+- There is no alternative attendance route - no app means no attendance (Part A coupling 7)
+- An exception is resolved before the timesheet is compiled for that period
+- A missed check-out does not silently become a full shift or a zero shift; it is resolved explicitly
+- Resolution is attributed and audited, since it changes billable hours
+- A systemic cause - an app outage, for instance - can be resolved in bulk
+- Unresolved exceptions are visible on the timesheet before it is sent for approval
+- A check-in away from the expected location is flagged for a person to resolve; whether it is blocked outright is a setting in M12-I5
+
+Index **M8-I7** · Client ref **D22** · Band **L** · Design **1.5pd** · Build **4.5pd** · QA **2.0pd** · Total **8.0pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I7, M8-I14**
+
+#### M8-I8 — Timesheet
+
+`D22` · `Screen` · `XL · 5.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Fulfilment lead, Finance, Client (via link).** The period summary the client approves and M9 invoices against.
+
+##### Screens to build
+
+1. **Timesheet**
+  - Lists the shifts worked in the period with hours and value
+  - Marks lines with an unresolved problem
+  - Sends the timesheet to the client for approval
+
+##### Conditions it must satisfy
+
+- A timesheet is compiled for the period from shift-level attendance (Part A contractual stage 8)
+- Value is calculated against the contract rate resolved through M2-I11
+- A timesheet with unresolved exceptions is flagged before it can be sent for approval
+- Sending for approval issues an A13 timesheet approval link (M7-I12)
+- Leave categorisation and overtime treatment are explicitly out of the thin slice (Part A contractual stage 10)
+- A correction after approval requires the timesheet to be reissued, not silently amended
+
+Index **M8-I8** · Client ref **D22** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.5pd** · Total **9.5pd** · Confidence **Medium** · Open items **-** · Linked items **M7-I12, M2-I11, M9-D25**
+
+#### M8-I9 — Timesheet tracking
+
+`D22` · `Screen` · `L · 3.0pd` · `AI High` · `High` · `XMOD` · `Low`
+
+**Who uses it: Finance, Fulfilment lead.** Which timesheets are out, approved, queried or about to be treated as approved.
+
+##### Screens to build
+
+1. **Timesheet tracking**
+  - Lists timesheets by period with whether the client has approved them
+  - Shows how long is left before a timesheet counts as approved
+  - Sends a timesheet again
+
+##### Conditions it must satisfy
+
+- An approved timesheet is the input to the D25 shift invoice, not raw attendance (Part A CLOSED item)
+- Where no response arrives, the per-client deemed-approval window applies (Part A contractual stage 9)
+- The deemed countdown is visible before expiry, so finance can chase
+- A platform default prevents an unconfigured client stalling invoicing (Part A CLOSED item, OI-A-05)
+- Approval evidence is retrievable for a billing query, timestamped against an identified recipient (OI-A-12)
+
+Index **M8-I9** · Client ref **D22** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-05, OI-A-12** · Linked items **M7-I12, M2-I10, M9-D25**
+
+#### M8-I10 — Privileging
+
+`D7` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Recruiter, Fulfilment lead.** Records the privileges a hospital grants a doctor to practise at that site, which is separate from council registration and is required before the doctor can start.
+
+##### Screens to build
+
+1. **Privileging**
+  - Lists the privileging requests raised for a placement, with their state
+  - Records that the hospital has granted privileges, and from what date
+  - Records a rejection with a reason
+  - Blocks the joining date being confirmed until privileges are granted
+
+##### Conditions it must satisfy
+
+- A doctor placement cannot be confirmed as joined until privileging is recorded as granted (M8-I1)
+- Privileging is held per placement and per hospital, not once per doctor
+- Council registration in M4 does not satisfy privileging and does not skip this step
+- Nurse and allied health placements do not require this step and are not blocked by it
+- How privileging is requested from the hospital, and whether the platform does it, is not yet decided (OI-HS-16)
+
+Index **M8-I10** · Client ref **D7** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-HS-16** · Linked items **M8-I1, M4-I12**
+
+#### M8-I11 — Check-in scheduling
+
+`A6` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Create and fire the check-in events from the joining date, on both sides.
+
+##### Screens to build
+
+1. **No screen**
+  - Creates the day 0, 7, 30, 60 and 90 events from the joining date
+  - Sends the candidate-side ones through the M5 messaging layer
+  - Sends the client-side ones as an M7 link
+  - Escalates to a phone call where nobody answers
+
+##### Conditions it must satisfy
+
+- Events generate at day 0, 7, 30, 60 and 90 from the confirmed joining date
+- Candidate-side dispatch runs through the M5 notification layer, not a separate sender
+- Client-side dispatch issues an A13 link of the correct type (M7-I17)
+- A joining date change reschedules unfired events and leaves fired ones intact
+- Non-response escalates on the configured timer rather than being silently missed
+
+Index **M8-I11** · Client ref **A6** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M5-I8, M7-I17**
+
+#### M8-I12 — Check-in questions
+
+`A6` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** Serve the right questions for the candidate's category, rendered for app, WhatsApp or phone call.
+
+##### Screens to build
+
+1. **No screen**
+  - Serves the right check-in questions for the candidate's category
+  - Renders them for the app, for WhatsApp and for a voice call from one definition
+
+##### Conditions it must satisfy
+
+- The same logical question set renders correctly as an app form, a WhatsApp template and a voice script
+- Question sets differ by candidate category (Part A stage 15)
+- Responses return on one schema regardless of channel, matching the A14 pattern
+- A question set version change does not invalidate responses captured under a prior version
+
+Index **M8-I12** · Client ref **A6** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I26, M5-I15**
+
+#### M8-I13 — Day 90 record
+
+`A6` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: System.** The day-90 record the invoice fires against. It must still make sense to someone querying a charge a year later.
+
+##### Screens to build
+
+1. **No screen**
+  - Writes the day 90 record from the client's answer, or from the waiting period running out
+  - Records who answered and when
+  - Cannot be changed once written
+
+##### Conditions it must satisfy
+
+- An acknowledgement is timestamped against an identified recipient (Part A stage 16)
+- Where no response arrives, contract terms deem retention confirmed after the configured window (Part A stage 16)
+- Either path produces an auditable trigger record capable of supporting a billing query (Part A stage 16)
+- The record is immutable once created and links to the link response or the deemed event
+- The window resolves through M2-I12 with a platform default fallback (OI-A-05)
+- The recipient identity model is unspecified, which makes the record's defensibility uncertain (OI-A-12)
+
+Index **M8-I13** · Client ref **A6** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-12, OI-A-05** · Linked items **M2-I12, M7-I18, M9-A7**
+
+#### M8-I14 — Check-in receiver
+
+`D22` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: System.** Receive check-ins from the app, including ones taken with no signal and synced later.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives shift check-ins and check-outs from the app
+  - Stores where the phone was without blocking anything
+  - Accepts a check-in taken offline and sent later, keeping its original time
+
+##### Conditions it must satisfy
+
+- A check-in matches to a shift demand line in M3 (M3-I14)
+- An offline check-in syncs with its original timestamp preserved, not the sync time
+- A duplicate check-in from a retried sync does not create a second attendance record
+- The location stamp is stored without a boundary check (Part A CLOSED item)
+- A check-in with no matching shift raises an exception rather than being discarded
+
+Index **M8-I14** · Client ref **D22** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **2.0pd** · Total **5.0pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I7, M3-I14**
+
+#### M8-I15 — Timesheet build
+
+`D22` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Turn attendance into a timesheet, priced against the right contract version.
+
+##### Screens to build
+
+1. **No screen**
+  - Builds the timesheet for a period from the shift attendance
+  - Prices each line against the contract rate for that date
+  - Rebuilds consistently after a correction
+
+##### Conditions it must satisfy
+
+- A timesheet compiles from attendance for the defined period
+- Each line resolves a rate against the contract version in force (M2-I11)
+- Compilation is repeatable; regenerating after a correction produces a consistent result
+- The approval state is set by the client through an A13 link, not by an internal user (Part A CLOSED item)
+- Internal approval routing is explicitly out of the thin slice (Part A contractual stage 10)
+
+Index **M8-I15** · Client ref **D22** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I11, M7-I18**
+
+#### M8-I16 — Timesheet waiting period
+
+`D22` · `Service` · `M · 2.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: System.** The clock that lets invoicing proceed when a client simply never replies.
+
+##### Screens to build
+
+1. **No screen**
+  - Counts down the client's waiting period once a timesheet is sent
+  - Marks the timesheet approved when that period runs out with no answer
+
+##### Conditions it must satisfy
+
+- A timesheet with no client response is deemed approved after the configured window (Part A contractual stage 9)
+- The window resolves per client with a platform default fallback so invoicing does not stall (OI-A-05)
+- A client response before expiry suppresses the timer
+- The deemed event is auditable and visibly distinguished from an explicit approval
+- A deemed approval is as valid an invoice input as an explicit one
+
+Index **M8-I16** · Client ref **D22** · Band **M** · Design **0.0pd** · Build **2.0pd** · QA **1.5pd** · Total **3.5pd** · Confidence **Low** · Open items **OI-A-05** · Linked items **M2-I12, M9-D25**
+
+#### M8-I17 — Approved timesheet export
+
+`D22` · `Service` · `S · 1.0pd` · `AI High` · `Low` · `SPEC` · `Medium`
+
+**Who uses it: System.** Produces a file of approved timesheet data for the manual payroll process that runs outside the platform until M13.
+
+##### Screens to build
+
+1. **No screen**
+  - Produces a file of approved timesheets for a period and a client
+  - Runs on demand or on a schedule
+  - Records that the export was taken and by whom
+
+##### Conditions it must satisfy
+
+- Only approved or deemed-approved timesheets appear in the export
+- The same period cannot be silently exported twice without it being visible
+- Part A records that no handoff to payroll is scoped, so this is an addition rather than a clarification (OI-A-15)
+- The export is retired once M13 payroll connects directly
+
+Index **M8-I17** · Client ref **D22** · Band **S** · Design **0.0pd** · Build **1.0pd** · QA **0.5pd** · Total **1.5pd** · Confidence **Medium** · Open items **OI-A-15** · Linked items **M8-I15, M13-I5**

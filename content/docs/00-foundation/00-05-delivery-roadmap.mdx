@@ -1,264 +1,124 @@
 ---
-title: "00-05 · Delivery Roadmap"
-description: "Six months, 126 working days, 1344 person-days, ~10.7 average team size. Sequenced by dependency, not by the original release split."
+title: "00-05 Delivery roadmap"
+description: "Seven build phases across six months (126 working days at 21/month). The phases are the engineering sequence; the plan's milestones are the commercial one."
 ---
 
-Six months, 126 working days, 1344 person-days, ~10.7 average team size.
-Sequenced by dependency, not by the original release split.
+**Package** `n/a` · **Schema** `n/a` · **Plan** all 16 milestones · **Effort** 1362.5pd · **Risk** — · **Build in** Phase 0
 
----
+Seven build phases across six months (126 working days at 21/month). The phases are the engineering
+sequence; the plan's milestones are the commercial one. The mapping is exact — no milestone is split
+across a phase boundary except where the plan itself splits it (D14, D22, D25).
 
-## 1. Eight phases
+Effort as planned: **design 224.0 · build 780.5 · QA 358.0 = 1362.5 person-days**, average team 10.8.
+Design front-loads into months 1–3; QA back-loads into months 4–6.
 
-| Phase | Months | Components | pd | Gate |
+## 1. Phases
+
+| Phase | Months | Components | Milestones covered | pd |
 |---|---|---|---|---|
-| **0 · Ground** | 1 | Repo, CI/CD, 4 environments, P13, P05, P12 | 60 | A hello-world API + SPA deploys to `dev` through the pipeline |
-| **1 · Foundations** | 1–2 | P01, P02, P03, P04, P06 | 65 | A user signs in, gets role-scoped nav, uploads a file, every action audited |
-| **2 · Commercial base** | 2–3 | B01, B02, B15 (profiling) | 105 | A client, its sites, a rate card and a versioned contract exist; rate resolves *as at* a date |
-| **3 · Demand** | 3–4 | P07, P08, P09, B03, B04 | 174 | A vacancy arrives by email and WhatsApp, normalises, appears on the fulfilment board, chases its own missing fields |
-| **4 · Supply** | 2–4 (parallel) | B05, B06, B07, B15 (migration) | 188 | A candidate registers in the app, uploads a CV, gets verified; migrated pool reconciles |
-| **5 · Loop & match** | 3–5 | B08, B09 | 180 | Confidence decays, cadence contacts the base, replies reset it, ranking produces an explained list |
-| **6 · Revenue chain** | 4–6 | P10, B10, B11, B12, B13 | 262 | End-to-end: shortlist → offer → joined → day-90 link answered → **invoice raised** |
-| **7 · Insight + R2** | 5–6 | B14, P11, B16–B21 | 310 | Reports run; portal, onboarding, workforce, payroll, prioritisation, collections |
+| **1 — Foundations** | 1–2 | 02-01, 02-02, 02-03, 02-04, 02-05, 02-06, 02-10, 02-13, 02-15, 03-13 (profiling only) | M0, M1 | ~176 |
+| **2 — Client & candidate spine** | 2–3 | 02-07, 02-12, 03-01, 03-04, 03-05, 03-13 | M2, M4 | ~266 |
+| **3 — Demand** | 3–4 | 02-08, 02-09, 02-11, 03-02, 03-03 | M3 | ~208 |
+| **4 — Engagement & matching** | 3–5 | 03-06, 03-07, 02-14 | M5, M6, A13 half of M7 | ~209 |
+| **5 — Selection, placement & attendance** | 4–6 | 03-08, 03-09, 03-10 | M7 (rest), M8 | ~167 |
+| **6 — Money and the rest of Release 1** | 5–6 | 03-11, 03-12, 03-14, 03-15, 03-16, 03-18 | M9, M10, M11, M12, M14 | ~223 |
+| **7 — R2 remainders** | 6 | 03-17, 03-19, 03-20 | M13, M15 | ~79 |
 
-Phases 3 and 4 run in parallel with different people — they touch different schemas and only meet
-at B09.
+Phases overlap by design: 02-13 runs through Phases 1–2 waiting on `X14`/`X16`, 03-05 runs Phases 2–4
+against three consumers, and 02-14 lands in Phase 4 ahead of the three modules that need it.
 
----
+## 2. Phase gates
 
-## 2. Month-by-month
+The client requires a gate every three to four weeks with a **working demonstration**, not a document,
+and named attendees: **Shallu Kakkar** (fulfilment and recruiter workflow), **Suman** (client-facing
+surfaces), **Mr. Abednego Peter** (clinical quality and the candidate record). A written record at each
+gate of what was raised and what changed.
 
-```
-        M1        M2        M3        M4        M5        M6
-       ├─────────┼─────────┼─────────┼─────────┼─────────┼─────────┤
-P0     ████████
-P1     ████████████████
-P2               ████████████████
-P3                         ████████████████████
-P4               ████████████████████████████
-P5                                  ████████████████████
-P6                                            ████████████████████
-P7                                                      ████████████████
-       ├─────────┼─────────┼─────────┼─────────┼─────────┼─────────┤
-design ██████████████████████████████                              (221pd, front-loaded)
-QA               ░░░░░░░░░░████████████████████████████████████████ (353pd, back-loaded)
-```
-
----
-
-## 3. Phase detail
-
-### Phase 0 · Ground (month 1)
-
-Nothing business-facing. This is the thing that makes everything after it possible.
-
-| Work | Spec |
-|---|---|
-| pnpm monorepo, TypeScript config, lint/format, boundaries rules | `01-01`, `01-02` |
-| Postgres + Redis + LocalStack via docker-compose | `01-01` |
-| Drizzle setup, migration runner, seed framework | `01-05` |
-| Vitest + Supertest + Playwright harness | `01-08` |
-| Terraform: VPC, RDS, ElastiCache, S3, ECS, ALB, CloudFront, Secrets Manager, ×4 envs | `01-09` |
-| GitHub Actions: lint → typecheck → test → build → deploy | `01-09` |
-| P13 job runtime, P05 design system, P12 adapter framework | `02-13`, `02-05`, `02-12` |
-
-**Gate:** a trivial endpoint and a trivial screen reach `dev` through the real pipeline, with logs in
-CloudWatch and a migration applied by the pipeline rather than by hand.
-
-> The plan puts deployment (`M1-I5`, 10pd) and environments (`M1-I16`, 10pd) inside M1. Do them in
-> month one anyway. Everything is untestable until they exist, and "we will deploy properly later"
-> reliably becomes "we deployed badly for six months".
-
-### Phase 1 · Foundations (months 1–2)
-
-P01 iam · P02 audit · P03 config · P04 files · P06 list engine
-
-**Gate:**
-- A user is invited, activates, signs in, and sees only the nav their role permits
-- A deactivated user cannot sign in but is still visible on records they created
-- Removing a permission takes effect on the next *request*, not the next login
-- Every login, failed login, lockout and permission change is in the audit trail
-- A file uploads, virus-scans, becomes available, and downloads via a short-lived presigned URL
-- Nine configurable lists exist in one settings area, with per-client override over platform default
-- `<DataTable/>` filters, sorts, pages, chooses columns, saves views and exports
-
-### Phase 2 · Commercial base (months 2–3)
-
-B01 clients · B02 contracts · B15 CPAL profiling
-
-**Sequence contracts early, not late.** M9 cannot invoice without contract terms, and there is no
-fallback.
-
-**Gate:**
-- Client → locations → departments → contacts
-- Sender identities registered (intake depends on this in phase 3)
-- Rate card versioned; `rateLookup(role, skill, location, asAt)` returns the version in force *then*
-- Contract versioned; renewal creates a version, does not overwrite
-- Three per-client windows configured, each falling back to a platform default
-- **CPAL profiling has run.** Volume, quality and duplicate rate documented. Until it does, B15 is
-  unpriced and go-live has no date (`OI-A-02`).
-
-### Phase 3 · Demand (months 3–4)
-
-P07 messaging · P08 inbound · P09 events · B03 intake · B04 requisitions
-
-The largest phase. 174pd. Build the pipeline before the channels.
-
-Order within the phase:
-1. P09 events — **first**, because every module after this writes events and they cannot be
-   backfilled. A module that ships without emitting events makes its own period unreportable.
-2. P07 messaging — needed to chase a client for missing fields
-3. P08 inbound — receiver, sender matching, message-type registration
-4. B04 requisitions — the object, states, versions, board
-5. B03 intake — channels on top of the pipeline: email, WhatsApp, spreadsheet, HRMS, voice notes
-
-**Gate:** a vacancy arrives by email *and* by WhatsApp text, both normalise to one requisition
-schema, an incomplete one chases the client on the channel it arrived on, a duplicate across two
-channels surfaces for a human, and the fulfilment board shows live demand with a correct age clock
-(including hold/resume).
-
-### Phase 4 · Supply (months 2–4, parallel with 3)
-
-B05 candidates · B06 credentials · B07 candidate app · B15 migration
-
-**Start the mobile app in month 2.** App store enrolment (Apple needs a D-U-N-S number in Apollo's
-name) and first-submission review are calendar time that no amount of team size removes, and the app
-is on the revenue critical path for shift invoicing.
-
-**Gate:** candidate registers by phone + OTP, uploads a CV, corrects the parsed fields, adds
-category-specific attributes, uploads documents, verification queue works green/amber/red with
-pendency, credentials carry issuer and validity, migrated pool reconciles to source totals.
-
-### Phase 5 · Loop & match (months 3–5)
-
-B08 engagement · B09 matching
-
-B08's four parts (A3 decay, A4 cadence, A5 voice, A14 response capture) are **one unit**. Do not
-split them across sprints.
-
-**External calendar dependency:** WhatsApp template approval takes weeks and is outside our control.
-Submit templates at the *start* of phase 5, not when the code is ready (`OI-HS-07`).
-
-**Gate:** confidence decays on schedule, cadence selects the stalest first, a message goes out on the
-right channel respecting opt-out, a reply on WhatsApp *and* in the app produces the same structured
-answer, confidence resets, and ranking produces an ordered list with a stated rationale and unmet
-criteria per candidate.
-
-### Phase 6 · Revenue chain (months 4–6)
-
-P10 links · B10 selection · B11 placements · B12 attendance · B13 billing
-
-**Build P10 first.** M8, M9 and M12 all wait on it, and it is the only way to reach a client.
-
-**Gate — the one that matters:**
-```
-requisition → ranked shortlist → client opens link with no password → accepts
-  → interview → feedback → selection decision with structured reason
-  → offer generated → sent over WhatsApp → e-signed → mapped to contract
-  → joining confirmed → 90-day clock starts
-  → day 0/7/30/60 check-ins fire
-  → day-90 link sent → client answers → RetentionRecord written (immutable)
-  → contract terms resolved as at trigger time
-  → PERMANENT INVOICE RAISED, with the evidence attached
-```
-And in parallel:
-```
-shift demand line → candidate accepts in app → checks in → checks out
-  → timesheet built and priced against the right contract version
-  → timesheet link → client approves (or the window expires → deemed approved)
-  → SHIFT INVOICE RAISED
-```
-
-### Phase 7 · Insight + Release 2 (months 5–6)
-
-B14 analytics, then P11, B16, B17, B18, B20, B21, B19.
-
-Internal order (dependency-forced):
-```
-B14 analytics ─┐
-P11 approvals ─┼─▶ B18 workforce ─┐
-B17 onboarding ┘                  ├─▶ B19 payroll   (last — needs three upstream)
-B21 collections ──────────────────┘
-B16 portal    (independent, needs everything to display)
-B20 demand-ops (needs B14 performance data)
-```
-
-**This half is compressed and it is the main schedule risk.** Five build steps start in months 5–6,
-each needing the one before it. They cannot be parallelised by adding people.
-
-**Two consequences, stated now rather than discovered in month five:**
-1. Any slip in months 1–4 lands entirely here, because R2 is the only thing left to cut.
-2. **B19 payroll is last, behind three other modules.** If the payroll line matters commercially, it
-   is the item most exposed to everything upstream of it.
-
----
-
-## 4. Calendar dependencies that team size does not fix
-
-| Dependency | Lead time | Start by | Risk if late |
+| Gate | Week | Demonstration that passes it | Attendee |
 |---|---|---|---|
-| **WhatsApp template approval** | Weeks, per template, provider-controlled | Month 3 | Gates the entire M5 contact schedule going live |
-| **Apple / Google developer enrolment** | Days–weeks; Apple needs a D-U-N-S in Apollo's name | Month 2 | Gates app store submission, which gates shift attendance, which gates shift invoicing |
-| **First app store review** | Slower than subsequent updates | Month 4 | Same chain |
-| **CPAL data access for profiling** | Apollo-provided | Month 1 | B15 stays unpriced; go-live has no date |
-| **Supplier selection** (voice, STT, OCR, e-sign, verification aggregator, payroll engine) | Apollo decision | See `05-03` | Each unselected supplier is an unpriced integration built against a fake |
-| **Apollo AWS account + credential boundary** | Apollo/PMO decision | Kick-off | Blocks phase 0 entirely |
+| G1 | 4 | A named recruiter signs in, sees only their permitted navigation, an administrator adds a candidate category as **data**, and every action appears on the activity trail | Shallu |
+| G2 | 8 | **One client, one nurse, one link.** A tokenised day-90 link is issued to a real hospital contact, opened on a phone, answered, and produces an immutable `RetentionRecord`. *This is the client's own request and it settles the single riskiest behavioural assumption in the plan.* | Suman |
+| G2b | 8 | **A crude ranked list on three fields** against a live requisition, in front of recruiters. The overrides they make are the weighting specification (`OI-A-11`) | Shallu |
+| G3 | 12 | The same requirement sent by email, spreadsheet, WhatsApp text and WhatsApp voice note produces four requisitions differing only in source channel and raw payload | Shallu |
+| G4 | 16 | A Base B nurse is contacted on cadence, replies on WhatsApp, and their freshness score resets — then a shift ranking reorders because of it | Shallu |
+| G5 | 20 | A candidate is shortlisted, the client responds by link, an offer is signed, joining is confirmed and the placement's trial events schedule themselves | Suman + Abednego |
+| G6 | 22 | A shift is checked into on the app, appears on a timesheet, is approved by a client link, and raises a shift invoice traceable to the approval in two clicks | Shallu + finance |
+| G7 | 26 | A permanent invoice fires from a day-90 record, and the funnel report covers a period that has already passed | Suman |
 
-**Every one of these should be started in the first two weeks**, regardless of when the code that
-needs it is scheduled.
+**Acceptance is tied to the gate, not to milestone completion.** The scenario catalogue is authored
+jointly and finalised gate by gate. Feedback at a gate that concerns capability already inside the
+agreed scope **completes** the specification; feedback that introduces new capability is a change.
 
----
+## 3. The three assumptions the gates exist to settle
 
-## 5. Effort shape
-
-| | pd | Notes |
+| Assumption | Settled at | If it is wrong |
 |---|---|---|
-| Design | 221 | Front-loaded into months 1–3. Design system first, then screens. |
-| Build | 770 | Even-ish, peaking months 3–4 |
-| QA | 353 | Back-loaded into months 4–6 |
-| **Total** | **1344** | ÷126 days = **10.7 average heads** |
+| Recruiters accept a ranked shortlist, and their overrides imply a weighting | G2b, week 8 | `03-07` weight model is redesigned while it is still cheap |
+| A hospital contact will click a link to confirm retention at day 90 | G2, week 8 | The entire permanent billing chain needs another trigger; found in month 2 rather than month 6 |
+| Candidates install the app | G4, week 16 | Shift attendance has **no other route** — the contractual invoice chain has no fallback |
 
-10.7 is a **floor for capacity planning, not a plan.** Design front-loads, QA back-loads, and the
-integration-heavy work in P07/P08, B06, B08 and B19 needs specialists rather than more generalists.
+## 4. Category sequencing
 
-**Not in the 1344:** discovery workshops, client sessions, defect cycles past first-pass QA, project
-management, and the 500 consulting hours in the legal SOW. UAT support is a line item in phase 6/7;
-the rest is not.
+**Nurses first, then doctors, then allied health.** Each category is taken end to end — one client, one
+requisition, one candidate sourced, ranked, shortlisted, placed, tracked to day 90 and invoiced —
+before any part of it is thickened. Module coherence is a secondary aim and gives way to getting a
+path working.
 
----
+Category is never a code branch. Adding doctors is: reference data (`02-03`), an attribute set
+(`03-04`), a registry adapter (`02-13`), a weight set (`03-07`), a trial question set (`03-09`) and,
+uniquely for doctors, privileging (`03-09`, `M8-I10`). All configuration except privileging.
 
-## 6. What to cut, in order, if the schedule compresses
+## 5. Critical path and what compresses
 
-Decided now so it is not decided under pressure in month five:
+```
+02-01 identity ─▶ 02-06 shell ─▶ 03-01 clients ─▶ 03-03 requisitions ─▶ 03-07 ranking
+                                       │                                     │
+                       03-04 candidates ┘                    02-14 links ────┤
+                                       │                                     ▼
+                       03-05 app ──────┴──────────────────────────▶ 03-08 selection
+                                                                              │
+                                                              03-09 placement ─┤
+                                                                              ▼
+                                              03-10 timesheets ──▶ 03-11 billing ──▶ 03-12 reporting
+                                                                              │
+                                                             03-17 payroll ◀───┴─ 03-15, 03-16, 03-19
+```
 
-| Cut order | Component | Consequence |
+**The back half is compressed and this is the main schedule risk.** Five of the ten build steps begin
+in months five and six, each needing the one before it, so they cannot be parallelised by adding
+people. Two consequences, stated now:
+
+1. Any slip in months one to four lands **entirely on the Phase 6–7 work**, because it is the only
+   thing left to cut.
+2. **03-17 payroll sits last behind three other components.** If the contractual line matters
+   commercially, it is the item most exposed to everything upstream.
+
+If the period cannot hold both three category modules and the full R2 remainder, the client's stated
+priority is **three category modules on a thinner R2**, because the category dimension is what becomes
+expensive to retrofit — it reaches into the adapters, the weight model and the trial question sets.
+
+## 6. Calendar dependencies no team size removes
+
+Start these in week one regardless of when the phase begins.
+
+| Dependency | Why it cannot be compressed | Blocks |
 |---|---|---|
-| 1 | B20 demand prioritisation | Allocation stays a morning-call record. Zero revenue impact. |
-| 2 | B16 client portal | Clients keep using tokenised links, which work. Loses the sixth intake channel. |
-| 3 | B21 collections | Invoices raise; Apollo chases payment outside the platform, as today. |
-| 4 | B18 workforce operations | Salary changes stay manual with an offline approval trail. |
-| 5 | B19 payroll | Payroll stays manual — **this caps how many shift workers Apollo can take on** (`OI-A-16`). Commercially significant. |
-| 6 | B17 associate onboarding | Paper forms continue. Blocks B19 anyway. |
+| `X01` Meta / WhatsApp business verification + template approval | Provider review, weeks, outside Apollo's control | 02-09, 03-02 chase, 03-06 cadence go-live |
+| `X02` SMS DLT registration | Indian telecom regulator | 02-09 SMS channel |
+| `X14` Verification aggregator contract | Procurement + customer onboarding | all of 03-04 verification |
+| `X12`/`X13` App store accounts (Apple needs a D-U-N-S in Apollo's legal name) | Third-party issuance + first-submission review | 03-05, and therefore all shift attendance |
+| `X06` SSO decision | Changes what 02-01 builds; retrofitting after 90 users are live is worse than either option | 02-01 |
 
-**Never cut:** anything on the critical path
-(`P01 → P03 → B01 → B02 → B04 → B05 → B06 → B09 → P10 → B10 → B11 → B13`), P09 events (cannot be
-backfilled), or P02 audit (the day-90 billing trigger is indefensible without it).
+Get a placeholder build through app store review early. It removes `X12`/`X13` risk entirely.
 
----
+## 7. What must exist before its consumer, or cannot be added later
 
-## 7. Phase gate checklist
-
-A phase is not done until all of these are true. No exceptions, because every one of them gets
-harder to retrofit than to do:
-
-- [ ] Every acceptance criterion in each component spec passes as an automated test
-- [ ] Migrations run forward on an empty database **and** on a copy of the previous environment
-- [ ] Every state transition emits its domain event, and the event is in `event_store`
-- [ ] Every mutating action writes an audit entry with actor, timestamp and before/after
-- [ ] Every list screen uses P06, not a bespoke table
-- [ ] Every external call goes through P12 with a fake adapter available for tests
-- [ ] Every screen has defined empty, loading, error and no-permission states
-- [ ] RBAC is enforced **server-side**, verified by a test that calls the endpoint as the wrong role
-- [ ] Runbook written for each new failure mode
-- [ ] Open items touched by the phase are re-checked against `05-03`
-
+| Must be built first | Consumer | Consequence of getting it wrong |
+|---|---|---|
+| `02-11` event spine | `03-12` reporting | Reports **cannot be produced for the earlier period at all**. This is the one prerequisite that cannot be retrofitted. |
+| `03-03` `StatusTransition` + `AllocationRecord` | `03-12` stage loss by recruiter | Not computable retrospectively |
+| `02-14` link mechanism | 03-08, 03-09, 03-10, 03-11 | No client surface exists at all — D12 is deferred |
+| `02-13` adapter interfaces | `03-04` verification | No candidate can be verified |
+| `03-05` app | `03-10` attendance | No attendance, no timesheet, no shift invoice |
+| `03-01` `ContractVersion` + windows | `03-11` billing | Permanent billing does not run — there is **no fallback** |
+| `02-03` category as reference data | everything | A core built to one category makes doctors a migration |

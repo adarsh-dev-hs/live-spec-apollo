@@ -1,333 +1,136 @@
 ---
-title: "01-06 · Events and Background Jobs"
-description: "Transactional outbox · BullMQ on Redis · append-only event store"
+title: "01-06 Events and jobs"
+description: "Two separate mechanisms that are often confused. Events are a record that something happened, kept for reporting (F14). Jobs are work to be executed later (02-10)."
 ---
 
-Transactional outbox · BullMQ on Redis · append-only event store
+**Package** `@apollo/events`, `@apollo/jobs` · **Schema** `events`, `jobs` · **Plan** F14, F07, D29, A4 · **Effort** — · **Risk** High `DATA` · **Build in** Phase 1 (runtime), Phase 3 (spine)
 
----
+Two separate mechanisms that are often confused. **Events** are a record that something happened, kept
+for reporting (`F14`). **Jobs** are work to be executed later (`02-10`). A job may be triggered by an
+event; an event is never a job.
 
-## 1. Why this matters more than usual here
+## 1. Events — the one thing that cannot be retrofitted
 
-Two constraints from the delivery plan drive this entire document:
+> "If this is built after M3 rather than before it, the reports in M9 cannot be produced for the
+> earlier period at all." — `M3-I31`
 
-> **F14 · Event recording.** "Every module writes an event as things happen, and the reports in M9
-> read those events later. **This is the one prerequisite that cannot be added afterwards.**"
+Every module emits an event as work happens, inside the business transaction, through the outbox.
 
-> **M3-I28 · Status change log.** "Append-only transition record. D28 stage-level conversion loss
-> **cannot be computed retrospectively** without it."
+### Naming and payload
 
-A module that ships without emitting its events makes the entire period before that ship date
-permanently unreportable. There is no backfill. Build P09 in phase 3, before any module that
-depends on it, and treat "does it emit its events" as a merge blocker.
-
----
-
-## 2. Transactional outbox
-
-**Problem:** you cannot atomically write to Postgres and publish to Redis. Publish first and the
-transaction may roll back — you have announced something that did not happen. Publish after and the
-process may die — the thing happened and nobody knows.
-
-**Solution:** write the event to a table inside the same transaction, and relay it separately.
-
-```
-┌── transaction ────────────────────────────┐
-│  UPDATE demand.requisition SET status=... │
-│  INSERT INTO demand.status_transition ... │
-│  INSERT INTO platform.audit_entry ...     │
-│  INSERT INTO platform.outbox ...          │   ← the event
-└───────────────────────────────────────────┘
-                    │ commit
-                    ▼
-        outbox relay (worker, polls every 1s)
-                    │
-     ┌──────────────┼──────────────────┐
-     ▼              ▼                  ▼
- event_store    BullMQ topic      (delete from outbox)
- (append-only)       │
-                     ▼
-              module subscribers
-```
-
-```sql
-CREATE TABLE platform.outbox (
-  id             uuid PRIMARY KEY,
-  event_name     text NOT NULL,
-  aggregate_type text NOT NULL,
-  aggregate_id   uuid NOT NULL,
-  payload        jsonb NOT NULL,
-  actor_id       uuid,
-  occurred_at    timestamptz NOT NULL DEFAULT now(),
-  published_at   timestamptz
-);
-CREATE INDEX idx_outbox__unpublished ON platform.outbox (occurred_at) WHERE published_at IS NULL;
-```
-
-Delivery is **at-least-once**. Every subscriber must be idempotent. There is no exactly-once, and
-pretending otherwise produces subtler bugs than accepting it.
-
----
-
-## 3. Event naming and payloads
-
-```
-<module>.<aggregate>.<past-tense-verb>
-```
-
-| Rule | |
-|---|---|
-| Past tense, always | It already happened; a subscriber cannot veto it |
-| Payload carries **IDs and the few facts a subscriber needs to decide whether it cares** | Not the whole entity |
-| Payloads are versioned by addition only | Never remove or repurpose a field |
-| A schema (zod) per event, in the module's `events/` folder | Validated on emit |
-| Events are **facts, not commands** | `demand.requisition.closed`, never `matching.please_rerank` |
+`<schema>.<entity>.<past_tense_verb>` — `demand.requisition.status_changed`,
+`placement.retention.confirmed`, `billing.invoice.raised`.
 
 ```ts
-// packages/modules/requisitions/src/events/index.ts
-export const events = defineEvents({
-  'demand.requisition.created': z.object({
+// packages/events/src/demand.ts
+export const RequisitionStatusChanged = defineEvent({
+  name: 'demand.requisition.status_changed',
+  version: 1,
+  payload: z.object({
     requisitionId: z.string().uuid(),
-    clientId:      z.string().uuid(),
-    category:      candidateCategory,
-    positions:     z.number().int().positive(),
-    source:        intakeChannel,
-  }),
-  'demand.requisition.held': z.object({
-    requisitionId: z.string().uuid(),
-    reasonCode:    z.string(),
+    clientId: z.string().uuid(),
+    locationId: z.string().uuid(),
+    candidateCategory: z.string(),
+    careSetting: z.string(),
+    serviceLine: z.enum(['permanent', 'contractual']),
+    from: z.string(), to: z.string(),
+    ownerId: z.string().uuid().nullable(),
+    actorId: z.string().uuid().nullable(),   // null = system
+    occurredAt: z.string().datetime(),
   }),
 })
 ```
-
----
-
-## 4. Event catalogue
-
-The events the platform relies on. Each module spec lists its own; this is the cross-module view.
-
-| Event | Emitted by | Consumed by |
-|---|---|---|
-| `platform.user.deactivated` | iam | requisitions (reassign owner), engagement |
-| `clients.client.activated` | clients | intake (sender identities become live) |
-| `clients.contract.version_created` | contracts | billing (terms cache invalidation) |
-| `clients.contract.expiring_soon` | contracts | messaging (renewal alert) |
-| `demand.inbound.received` | inbound | intake |
-| `demand.inbound.unmatched` | inbound | intake (unmatched senders queue) |
-| `demand.inbound.unparseable` | intake | intake (manual entry queue) |
-| `demand.requisition.created` | requisitions | matching, analytics |
-| `demand.requisition.completed` | requisitions | matching (ranking may run) |
-| `demand.requisition.held` / `.released` / `.closed` | requisitions | matching (invalidate ranked set), analytics |
-| `demand.requisition.allocated` | requisitions | analytics, demand-ops |
-| `demand.shift_line.created` | requisitions | matching (shift ranking), attendance |
-| `supply.candidate.registered` | candidates | engagement (welcome), analytics |
-| `supply.candidate.verified` | credentials | matching (eligibility), engagement |
-| `supply.credential.expiring` | credentials | engagement (chase), matching |
-| `supply.candidate.merged` | candidates | everything holding a candidate id |
-| `engage.availability.confirmed` | engagement | matching (confidence reset) |
-| `engage.message.delivered` / `.failed` | messaging | engagement (retry), analytics |
-| `match.ranked_set.generated` | matching | selection |
-| `match.shortlist.sent` | matching | selection, links |
-| `select.interview.completed` | selection | matching (outcome write-back) |
-| `select.decision.recorded` | selection | **matching (A8 write-back)**, placements |
-| `select.offer.signed` | selection | placements, contracts |
-| `place.placement.created` | placements | requisitions (fill count), onboarding, analytics |
-| `place.dropout.recorded` | placements | **requisitions (position returns to open)**, analytics |
-| `place.trial_event.due` | placements | messaging, links |
-| `place.retention.confirmed` | placements | **billing (permanent invoice trigger)** |
-| `place.timesheet.approved` | attendance | **billing (shift invoice trigger)**, payroll |
-| `place.attendance.recorded` | attendance | attendance (timesheet build) |
-| `bill.invoice.raised` | billing | analytics, collections |
-| `bill.payment.received` | collections | billing (receivable) |
-| `platform.link.answered` | links | selection / placements / attendance (routed by type) |
-| `platform.approval.granted` | approvals | workforce, collections |
-
-**The three events the money depends on** — `place.retention.confirmed`, `place.timesheet.approved`,
-`select.decision.recorded` — get explicit integration tests asserting the subscriber fired and did
-the right thing. Not just that the event was emitted.
-
----
-
-## 5. Subscribers
-
-```ts
-// packages/modules/requisitions/src/subscribers/on-dropout-recorded.ts
-export const onDropoutRecorded = defineSubscriber({
-  event: 'place.dropout.recorded',
-  name:  'requisitions.reopen-position',           // unique — used as the idempotency key
-  handler: async ({ payload }) => {
-    await RequisitionService.reopenPosition({
-      requisitionId: payload.requisitionId,
-      reason: 'candidate_dropout',
-    })
-  },
-})
-```
-
-| Rule | |
-|---|---|
-| Idempotent. Always. | At-least-once delivery. Key on `(subscriberName, eventId)`. |
-| Runs in the worker, never in the API process | |
-| Failure retries with backoff, then dead-letters and alerts | Never silently dropped |
-| A subscriber may **not** emit a synchronous chain more than 2 deep | Depth 3 means the boundary is wrong |
-| Slow work is enqueued, not done in the handler | |
-| No subscriber may write another module's tables | It calls that module's service |
-
----
-
-## 6. Queues
-
-BullMQ. One queue per unit of work, named `<module>.<verb>`.
-
-| Queue | Concurrency | Attempts | Backoff | Notes |
-|---|---|---|---|---|
-| `platform.outbox-relay` | 1 | ∞ | 1s fixed | Single consumer, ordering matters |
-| `platform.event-dispatch` | 10 | 5 | exp 2s | Fan-out to subscribers |
-| `files.virus-scan` | 5 | 3 | exp 10s | Blocks file availability |
-| `inbound.receive` | 20 | 5 | exp 5s | Webhook → InboundRecord |
-| `intake.parse` | 10 | 3 | exp 30s | Model-dependent; failures → manual entry queue |
-| `intake.transcribe` | 5 | 3 | exp 60s | Per-minute billed — do not retry blindly |
-| `messaging.send` | 20 | 5 | exp 30s | Rate-limited per provider |
-| `messaging.receipt` | 20 | 3 | exp 10s | Delivery receipts |
-| `engagement.cadence-run` | 2 | 2 | exp 5m | Whole-base sweeps; heavy |
-| `engagement.decay` | 1 | 2 | exp 5m | Scheduled |
-| `matching.rank` | 5 | 3 | exp 30s | CPU-bound |
-| `credentials.verify` | 10 | 3 | exp 5m | External registries, often slow |
-| `placements.checkin-fire` | 10 | 3 | exp 5m | Day 0/7/30/60/90 |
-| `attendance.timesheet-build` | 5 | 3 | exp 60s | |
-| `billing.raise-invoice` | 2 | 3 | exp 60s | **Low concurrency deliberately** — money |
-| `analytics.project` | 5 | 5 | exp 30s | Event → projection |
-| `migration.batch` | 1 | 1 | — | Locked; one batch at a time, resumable, no auto-retry |
-| `payroll.run` | 1 | 1 | — | Locked; manual retry only |
-
-**`migration.batch`, `billing.raise-invoice` and `payroll.run` deliberately do not auto-retry
-aggressively.** A blind retry there duplicates money or data. They fail loudly and a human decides.
-
----
-
-## 7. Job rules
 
 | Rule | Why |
 |---|---|
-| Payloads carry **IDs, not entities** | State may have changed since enqueue; re-read it |
-| Every job has a deterministic `jobId` | BullMQ dedupes; the same work never queues twice |
-| Every consumer is idempotent | Retries are normal, not exceptional |
-| Jobs are small; large work fans out into per-item jobs | One job per migration *record*, not per batch |
-| Progress is reported for anything a user watches | `M1-I2` requires observable progress mid-run |
-| Every queue has a DLQ, an alarm on DLQ depth, and a documented replay path | A job that fails permanently is never silently dropped |
-| No job runs longer than 15 minutes | Split it |
+| Payload is **self-contained**: it carries the dimensions a report will group by, denormalised | A mart must not have to join back to an operational table that has since changed |
+| No personal data in a payload — ids only | `02-12`; the event log is long-lived |
+| Versioned. A change is a new version; old versions keep being read | A taxonomy change must not silently alter historic scores or counts (`M6-I7`) |
+| Emitted **inside** the business transaction via the outbox | An event that did not happen when the change did is worse than no event |
+| Emitted once, from the owning service — never re-derived from a database trigger | Triggers hide causality and cannot see the actor |
 
----
+### Outbox
 
-## 8. Schedulers
+```
+service transaction ──▶ INSERT events.outbox (event, payload, occurred_at)
+                                   │
+worker (02-10) polls ──────────────┴──▶ publish to events.platform_event (append-only)
+                                            └──▶ subscribers: 03-12 marts, job triggers
+```
 
-BullMQ repeatable jobs, registered once at worker boot. **Never `node-cron`, never a `setInterval`,
-never an OS cron** — schedules must survive a deploy and must not double-fire across tasks.
+At-least-once delivery. Every subscriber is idempotent on `(event_id, subscriber)`.
 
-| Schedule | Cadence | Owner | Does |
+### The five event families reporting depends on
+
+| Family | Emitted by | Without it |
+|---|---|---|
+| `demand.requisition.*` (created, status_changed, revised, closed) | 03-03 | No funnel, no time-to-fill, no stage loss (`M9-I5`, `M9-I6`, `M9-I8`) |
+| `demand.allocation.*` (recorded, removed) | 03-03 | **Loss by recruiter cannot be produced at all** (`M9-I8`) |
+| `matching.*` (set_generated, override_applied, shortlist_submitted) | 03-07 | No override analysis, no ranking quality signal |
+| `selection.*` (decided, offered, signed, declined) | 03-08 | No conversion, no rejection-reason analysis |
+| `placement.*` (joined, dropped_out, trial_event_answered, retention_confirmed) | 03-09 | No trial survival, no revenue-at-risk (`M9-I7`) |
+
+## 2. Jobs — the runtime (`02-10`)
+
+BullMQ on Redis, one worker process, queues grouped by class so a cadence run over the whole Base B
+cannot starve an interactive retry.
+
+| Queue class | Queues | Concurrency | Note |
 |---|---|---|---|
-| `engagement.decay` | Hourly | engagement | Decays availability confidence per base schedule (A3) |
-| `engagement.cadence-select` | Every 4h | engagement | Selects who to contact next, enqueues sends (A4) |
-| `requisitions.age-tick` | Hourly | requisitions | Recomputes age, respecting hold pauses |
-| `intake.follow-up-chase` | Hourly | intake | Chases incomplete requisitions on their origin channel |
-| `intake.follow-up-escalate` | Hourly | intake | Escalates to the owner after the configured window |
-| `placements.checkin-due` | Daily 06:00 IST | placements | Fires day 0/7/30/60/90 check-ins |
-| `placements.retention-deem` | Daily 06:00 IST | placements | Applies the deemed-confirmation window |
-| `attendance.timesheet-close` | Daily 02:00 IST | attendance | Builds timesheets for closed periods |
-| `attendance.approval-deem` | Daily 06:00 IST | attendance | Applies the deemed-approval window |
-| `credentials.expiry-warn` | Daily 07:00 IST | credentials | Warns before a credential expires |
-| `contracts.renewal-alert` | Daily 07:00 IST | contracts | Alerts before a contract runs out |
-| `analytics.project` | Every 15 min | analytics | Refreshes projections |
-| `analytics.mis-pack` | Monthly, 1st 05:00 IST | analytics | Generates the leadership pack |
-| `collections.dunning` | Daily 09:00 IST | collections | Chases overdue invoices (M15) |
-| `platform.token-expiry` | Hourly | links | Expires unanswered links |
+| `interactive` | `messaging.send`, `links.issue`, `files.scan` | high | user is waiting or nearly |
+| `provider` | `adapters.check`, `ocr.extract`, `voice.call`, `stt.transcribe`, `esign.send` | per-provider rate limit | limits respected, not discovered through throttling (`M5-I8`) |
+| `batch` | `engagement.cadence-run`, `migration.load`, `reporting.refresh`, `timesheets.build` | low | long-running, resumable |
+| `schedule` | timers below | 1 | singleton, advisory-locked |
 
-All IST times are computed from UTC with `Asia/Kolkata` — Apollo operates on Indian business hours,
-and a check-in that fires at 06:00 UTC arrives at 11:30 in the morning, which is not what "daily
-morning" means to anyone using the system.
+### Every scheduled job in the platform
 
-**The two deeming schedulers are revenue-critical.** If `retention-deem` or `approval-deem` stops
-running, invoices silently stop being raised and nobody notices until month end. Both have a
-heartbeat alarm on last-successful-run, not just on failure.
+| Schedule | Job | Component | Plan ref |
+|---|---|---|---|
+| every minute | `outbox.publish` | 02-11 | `M3-I31` |
+| every minute | `messaging.retry-and-receipts` | 02-09 | `M5-I9` |
+| every 5 min | `inbound.retry` | 02-08 | `M3-I18` |
+| hourly | `demand.followup-escalation` — window expiry escalates to the owner, **never deems a value** | 03-02 | `M3-I22`, `AS-01` |
+| hourly | `links.expire-and-deem` — expires links; deems **only** day-90 and timesheet types | 02-14 | `M7-I17`, `M8-I16` |
+| daily | `engagement.decay` — decays availability confidence on six per-segment schedules | 03-06 | `M5-I10` |
+| daily | `engagement.cadence-run` — selects who to contact next | 03-06 | `M5-I11` |
+| daily | `placement.trial-events` — generates and fires day 0/7/30/60/90 events | 03-09 | `M8-I11` |
+| daily | `candidates.credential-expiry` — warns ahead of expiry | 03-04 | `M4-I25` |
+| daily | `clients.contract-renewal-alert` | 03-01 | `M2-I13` |
+| daily | `billing.trigger-sweep` — raises invoices for confirmed/deemed triggers | 03-11 | `M9-I12` |
+| daily | `reporting.refresh-marts` | 03-12 | `M9-I17` |
+| daily (Phase 7) | `billing.dunning` | 03-20 | `M15-I7` |
+| weekly | `dp.retention-sweep` | 02-12 | `M4-I27` |
 
----
+### Job rules
 
-## 9. Event store and projections
-
-```sql
-CREATE TABLE platform.event_store (
-  id             uuid PRIMARY KEY,
-  event_name     text NOT NULL,
-  aggregate_type text NOT NULL,
-  aggregate_id   uuid NOT NULL,
-  payload        jsonb NOT NULL,
-  actor_id       uuid,
-  occurred_at    timestamptz NOT NULL,
-  sequence       bigserial
-);
-CREATE INDEX idx_event_store__aggregate ON platform.event_store (aggregate_type, aggregate_id, sequence);
-CREATE INDEX idx_event_store__name_time ON platform.event_store (event_name, occurred_at DESC);
-```
-
-Append-only, by grant. Retained for the full contract period and beyond — a billing query may land
-years later (`OI-HS-14`).
-
-**Projections** are reporting tables derived by replaying events (`02-09`, `03-14`):
-
-| Rule | |
+| Rule | Detail |
 |---|---|
-| Rebuildable from `event_store` alone, from zero, at any time | This is the test that the events are sufficient |
-| Never written by a business module — only by the projector | |
-| A projection bug is fixed by fixing the projector and replaying, never by patching the table | |
-| Reports read projections, never operational tables | |
+| Idempotent, keyed | `idempotencyKey` on enqueue; a repeat is a no-op, not a second send |
+| Retry policy is per queue class | transient → exponential backoff, max 5; permanent → straight to dead-letter, no retry (`M5-I9`) |
+| Dead letters are **visible and re-queueable by an operator** | `M3-I30` requires exactly this |
+| Every run is recorded: which rule, which rows, when | `M5-I11` — a cadence run must be auditable |
+| A batch resumes from its last checkpoint | `M1-I11` migration, `M1-I2` pause/resume |
+| A singleton job takes a Postgres advisory lock | Two cadence runs at once would double-contact the base |
+| Volume is projectable **before** execution | `M5-I5`, `M5-I11` — the cost preview exists because WhatsApp is billed per conversation (`OI-HS-05`) |
+| A job never assumes the world it saw at enqueue time | Re-read state at execution; a candidate may have opted out since |
 
-**Event sourcing is not the write model.** Current state lives in normal tables. Events exist for
-reporting and for reaction. Do not reconstruct a requisition by replaying its events.
+## 3. Which mechanism to use
 
----
-
-## 10. Ordering
-
-Events are ordered **per aggregate**, not globally.
-
-- `event_store.sequence` gives a total order for replay
-- Dispatch is concurrent, so two subscribers may see events out of order relative to each other
-- If a subscriber needs ordering, it partitions by `aggregate_id` (BullMQ group key)
-- **Never assume** `demand.requisition.completed` arrives before `demand.requisition.allocated` in a
-  different subscriber
-
-Where ordering genuinely matters — invoice raising, payroll — the work is serialised by a distributed
-lock on the aggregate, not by hoping the queue behaves.
-
----
-
-## 11. Observability
-
-| Signal | Alarm |
+| Need | Use |
 |---|---|
-| Queue depth per queue | > 1000 for 5 min |
-| DLQ depth | > 0 |
-| Outbox lag (oldest unpublished) | > 60s |
-| Job failure rate | > 5% over 15 min |
-| Scheduler heartbeat | Missed run for any revenue-critical schedule |
-| Event dispatch latency p95 | > 10s |
+| A report will need to count this later | **Event** |
+| Another module must react | **Event** subscribed by a job |
+| Something must happen at a time | **Scheduled job** |
+| Something must happen after a wait | **Delayed job**, keyed so it can be cancelled |
+| A provider must be called | **Job** on the `provider` class, never inline |
+| Something must be undoable | Neither — a state machine transition with an audit entry |
 
-Every job logs start, finish and duration with its `jobId`. A BullMQ dashboard is exposed in `dev`,
-`qa` and `uat`; in `prod` it is behind admin permission and read-only.
+## 4. Cost instrumentation (`OI-HS-05`)
 
----
+Every provider job records its cost unit on completion — WhatsApp conversations, voice minutes,
+transcription minutes, OCR pages, verification checks, e-sign envelopes, AI tokens — attributed to the
+**cause**: `demand.followup`, `engagement.cadence`, `selection.offer`, `placement.checkin`.
 
-## 12. Local development
-
-```bash
-pnpm dev:worker           # runs consumers and schedulers against local Redis
-pnpm jobs:trigger <name>  # fire a scheduled job immediately
-pnpm jobs:replay <id>     # replay one DLQ job
-pnpm events:tail          # tail the event store
-pnpm events:reproject     # rebuild all projections from scratch
-```
-
-`pnpm events:reproject` runs in CI against the seed dataset. If projections cannot be rebuilt from
-events alone, the events are incomplete — and that is the failure the plan warns cannot be fixed
-retrospectively.
-
+This is not optional instrumentation. Apollo has asked for a running-cost figure and cannot produce one
+without it, and per-conversation cost could exceed the build cost of the module that sends the
+messages if Base B is larger than assumed.

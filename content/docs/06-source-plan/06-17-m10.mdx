@@ -1,0 +1,230 @@
+---
+title: "06-17 M10 — Client Portal"
+description: "A proper logged-in website for clients. Until now clients have only had one-off links with no password. This gives them accounts: they can raise vacancies themselves, see how their…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M10 · D12 · Months 5–6*
+
+`Release 2` · `8 items` · `30 conditions` · `44.0pd` · `1 high risk` · `Client Portal`
+
+A proper logged-in website for clients. Until now clients have only had one-off links with no password. This gives them accounts: they can raise vacancies themselves, see how their vacancies are progressing, look at shortlists, respond to candidates, approve timesheets and download invoices. Once this exists, the client portal also becomes a sixth way requisitions arrive, which M3 already allows for in its channel list.
+
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Drafting point** — §5.1 states that no external client-portal users are onboarded in the first six months, and separately that portal users for hospitals and home healthcare providers are onboarded in R2, which falls inside the six months. Please reconcile.
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+This adds a whole new group of users. The role and permission model from M1 has to stretch to cover people outside Apollo, and every screen needs to be checked so a client only ever sees their own data.
+
+### Records this milestone owns
+
+- ClientUser — a login for someone at the client. Separate from Apollo staff logins.
+- ClientUserRole — what that person can do and which sites they can see.
+- PortalSession — logins and activity, kept for audit.
+
+### How records move
+
+- ClientUser: invited → registered → active → suspended
+
+### Not in this milestone
+
+- Clients editing their own rate card or contract terms. Those stay with Apollo.
+- Clients seeing candidate personal data beyond what the shortlist already shows.
+
+### Needs to exist first
+
+- M1 for the permission model, extended to outside users. M2 for the client and contact records. M3, M6, M7, M8 and M9 for everything the portal displays.
+
+### What breaks without it
+
+- M3 gains a sixth intake channel. The one-off links from M7 stay in place for clients who never sign in.
+
+### Items — 8 to build · design 10.5pd, build 22.0pd, QA 11.5pd
+
+#### M10-I1 — Client sign in
+
+`D12` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `COMP` · `Low`
+
+**Who uses it: Client user.** The first client login the platform has ever had. Clients receive an invite, set a password and sign in.
+
+##### Screens to build
+
+1. **Client sign in**
+  - Takes an email address and a password
+  - Signs the client user in and opens the portal
+2. **Set up account**
+  - Opened from an invitation
+  - Takes a password and activates the account
+
+##### Conditions it must satisfy
+
+- A client user completes set-up from an invite and can sign in afterwards
+- An expired invite can be reissued without creating a second account
+- A client user cannot reach any Apollo internal screen
+- Sessions expire and require a fresh login
+- Client identity is kept entirely separate from Apollo staff identity
+
+Index **M10-I1** · Client ref **D12** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M1-S02, M0-I1**
+
+#### M10-I2 — Portal users
+
+`D12` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `COMP` · `Low`
+
+**Who uses it: Client admin, Apollo BD.** Someone at the client adds and removes their own colleagues, within limits Apollo sets.
+
+##### Screens to build
+
+1. **Portal users**
+  - Lists the users at that client with their access
+  - Invites a colleague
+  - Removes a user
+
+##### Conditions it must satisfy
+
+- A client admin can only see and manage users belonging to their own client
+- Site-level access limits what a user sees to their own hospitals
+- Apollo can suspend a client user without going through the client
+- Removing a user does not remove the records they created
+
+Index **M10-I2** · Client ref **D12** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Low** · Open items **-** · Linked items **M10-I1**
+
+#### M10-I3 — Portal: raise requisition
+
+`D12` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Client user.** The sixth intake channel. M3 already lists it and leaves it switched off; this switches it on.
+
+##### Screens to build
+
+1. **Raise a requisition**
+  - Takes the same fields as the internal requisition form
+  - Limits sites and departments to that client
+  - Submits it, which creates a requisition marked as arriving by portal
+
+##### Conditions it must satisfy
+
+- A requisition raised here produces the same record as one arriving by email (M3 AC1)
+- The source channel is recorded as portal
+- Enabling this channel is configuration in M3, not a schema change (M3 AS-05)
+- The client only sees their own sites and departments
+- Completeness is checked at submit so the chase loop is rarely needed
+
+Index **M10-I3** · Client ref **D12** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M3-I5, M3-I9**
+
+#### M10-I4 — Portal: my requisitions
+
+`D12` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `XMOD` · `Low`
+
+**Who uses it: Client user.** Clients see how their own vacancies are going without phoning a recruiter.
+
+##### Screens to build
+
+1. **My requisitions**
+  - Lists that client's requisitions with their status and how many positions are filled
+  - Opens a requisition
+
+##### Conditions it must satisfy
+
+- A client sees only their own requisitions
+- Status shown is client-appropriate and does not expose internal notes
+- Age matches the internal aging rule, excluding held days (M3 AC6)
+
+Index **M10-I4** · Client ref **D12** · Band **M** · Design **1.5pd** · Build **2.0pd** · QA **1.0pd** · Total **4.5pd** · Confidence **Low** · Open items **-** · Linked items **M3-I12**
+
+#### M10-I5 — Portal: shortlists
+
+`D12` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Client user.** The logged-in version of the shortlist link from M7. Same decisions, richer view.
+
+##### Screens to build
+
+1. **Shortlists**
+  - Lists the candidates put forward against each requisition
+  - Accepts, rejects with a reason, or asks for an interview
+
+##### Conditions it must satisfy
+
+- Decisions write into the same selection record as the link version (M7-I10)
+- The reason list is the same configured taxonomy used internally
+- A client who never signs in can still use the one-off link — both routes stay open
+
+Index **M10-I5** · Client ref **D12** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M7-I10**
+
+#### M10-I6 — Portal: timesheets
+
+`D12` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Client user.** The logged-in version of the timesheet approval link.
+
+##### Screens to build
+
+1. **Timesheets**
+  - Lists timesheets awaiting the client's approval
+  - Approves one, or queries a line with a reason
+
+##### Conditions it must satisfy
+
+- Approval sets the same state as the link version (M7-I12)
+- The waiting-period rule still applies if the client does not respond
+- A queried line routes back to Apollo without approving the rest
+
+Index **M10-I6** · Client ref **D12** · Band **M** · Design **1.5pd** · Build **2.0pd** · QA **1.0pd** · Total **4.5pd** · Confidence **Low** · Open items **-** · Linked items **M7-I12**
+
+#### M10-I7 — Portal: invoices
+
+`D12` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `COMP` · `Low`
+
+**Who uses it: Client user.** Clients download their own invoices and signed documents instead of asking finance.
+
+##### Screens to build
+
+1. **Invoices**
+  - Lists that client's invoices
+  - Downloads an invoice
+
+##### Conditions it must satisfy
+
+- A client sees only their own invoices
+- Rate card and contract are visible but not editable
+- Downloads are logged for audit
+
+Index **M10-I7** · Client ref **D12** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Low** · Open items **-** · Linked items **M9-I1**
+
+#### M10-I8 — Portal data scoping
+
+`D12` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `COMP` · `Low`
+
+**Who uses it: System.** Every portal query must be limited to the signed-in user's client and sites. One mistake here leaks another hospital's data.
+
+##### Screens to build
+
+1. **No screen**
+  - Limits every portal request to the signed-in user's own client and sites
+  - Refuses any request that has not been limited
+
+##### Conditions it must satisfy
+
+- No portal query can return data belonging to another client, under any parameter
+- A user limited to two sites cannot see a third
+- A new portal endpoint added later fails closed if scoping is not applied
+- Scoping is tested automatically, not by inspection
+
+Index **M10-I8** · Client ref **D12** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **3.0pd** · Total **8.0pd** · Confidence **Low** · Open items **OI-HS-01** · Linked items **M0-I3**

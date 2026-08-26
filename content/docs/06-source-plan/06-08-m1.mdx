@@ -1,0 +1,452 @@
+---
+title: "06-08 M1 — Platform Foundations & Migration"
+description: "This is the base every other module is built on. It gives us a working web console with logins and roles, a running environment on Apollo's own AWS account, and the documentation and…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M1 · D11, A10, A12, F10, F12 · Months 1–3*
+
+`Release 1` · `16 items` · `79 conditions` · `128.5pd` · `10 high risk` · `Ops/Admin`
+
+This is the base every other module is built on. It gives us a working web console with logins and roles, a running environment on Apollo's own AWS account, and the documentation and go-live support the contract asks for. It also holds two other things: a plug-in layer for talking to outside registries (so India works now and other countries can be added later without rewriting the app), and the job of moving Apollo's old CPAL data into the new system so the platform becomes the place the business actually works from.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D11 | Foundations & documentation | Original R1 | M1 — Platform Foundations & Migration |
+> | A10 | Legacy migration | New addition | M1 — Platform Foundations & Migration |
+> | A12 | Configurable market layer | New addition | M1 — Platform Foundations & Migration |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M1 — Platform Foundations & Migration. Reproduced without alteration.*
+>
+> Carries role-based access control, deployment to the client-hosted AWS Mumbai environment, technical and user documentation, UAT support and go-live for the enlarged Release 1, together with the market adapter interfaces sitting behind identity, certification and qualification. It also carries migration of CPAL and current tooling into the platform as the system of record, including retirement of the legacy tool.
+>
+> Deliverables: D11, A10, A12
+>
+> Surfaces: Ops/Admin only — administration and configuration screens. No candidate-facing or client-facing surface.
+>
+> **OPEN** — A12 market coverage. Only the India adapter is in scope for Release 1. With three candidate categories, the India adapter set now spans nursing councils, the NMC and state medical councils, the allied health councils and the Pharmacy Council; several have no API and resolve to document plus manual verification behind the same interface. The requirement is that the interface accepts the US, Germany and Ireland later without change to core domain logic. The set of interface contracts to be proven against those three markets in Release 1 is not enumerated in the revision.
+>
+> **OPEN** — A10 effort basis. Estimation is to follow a joint data profiling exercise that has not yet run. Apollo will provide access for profiling ahead of estimation.
+>
+> **OPEN** — A10 against D3 duplicate handling. D3 scopes duplicate detection and merge for app self-registration. The revision does not state whether the migrated CPAL base is resolved through the same mechanism or through a one-time migration-side process.
+>
+> Note: the LMS is being built by an internal Apollo team and is outside HireSense scope. It is expected to connect to this platform via API at a later point; no Release 1 deliverable depends on it and no LMS integration is scoped here.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 3** — Registry adapters for the additional categories behind the existing M1 interface - the NMC and state medical councils, the allied health councils and the Pharmacy Council. Several have no API and resolve to document plus manual verification behind the same interface, which is an argument for defining that interface once.
+>
+> **Context** — We would also single out your treatment of the four markets. A12 and F16 put adapter interfaces behind identity, certification and qualification with only the India adapter implemented, so that the United States, Germany and Ireland can later be added as configuration rather than as a change to core logic. That is the right pattern, and it is the pattern this email asks you to apply on a second axis.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+Two things here are built once and used everywhere. The console shell (navigation, page frame, permissions) is used by every Ops screen in the platform. The registry adapter interface is used by M4 for every identity and credential check. It also carries two pieces of foundation work that nothing before it needs: the design system and the deployment pipeline and environments.
+
+### Records this milestone owns
+
+- User, Role, Permission — who can log in and what they can do. Every other module reads these.
+- MarketAdapter, AdapterCall — the configuration for each outside registry, and a log of every call made to one.
+- MigrationBatch, MigrationRecord, MigrationException — the old-data import: what came in, what loaded, what failed.
+- SystemConfig — platform-wide default settings. M2 falls back to these when a client has none set.
+
+### How records move
+
+- MigrationBatch: staged → profiled → transformed → loaded → reconciled → cut over
+- MigrationRecord: extracted → mapped → loaded. Or extracted → exception → resolved → loaded. Or rejected, with a reason.
+- AdapterCall: requested → responded, giving green, amber or red. Or failed → retried. Or falls back to a person checking it by hand.
+
+### Not in this milestone
+
+- Adapters for the US, Germany and Ireland. India only for now. The interface must be able to take them later without changing the core app.
+- The LMS. Apollo's own team is building it. It will connect by API later. Nothing here depends on it.
+- Any client login. The client portal (D12) is a later milestone, so logins here are for Apollo staff only.
+- Statutory filing (PF, ESIC returns). Not in this contract at all.
+
+### Needs to exist first
+
+- Nothing. This milestone goes first.
+
+### What breaks without it
+
+- Everything. No environment and no login means nothing else can be built or tested. No adapter layer means M4 cannot verify anyone. No migration means the candidate pool is nearly empty when matching starts.
+
+### Items — 16 to build · design 14.0pd, build 84.0pd, QA 30.5pd
+
+#### M1-I1 — Console frame
+
+`D11` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: All Apollo internal users.** The page frame every Ops screen sits inside: navigation, header, search, user menu. Build it once.
+
+##### Screens to build
+
+1. **Console frame**
+  - Wraps every Ops screen with a left-hand menu of the modules the user can reach
+  - Applies role-based access to every screen, using the roles set in M0-I3
+  - Shows who is signed in and lets them sign out
+
+##### Conditions it must satisfy
+
+- A user sees only the navigation entries their role permits (M0-I3)
+- Switching between modules preserves filter state within a session
+- Session expiry redirects to login without losing unsaved form state
+
+Index **M1-I1** · Client ref **D11** · Band **M** · Design **2.5pd** · Build **2.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M0-I1, M0-I3, M1-I4**
+
+#### M1-I2 — Migration screens
+
+`A10` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `DATA` · `Low`
+
+**Who uses it: Platform administrator, Hiresense.** Start, pause and watch the data import from the old system. Shows counts and progress.
+
+##### Screens to build
+
+1. **Migration status**
+  - Lists each migration run with how many records were read, loaded and failed
+  - Starts, pauses and resumes a run
+2. **Failed records**
+  - Lists records that did not load, with the reason
+  - Opens one to correct the field that failed and send it back to load
+  - Rejects a record with a reason so it is counted and not lost
+
+##### Conditions it must satisfy
+
+- A batch reports extracted, mapped, loaded, exception and rejected counts that reconcile to the source total
+- A paused batch resumes without reprocessing already-loaded records
+- A batch cannot be started twice concurrently
+- Progress is observable while a batch runs, not only on completion
+- Effort and volume cannot be estimated until profiling runs (OI-A-02)
+
+Index **M1-I2** · Client ref **A10** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-02** · Linked items **M1-I10**
+
+#### M1-I3 — Registry settings
+
+`A12` · `Config` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator.** Configure which country's registries are active and how to reach each one.
+
+##### Screens to build
+
+1. **Registry configuration**
+  - Lists each outside registry the platform checks against
+  - Switches a registry on or off
+  - Holds the endpoint and credentials for each registry
+  - Switches a registry to manual checking where it has no API
+
+##### Conditions it must satisfy
+
+- Adding a new market registers adapters as configuration rather than a code change
+- A registry with no API resolves to document plus manual verification behind the same interface
+- Disabling an adapter routes checks to the manual fallback rather than failing them
+- Which interface contracts must be proven against the three future markets is unresolved (OI-A-01)
+- Only the platform administrator can change adapter configuration
+
+Index **M1-I3** · Client ref **A12** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M3-I26**
+
+#### M1-I4 — Component library
+
+`F12` · `Screen` · `XL · 6.0pd` · `AI Medium` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Design team, front-end developers.** The shared visual language and the components built from it. Five different surfaces in this plan - if each is designed separately the work is done five times and looks like it. First needed for the Ops console shell, which is the first surface anyone designs.
+
+##### Screens to build
+
+1. **Component library**
+  - Holds the shared buttons, forms, tables, modals and page layouts
+  - Holds the colour, type and spacing rules every surface uses
+  - Holds the standard empty, loading, error and no-permission states
+
+##### Conditions it must satisfy
+
+- The Ops console, candidate app, WhatsApp templates, voice scripts and client link pages all draw from one set
+- A new screen can be assembled from existing components rather than designed from scratch
+- Every state a screen can be in has a defined pattern, so developers are not inventing them
+- Components meet the agreed accessibility baseline
+- This must be complete before screen design is finalised, not alongside it
+- The set includes patterns for inline validation, form errors, empty states, permission denied and partial failures, so screens do not each invent their own
+- A spreadsheet with some bad rows reports each bad row by name and still loads the good ones
+
+Index **M1-I4** · Client ref **F12** · Band **XL** · Design **6.0pd** · Build **6.0pd** · QA **1.5pd** · Total **13.5pd** · Confidence **Medium** · Open items **-** · Linked items **-**
+
+#### M1-I5 — Deploy to Apollo's AWS account
+
+`D11` · `Service` · `XXL · 8.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Getting the platform running on Apollo's own AWS account in Mumbai, including who holds the credentials.
+
+##### Screens to build
+
+1. **No screen**
+  - Deploys the platform to Apollo's own AWS Mumbai account
+  - Runs the release through an approved pipeline with a way back to the previous release
+
+##### Conditions it must satisfy
+
+- A release deploys to the client-owned account through an approved pipeline
+- No Hiresense-held credential is required at runtime once handover completes
+- Rollback to the prior release is possible without data loss
+- DPDP residency holds - no personal data leaves ap-south-1 (M4-I27)
+- The credential and on-call boundary is agreed before first deployment (OI-HS-04)
+
+Index **M1-I5** · Client ref **D11** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **2.0pd** · Total **10.0pd** · Confidence **Low** · Open items **OI-HS-04** · Linked items **M1-I16, M4-I27**
+
+#### M1-I6 — Technical documentation
+
+`D11` · `Service` · `XL · 5.0pd` · `AI Medium` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Hiresense, Apollo IT.** Architecture, data model, API reference, runbooks and adapter contracts. A named D11 deliverable, not a by-product.
+
+##### Screens to build
+
+1. **No screen**
+  - Produces the technical documentation the contract asks for: architecture, data model, API reference and runbooks
+
+##### Conditions it must satisfy
+
+- Documentation covers every module delivered in Release 1
+- The adapter interface contract is documented well enough for a third party to implement a new market
+- Runbooks cover the failure modes named in the integration register
+- Documentation is versioned alongside the release
+
+Index **M1-I6** · Client ref **D11** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **1.0pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **All modules**
+
+#### M1-I7 — User guides
+
+`D11` · `Service` · `L · 3.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Apollo Ops.** Guides for each internal role, plus help content in the candidate app. A named contract deliverable.
+
+##### Screens to build
+
+1. **No screen**
+  - Produces a user guide for each Apollo role and help content for the candidate app
+
+##### Conditions it must satisfy
+
+- Each internal role has a guide covering the screens it can reach
+- The verbal-capture path is documented for site-resident recruiters, since it is not an edge case
+- Candidate-facing help exists in the app for registration and check-in
+- Material is ready before UAT, not after
+
+Index **M1-I7** · Client ref **D11** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **0.5pd** · Total **5.5pd** · Confidence **Medium** · Open items **-** · Linked items **All modules**
+
+#### M1-I8 — UAT support
+
+`D11` · `Service` · `XL · 5.0pd` · `AI Low` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Hiresense with Apollo.** Supporting Apollo while they test, and turning defects around. A named contract deliverable.
+
+##### Screens to build
+
+1. **No screen**
+  - Supports Apollo through user acceptance testing
+  - Takes in defects, agrees their severity, and turns fixes around
+
+##### Conditions it must satisfy
+
+- Defects raised in UAT are triaged against agreed severity definitions
+- A blocker is turned around within the agreed window
+- Sign-off criteria are agreed per module before UAT starts, not negotiated during it
+- Retest of a fixed defect is evidenced
+
+Index **M1-I8** · Client ref **D11** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **3.0pd** · Total **8.0pd** · Confidence **Low** · Open items **-** · Linked items **All modules**
+
+#### M1-I9 — Go-live and legacy retirement
+
+`D11` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `DATA` · `Low`
+
+**Who uses it: Hiresense with Apollo.** The switch-over: the platform becomes the system of record and the old tool is turned off.
+
+##### Screens to build
+
+1. **No screen**
+  - Runs the cutover to production
+  - Switches the platform to being the system of record
+  - Retires the legacy CPAL tool once the migration reconciles
+
+##### Conditions it must satisfy
+
+- The platform becomes system of record only after A10 reconciliation passes
+- A rollback point exists up to the agreed cutover commit
+- The legacy tool is retired only after the parallel-run period closes
+- Hypercare coverage is defined and staffed
+
+Index **M1-I9** · Client ref **D11** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Low** · Open items **OI-A-02** · Linked items **M1-I11**
+
+#### M1-I10 — CPAL data profiling
+
+`A10` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `DATA` · `Low`
+
+**Who uses it: Hiresense with Apollo.** Look at the old CPAL data and measure it: how much, how good, how many duplicates. Nothing else in A10 can be sized until this runs.
+
+##### Screens to build
+
+1. **No screen**
+  - Reads the CPAL data and measures how much there is, how complete it is and how many duplicates it holds
+  - Produces the figures the rest of the migration is estimated from
+
+##### Conditions it must satisfy
+
+- Volume, quality and duplicate rate are measured and documented
+- A mapping feasibility assessment identifies fields with no target
+- The output is sufficient to estimate the remainder of A10
+- Apollo provides access ahead of estimation (OI-A-02)
+- This item is a blocker, not a task - the figures below are placeholders
+
+Index **M1-I10** · Client ref **A10** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **1.0pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-02** · Linked items **-**
+
+#### M1-I11 — Migration pipeline
+
+`A10` · `Service` · `XXL · 8.0pd` · `AI Low` · `High` · `DATA` · `Low`
+
+**Who uses it: System.** Read the old data, reshape it, load it. Must be safe to re-run without creating duplicates.
+
+##### Screens to build
+
+1. **No screen**
+  - Reads records out of CPAL, reshapes them to the new model and loads them
+  - Can be re-run without creating duplicate records
+  - Sends records that will not load to the failed records screen
+
+##### Conditions it must satisfy
+
+- A re-run of a completed batch produces no duplicate records
+- A failure mid-batch resumes from the last checkpoint
+- A delta run picks up source changes between the main load and cutover
+- Every loaded record retains a reference to its source record
+- Once reconciliation passes, the platform becomes the system of record and the legacy CPAL tool is retired
+- Effort is unestimable until profiling completes (OI-A-02)
+
+Index **M1-I11** · Client ref **A10** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **OI-A-02** · Linked items **M1-I10, M2-I2**
+
+#### M1-I12 — Duplicate resolution on migrated data
+
+`A10` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `SPEC` · `Low`
+
+**Who uses it: System.** Find people who appear twice in the imported data and merge them without deleting either record.
+
+##### Screens to build
+
+1. **No screen**
+  - Finds people who appear more than once in the migrated data
+  - Merges them into one record, keeping a link back to both originals
+
+##### Conditions it must satisfy
+
+- Duplicates within the migrated base are detected before load completes
+- A merge retains lineage to both source records
+- The route - D3 mechanism or one-time migration process - is decided before build (OI-A-03)
+- Candidate data is never deleted; a losing duplicate is merged, not removed
+- Duplicates between migrated and app-registered candidates are also detected
+
+Index **M1-I12** · Client ref **A10** · Band **XL** · Design **0.5pd** · Build **5.0pd** · QA **2.5pd** · Total **8.0pd** · Confidence **Low** · Open items **OI-A-03** · Linked items **M4-I21, M1-I11**
+
+#### M1-I13 — Registry interfaces
+
+`A12` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: System.** Three interfaces — identity, certification, qualification — that any country's registries must fit behind.
+
+##### Screens to build
+
+1. **No screen**
+  - Defines three interfaces the platform checks against: identity, certification and qualification
+  - Returns green, amber or red on the same shape whichever registry answered
+  - Lets a new country be added by writing new adapters rather than changing the platform
+
+##### Conditions it must satisfy
+
+- A new market implements the three interfaces without change to core domain logic
+- All adapters return the same traffic-light response schema regardless of underlying registry
+- A registry with no API satisfies the interface through a document-plus-manual implementation
+- Contract tests fail if a core change breaks an existing adapter
+- Which contracts must be proven against US, Germany and Ireland is unresolved (OI-A-01)
+
+Index **M1-I13** · Client ref **A12** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M3-I26, M4-D4**
+
+#### M1-I14 — India registry adapters
+
+`A12` · `Integration` · `XXL · 8.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** The India connectors: nursing council, medical councils, allied health councils, pharmacy council. Several have no API and fall back to a person checking a document.
+
+##### Screens to build
+
+1. **No screen**
+  - Connects to the India registries: nursing councils, the NMC and state medical councils, the allied health councils and the Pharmacy Council
+  - Falls back to document plus manual checking for registries with no API
+
+##### Conditions it must satisfy
+
+- A nurse registration resolves through INC NUID to NRTS and returns a traffic-light outcome
+- A doctor registration resolves through the NMC or the correct state council
+- An allied health credential resolves through the relevant council or falls back to manual
+- A registry with no API returns the same response schema through the manual path
+- Category expansion to doctors and allied health is covered by configuration, not new domain logic (Part A CLOSED item)
+
+Index **M1-I14** · Client ref **A12** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M1-I13, M1-I15**
+
+#### M1-I15 — Verification supplier
+
+`A12` · `Integration` · `XL · 5.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** One supplier who fronts Aadhaar, PAN, EPFO and court checks, so we build one integration instead of five.
+
+##### Screens to build
+
+1. **No screen**
+  - Connects to one verification supplier that fronts Aadhaar, PAN, EPFO and court checks
+  - Returns each check as green, amber or red
+
+##### Conditions it must satisfy
+
+- Each check type returns a green, amber or red outcome on the common schema
+- An aggregator outage routes to the manual fallback rather than failing the candidate
+- Per-check cost is logged so consumption is measurable against the SOW
+- Consent for each check is captured and retained before the call is made (M4-I27)
+- Aggregator selection is confirmed before build - IDfy and AuthBridge are both preferred candidates
+
+Index **M1-I15** · Client ref **A12** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M1-I13, M4-I27**
+
+#### M1-I16 — Environments and monitoring
+
+`F10` · `Service` · `XXL · 8.0pd` · `AI Low` · `Medium` · `EXT` · `Low`
+
+**Who uses it: System.** Four environments, a way to move code between them, and enough monitoring to know when something has broken. First needed to deploy anything to the client-hosted account, which is M1's own deliverable.
+
+##### Screens to build
+
+1. **No screen**
+  - Provides development, QA, UAT and production environments
+  - Moves a release between them through an automated pipeline
+  - Raises an alert when something in production breaks
+  - Backs data up and can restore it to a chosen point in time
+
+##### Conditions it must satisfy
+
+- A build moves from development through to production without hand-editing configuration
+- A failure in production raises an alert rather than being found by a user
+- A restore to a chosen point in time has been rehearsed and evidenced before go-live
+- Recovery targets are agreed with Apollo - not yet stated (OI-HS-12)
+- Whose AWS account this runs in, and who is on call, is still to confirm (OI-HS-04)
+- Backups run on a schedule and a restore to a chosen point in time has been rehearsed and evidenced before go-live
+- Development, QA, UAT and production are provisioned consistently, with anonymised data in the non-production ones
+
+Index **M1-I16** · Client ref **F10** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **2.0pd** · Total **10.0pd** · Confidence **Low** · Open items **OI-HS-04, OI-HS-12** · Linked items **-**

@@ -1,345 +1,344 @@
 ---
-title: "P01 · Identity and Access"
-description: "How anyone gets into the platform and what they may reach once inside. The client's deliverable list asks for \"role-based access control\" as a phrase but never says how anyone…"
+title: "02-01 Identity and access"
+description: "How anyone gets into the platform and what they are allowed to reach, for three separate populations — Apollo staff, candidates and (from Phase 6) client users."
 ---
 
-**Package** `@apollo/iam` · **Schema** `platform` · **Plan** F01, F02, F03 (M0-I1, M0-I2, M0-I3), M1-I1, M4-I21
-**Effort** ~27pd · **Risk** High (SPEC — the permission model is unspecified) · **Build in** Phase 1
-
----
+**Package** `@apollo/identity` · **Schema** `identity` · **Plan** F01, F02, F03, D3 (auth), D12 (auth) · **Effort** ~36.5pd · **Risk** High `SPEC` · **Build in** Phase 1 · portal realm Phase 6
 
 ## 1. Purpose
 
-How anyone gets into the platform and what they may reach once inside. The client's deliverable list
-asks for "role-based access control" as a phrase but never says how anyone signs in, and asks for a
-requisition owner from "the Apollo internal user list" without anything creating that list. This
-component builds both, plus the permission and data-scope machinery every other module depends on.
-
----
+How anyone gets into the platform and what they are allowed to reach, for three separate populations —
+Apollo staff, candidates and (from Phase 6) client users. The client's deliverable list asks for
+"role-based access control" as a phrase but never says how anyone signs in, and requires a requisition
+owner drawn from "the Apollo internal user list" without anything creating that list. This component
+creates both, plus the permission model every screen in the platform is gated by and the data-scoping
+predicate every list query carries.
 
 ## 2. Scope
 
-**In**
-- Apollo staff sign-in, session, password reset, lockout
-- Apollo user management: create, edit, role assignment, site assignment, deactivate, bulk import
-- Role and permission model, permission checking middleware, data-scope resolver
-- Console frame: nav filtered by permission, header, user menu, session handling (`M1-I1`)
-- Candidate phone + OTP authentication (`M4-I21`) — separate identity, same package
+### In scope
 
-**Out**
-- Client portal login → `03-16` (M10). The `ClientUser` table is created there, not here.
-- Client link tokens → `02-10`. Links need no account.
-- Editing a role's permission set on screen — held in configuration (`M0-I3`, stated)
-- SSO / SAML / Active Directory — not asked for; note as a likely M2-phase request
+- Staff sign-in, sign-out, forgotten password, password reset, session and idle timeout (`M0-I1`)
+- Staff user management: create, edit, role assignment, **site assignment**, deactivation, bulk import
+  with row-level errors (`M0-I2`)
+- The role and permission model, read-only on screen and held in configuration (`M0-I3`)
+- Candidate identity: phone + OTP sign-in, rate limiting, number change and account recovery (`M4-I22`)
+- Client user identity: invite, account set-up, sign-in, client-admin user management, Apollo-side
+  suspension (`M10-I1`, `M10-I2`)
+- **Portal data scoping**: every portal request limited to the signed-in user's client and sites,
+  failing closed on a new endpoint (`M10-I8`)
+- The `Principal` resolution and permission guard used by every route in the platform
 
----
+### Explicitly out of scope
+
+- Link authorisation. A `link` principal is issued and validated by `02-14`, not here.
+- Business configuration of any kind — that is `02-03`.
+- Audit storage — this component **writes** audit entries; `02-02` stores them.
+
+### Explicitly not built
+
+- Corporate SSO / identity-provider federation. Pending `X06`; email and password is a small build,
+  federation is a different one, and retrofitting after ninety users are live is worse than either.
+  The decision must be taken **before** this component is built.
+- Self-service staff registration. Users are created by an administrator.
+- Client-side login before Phase 6. D12 is deferred and A13 needs no account, so no client credential
+  exists in Release 1 at all (`OI-A-04`).
+- Multi-factor authentication for staff. Not named anywhere in the client documents; raised as
+  `OI-HS-19` rather than assumed in.
 
 ## 3. Plan traceability
 
-| Item | Covered by |
-|---|---|
-| `M0-I1` Sign in (F01, XL, 9pd) | §5.1, §7.1, §9.1 |
-| `M0-I2` Apollo users (F02, XL, 7.5pd) | §5.2, §7.2, §9.2 |
-| `M0-I3` Roles (F03, XXL, 7.5pd) | §5.3, §7.3, §9.3 |
-| `M1-I1` Console frame (D11, M, 5.5pd) | §9.4 |
-| `M4-I21` Candidate sign-in (D3, L, 3pd) | §5.4, §7.4 |
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M0-I1` | F01 | Sign in, forgot password, set new password | XL | 5.0 |
+| `M0-I2` | F02 | Apollo users — list, add/edit, deactivate, bulk import | XL | 4.0 |
+| `M0-I3` | F03 | Roles — read-only list of what each role can reach | XXL | 4.0 |
+| `M4-I22` | D3 | Candidate sign-in — phone and one-time code | L | 3.0 |
+| `M10-I1` | D12 | Client sign in, set up account | L | 3.0 |
+| `M10-I2` | D12 | Portal users — client-admin manages their own colleagues | M | 2.0 |
+| `M10-I8` | D12 | Portal data scoping — every query limited, fails closed | XL | 5.0 |
 
----
+Also satisfies `OI-A-04` (Release 1 provisioning covers Apollo internal users only) and carries the
+platform-wide answer to `OI-HS-01`.
 
 ## 4. Dependencies
 
-**Needs first:** `@apollo/audit` (P02) · `@apollo/config` (P03) · `@apollo/jobs` (P13) · `@apollo/ui` (P05)
-**Consumed by:** every module. This is the first thing built after the ground phase.
+**Must exist first:** nothing. This goes first, with `02-02` (audit) built alongside it — sign-in
+events must be audited from the first login.
 
----
+**Consumed by:** every component. `02-06` renders navigation from permissions. `02-07` applies
+`scopeLocationIds` in every list query. `03-03` requires an owner from the active user list (`M3-I16`
+V1) and an allocated user holding the recruiter role (V2). `03-12` reports by recruiter using site
+attribution (`M9-I9`). `03-14` is unreachable without the `client_user` realm.
+
+**External:** `X06` corporate SSO decision (month 1, changes what is built). `X18` DPAs before any
+candidate personal data is handled.
 
 ## 5. Data model
 
-### 5.1 Users and sessions
-
 ```sql
-CREATE TABLE platform.app_user (
-  id             uuid PRIMARY KEY,
-  email          citext NOT NULL UNIQUE,
-  full_name      text NOT NULL,
-  password_hash  text,                          -- NULL until activation
-  status         app_user_status_enum NOT NULL DEFAULT 'invited',
-  last_login_at  timestamptz,
-  failed_attempts integer NOT NULL DEFAULT 0,
-  locked_until   timestamptz,
-  is_active      boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  created_by uuid, updated_by uuid,
-  version    integer NOT NULL DEFAULT 1
+CREATE TABLE identity.user (
+    id             uuid PRIMARY KEY DEFAULT uuidv7(),
+    email          citext NOT NULL UNIQUE,
+    full_name      text NOT NULL,
+    password_hash  text,                      -- null once SSO lands (X06)
+    status         text NOT NULL DEFAULT 'invited'
+                     CHECK (status IN ('invited','active','deactivated')),
+    role_version   integer NOT NULL DEFAULT 1, -- bumped on any role change; sessions compare
+    last_login_at  timestamptz,
+    failed_logins  integer NOT NULL DEFAULT 0,
+    locked_until   timestamptz,
+    deactivated_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
 );
--- 'invited' | 'active' | 'deactivated'
 
-CREATE TABLE platform.password_reset (
-  id          uuid PRIMARY KEY,
-  user_id     uuid NOT NULL REFERENCES platform.app_user(id),
-  token_hash  text NOT NULL,
-  expires_at  timestamptz NOT NULL,
-  used_at     timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now()
+CREATE TABLE identity.role (                   -- seeded by migration, not editable on screen
+    code        text PRIMARY KEY,              -- platform_admin | fulfilment_lead | recruiter | bd
+                                               -- | verification | finance | leadership
+    name        text NOT NULL,
+    description text NOT NULL
+);
+
+CREATE TABLE identity.role_permission (        -- configuration, seeded and versioned by migration
+    role_code  text NOT NULL REFERENCES identity.role(code),
+    permission text NOT NULL,                  -- '<resource>:<action>'
+    PRIMARY KEY (role_code, permission)
+);
+
+CREATE TABLE identity.user_role (
+    user_id   uuid NOT NULL REFERENCES identity.user(id),
+    role_code text NOT NULL REFERENCES identity.role(code),
+    PRIMARY KEY (user_id, role_code)
+);
+
+CREATE TABLE identity.user_site (              -- distinguishes 15 site-resident from 7 floating
+    user_id     uuid NOT NULL REFERENCES identity.user(id),
+    location_id uuid NOT NULL,                 -- clients.location(id), FK added in Phase 2
+    PRIMARY KEY (user_id, location_id)
+);
+
+CREATE TABLE identity.staff_session (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES identity.user(id),
+    role_version integer NOT NULL,
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz
+);
+
+CREATE TABLE identity.password_reset (
+    token_hash text PRIMARY KEY,
+    user_id    uuid NOT NULL REFERENCES identity.user(id),
+    expires_at timestamptz NOT NULL,
+    used_at    timestamptz                     -- single use (M0-I1)
+);
+
+-- ── candidate realm ─────────────────────────────────────────────────────────
+CREATE TABLE identity.candidate_identity (
+    id            uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id  uuid UNIQUE,                 -- candidates.candidate(id), set on profile creation
+    phone_e164    text NOT NULL UNIQUE,
+    phone_changed_at timestamptz,
+    status        text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE identity.otp_challenge (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    phone_e164 text NOT NULL,
+    code_hash  text NOT NULL,
+    attempts   integer NOT NULL DEFAULT 0,
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    delivered_via text CHECK (delivered_via IN ('sms','whatsapp'))
+);
+CREATE INDEX ON identity.otp_challenge (phone_e164, expires_at DESC);
+
+CREATE TABLE identity.candidate_token (        -- refresh tokens, rotating
+    token_hash text PRIMARY KEY,
+    candidate_identity_id uuid NOT NULL REFERENCES identity.candidate_identity(id),
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    rotated_to text, revoked_at timestamptz
+);
+
+-- ── client-user realm (Phase 6) ─────────────────────────────────────────────
+CREATE TABLE identity.client_user (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL,                   -- clients.client(id)
+    email citext NOT NULL,
+    full_name text NOT NULL,
+    password_hash text,
+    status text NOT NULL DEFAULT 'invited'
+      CHECK (status IN ('invited','registered','active','suspended')),
+    is_client_admin boolean NOT NULL DEFAULT false,
+    suspended_by_apollo boolean NOT NULL DEFAULT false,
+    invite_token_hash text, invite_expires_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (client_id, email)
+);
+
+CREATE TABLE identity.client_user_site (
+    client_user_id uuid NOT NULL REFERENCES identity.client_user(id),
+    location_id    uuid NOT NULL,
+    PRIMARY KEY (client_user_id, location_id)
+);
+
+CREATE TABLE identity.portal_session (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_user_id uuid NOT NULL REFERENCES identity.client_user(id),
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz,
+    ip inet, user_agent text                   -- kept for audit (M10 entity note)
 );
 ```
 
-Sessions live in **Redis**, not Postgres: `session:<hash>` → `{ userId, createdAt, lastSeenAt, ip, userAgent }`,
-TTL = idle timeout, refreshed on use, with an absolute cap.
-
-### 5.2 Roles, permissions, sites
-
-```sql
-CREATE TABLE platform.role (
-  id           uuid PRIMARY KEY,
-  key          text NOT NULL UNIQUE,            -- 'recruiter'
-  name         text NOT NULL,
-  description  text,
-  scope_kind   scope_kind_enum NOT NULL,        -- 'all' | 'sites' | 'client'
-  is_system    boolean NOT NULL DEFAULT true    -- system roles are config-defined
-);
-
-CREATE TABLE platform.permission (
-  key          text PRIMARY KEY,                -- 'demand.requisition.close'
-  module       text NOT NULL,
-  resource     text NOT NULL,
-  action       text NOT NULL,
-  description  text NOT NULL
-);
-
-CREATE TABLE platform.role_permission (
-  role_id        uuid NOT NULL REFERENCES platform.role(id),
-  permission_key text NOT NULL REFERENCES platform.permission(key),
-  PRIMARY KEY (role_id, permission_key)
-);
-
-CREATE TABLE platform.user_role (
-  user_id  uuid NOT NULL REFERENCES platform.app_user(id),
-  role_id  uuid NOT NULL REFERENCES platform.role(id),
-  PRIMARY KEY (user_id, role_id)
-);
-
-CREATE TABLE platform.user_site (
-  user_id     uuid NOT NULL REFERENCES platform.app_user(id),
-  location_id uuid NOT NULL,                    -- clients.location — ID only, no FK across schemas
-  PRIMARY KEY (user_id, location_id)
-);
-```
-
-`permission` and `role_permission` are **seeded from configuration** on deploy, not edited at
-runtime. Each module declares its permissions in `permissions.ts`; a migration-time sync inserts any
-new ones and reports orphans.
-
-### 5.3 Candidate authentication
-
-```sql
-CREATE TABLE platform.candidate_auth (
-  candidate_id  uuid PRIMARY KEY,               -- supply.candidate — ID only
-  phone_e164    text NOT NULL UNIQUE,
-  is_locked     boolean NOT NULL DEFAULT false,
-  last_login_at timestamptz
-);
-
-CREATE TABLE platform.refresh_token (
-  id           uuid PRIMARY KEY,
-  candidate_id uuid NOT NULL,
-  family_id    uuid NOT NULL,                   -- rotation family, for reuse detection
-  token_hash   text NOT NULL,
-  device_label text,
-  expires_at   timestamptz NOT NULL,
-  used_at      timestamptz,
-  revoked_at   timestamptz
-);
-CREATE INDEX idx_refresh_token__family ON platform.refresh_token (family_id);
-```
-
-OTPs live in Redis only: `otp:<phone>` → `{ hash, attempts }`, 5-minute TTL, single use.
-
----
+Indexes: `user(email)`, `user(status)`, `staff_session(user_id, expires_at)`,
+`client_user(client_id, status)`, `candidate_identity(phone_e164)`.
 
 ## 6. State machines
 
-**AppUser**
+### `User` (`M0-I2`)
 
-| From | To | Trigger | Rules |
+| From | Event | To | Rule |
 |---|---|---|---|
-| — | `invited` | Admin creates user | Invitation email sent; no password yet |
-| `invited` | `active` | User sets password from invite link | Link single-use, 7-day expiry |
-| `active` | `deactivated` | Admin deactivates | Cannot sign in; **all sessions revoked immediately**; stays visible on records they created |
-| `deactivated` | `active` | Admin reactivates | New password required |
-| `invited` | `deactivated` | Admin cancels invite | |
+| — | administrator creates | `invited` | Role and site assignment permitted immediately |
+| `invited` | first successful password set | `active` | |
+| `active` | administrator deactivates | `deactivated` | Cannot sign in; **stays visible on records they created** |
+| `deactivated` | administrator reactivates | `active` | Same identity, history preserved |
 
-**PasswordReset:** `issued → used` \| `issued → expired`. Single use. Using it revokes all sessions.
+A `deactivated` user cannot be chosen as a requisition owner (`M3-I16` V1) but remains rendered on
+historic allocations and audit entries.
 
-**Session:** `created → active → expired` (idle or absolute) \| `→ revoked` (logout, deactivation, password change).
+### `ClientUser` (`M10-I1`)
 
----
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | Apollo or client-admin invites | `invited` | Invite token, expiring |
+| `invited` | completes set-up from the invite | `registered` → `active` | An expired invite is **reissued without creating a second account** |
+| `active` | client-admin removes, or Apollo suspends | `suspended` | Records they created are not removed |
+| `suspended` | reinstated | `active` | |
+
+### `OtpChallenge` (`M4-I22`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | code requested | `issued` | Rate-limited per number; resend limited and expiry enforced |
+| `issued` | correct code | `consumed` | Single use |
+| `issued` | wrong code | `issued` (attempts++) | Locked after N attempts |
+| `issued` | expiry | `expired` | |
 
 ## 7. API surface
 
-### 7.1 Apollo authentication — `/api/v1/auth`
+| Method | Path | Realm | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/auth/staff/login` | public | Email + password → session cookie |
+| `POST` | `/v1/auth/staff/logout` | staff | Revoke session |
+| `POST` | `/v1/auth/staff/forgot-password` | public | Always 202, never reveals whether the address exists |
+| `POST` | `/v1/auth/staff/reset-password` | public | Single-use token + new password |
+| `GET` | `/v1/auth/me` | any | Principal, permissions and navigation entitlements |
+| `GET` | `/v1/users` | staff `user:read` | List, filter by role/site/status, search by name or email |
+| `POST` | `/v1/users` | staff `user:manage` | Create with roles and sites |
+| `PATCH` | `/v1/users/:id` | staff `user:manage` | Edit; role change bumps `role_version` |
+| `POST` | `/v1/users/:id/deactivate` | staff `user:manage` | |
+| `POST` | `/v1/users/import` | staff `user:manage` | Bulk; returns **row-level** outcomes |
+| `GET` | `/v1/roles` | staff `role:read` | Read-only role and permission matrix |
+| `POST` | `/v1/auth/candidate/otp` | public | Request code; rate-limited per number |
+| `POST` | `/v1/auth/candidate/verify` | public | Code → access + refresh token |
+| `POST` | `/v1/auth/candidate/refresh` | candidate | Rotate refresh token |
+| `POST` | `/v1/auth/candidate/change-phone` | candidate | Recovers the account without a duplicate |
+| `POST` | `/v1/auth/portal/login` | public | Client user sign-in |
+| `POST` | `/v1/auth/portal/accept-invite` | public | Set password, activate |
+| `GET`/`POST`/`DELETE` | `/v1/portal/users` | client_user `portal_user:manage` | Client-admin manages **only their own client's** users |
+| `POST` | `/v1/client-users/:id/suspend` | staff `client_user:manage` | Apollo suspends without going through the client |
 
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/login` | Email + password → session cookie. Rate limited 5/15min per account and per IP. |
-| POST | `/logout` | Revokes session |
-| GET | `/me` | Current user, roles, **resolved permission set**, scope |
-| POST | `/forgot-password` | Always returns 204, whether or not the email exists |
-| POST | `/reset-password` | Token + new password. Revokes all sessions. |
-| POST | `/accept-invite` | Token + password → `active` |
-
-### 7.2 User management — `/api/v1/users` (perm `platform.user.*`)
-
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/` | Paginated, filter by role, site, status. Uses `<DataTable/>`. |
-| POST | `/` | Create + send invite |
-| GET | `/:id` · PATCH | ETag-guarded |
-| POST | `/:id/deactivate` · `/:id/reactivate` | |
-| PUT | `/:id/roles` · `/:id/sites` | |
-| POST | `/import` | CSV. **202 + job.** Reports row-level errors by row number and still loads valid rows. |
-| GET | `/lookup?q=&role=` | Capped, searchable. Used by "requisition owner" pickers — **active users only**. |
-
-### 7.3 Roles — `/api/v1/roles` (perm `platform.role.read`)
-
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/` | Roles and what each reaches — **read only** (`M0-I3`) |
-| GET | `/:key/permissions` | The permission set, grouped by module |
-
-### 7.4 Candidate authentication — `/api/v1/candidate-auth`
-
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/request-otp` | Phone → OTP by SMS/WhatsApp. 3/hour per phone, 10/hour per IP. |
-| POST | `/verify-otp` | → access JWT (15 min) + refresh token (30 days) |
-| POST | `/refresh` | **Rotating.** Reuse of a used token revokes the whole family and logs a security event. |
-| POST | `/logout` | Revokes this device's family |
-
-### 7.5 Exported service interface
-
-```ts
-export const IamService = {
-  getUser(id): Promise<User | null>
-  getUsers(ids): Promise<User[]>                       // batch — avoids N+1 in composed responses
-  listActiveUsers(filter): Promise<User[]>
-  userHasPermission(userId, key): Promise<boolean>
-  resolveScope(userId): Promise<Scope>
-  assertRole(userId, roleKey): Promise<void>           // 'a recruiter allocated must hold a recruiter role'
-}
-```
-
-### 7.6 Middleware exported to every module
-
-```ts
-requireAuth()                              // → 401
-requirePermission('demand.requisition.close')  // → 403
-requireCandidate()                         // JWT
-applyScope(query, actor.scope)             // row-level, used inside repositories
-```
-
----
+Errors: `401` wrong realm or no session; `403` authenticated but lacking permission (never reveals
+existence); `409` email already used; `422` deactivated user selected as owner; `429` OTP rate limit.
 
 ## 8. Events and jobs
 
-**Emits**
+**Events emitted**
 
 | Event | When |
 |---|---|
-| `platform.user.invited` / `.activated` / `.deactivated` | Status change |
-| `platform.user.roles_changed` / `.sites_changed` | Assignment change — **invalidates the permission cache** |
-| `platform.auth.login_failed` / `.locked_out` | Security signal |
-| `platform.candidate.authenticated` | First login on a device |
-| `platform.security.token_reuse_detected` | Refresh token replay — alarms |
+| `identity.user.created` / `.role_changed` / `.deactivated` | administrator action |
+| `identity.staff.signed_in` / `.sign_in_failed` / `.locked_out` | every attempt (audited too) |
+| `identity.candidate.registered` / `.phone_changed` | candidate action |
+| `identity.client_user.invited` / `.activated` / `.suspended` | portal lifecycle |
 
-**Subscribes:** none. IAM is a leaf dependency by design.
+**Subscribed:** none. Identity is a source, not a consumer.
 
 **Jobs**
 
-| Job | Cadence |
-|---|---|
-| `iam.import-users` | On demand, from CSV upload |
-| `iam.expire-invites` | Daily — invites older than 7 days |
-| `iam.prune-refresh-tokens` | Daily |
-
-**Permission cache:** Redis, key `perms:<userId>`, TTL 60s, **explicitly invalidated** on role or site
-change. This is what makes "removing a permission takes effect on the user's next request, not their
-next login" true (`M0-I3`).
-
----
+| Job | Schedule | Purpose |
+|---|---|---|
+| `identity.expire-sessions` | every 15 min | Reap expired staff and portal sessions |
+| `identity.expire-otp` | every 5 min | Reap challenges |
+| `identity.send-invite` | on demand | Through `02-09`; candidate OTP goes SMS-first with WhatsApp fallback |
 
 ## 9. Frontend
 
-### 9.1 Sign in — `apps/ops`, unauthenticated routes
+| Screen | Route | App | Item |
+|---|---|---|---|
+| Sign in | `/login` | console | `M0-I1` |
+| Forgot password | `/forgot-password` | console | `M0-I1` |
+| Set new password | `/reset-password?token=` | console | `M0-I1` |
+| User list | `/admin/users` | console | `M0-I2` |
+| Add / edit user | `/admin/users/:id` | console | `M0-I2` |
+| Bulk import | `/admin/users/import` | console | `M0-I2` |
+| Roles | `/admin/roles` | console | `M0-I3` — **read-only** |
+| Sign up / sign in | app onboarding stack | mobile | `M4-I1`, `M4-I22` |
+| Client sign in | `/login` | portal | `M10-I1` |
+| Set up account | `/accept-invite?token=` | portal | `M10-I1` |
+| Portal users | `/settings/users` | portal | `M10-I2` |
 
-| Screen | Elements |
-|---|---|
-| Sign in | Email, password, submit, forgot-password link. Generic error on failure — never "no such user". |
-| Forgot password | Email, submit. Always shows the same confirmation. |
-| Set new password | New password twice, strength meter, submit |
-| Accept invite | Same, from the invite link |
-| Locked | Plain explanation and who to contact |
-
-### 9.2 Users — `/settings/users`
-
-| Screen | Elements |
-|---|---|
-| User list | `<DataTable/>`: name, email, role(s), site(s), status, last login. Filter by role/site/status. Search by name or email. |
-| User form | Name, email, roles (multi), sites (multi), save, deactivate |
-| Bulk import | Upload, preview, **per-row error report**, "load valid rows anyway" |
-
-### 9.3 Roles — `/settings/roles`
-
-Read-only list of roles; opening one shows its permissions grouped by module, and which users hold
-it. A banner states that permission sets are configuration-managed.
-
-### 9.4 Console frame (`M1-I1`)
-
-Left nav generated from the permission set — a user sees only entries their role permits. Header with
-global search and user menu. Session expiry shows an **in-place re-authentication dialog** and
-resumes the pending request; it does not navigate away and lose an unsaved form.
-
-Filter state is held in the URL (`01-03 §2`), which is what preserves it across module switches
-within a session.
-
----
+Components: `<PermissionGate>` (renders nothing rather than a disabled control), `<NoPermission>`
+page, `<SessionExpiryDialog>` which preserves unsaved form state per `01-03` §5.
 
 ## 10. Acceptance criteria
 
-| # | Criterion | Source |
+| # | Criterion | Traces to |
 |---|---|---|
-| 1 | A user signs in and reaches the console with the navigation their role permits | `M0-I1` |
-| 2 | A session times out after the configured idle period and returns the user to login | `M0-I1` |
-| 3 | A password reset link works once and expires | `M0-I1` |
-| 4 | Every login, failed login and lockout is written to the audit trail | `M0-I1` |
-| 5 | Candidate logins are completely separate — phone and code, no shared table or code path | `M0-I1`, `M4-I21` |
-| 6 | A user can be created, assigned a role, and assigned to one or more sites | `M0-I2` |
-| 7 | A deactivated user cannot sign in but stays visible on records they created | `M0-I2` |
-| 8 | A requisition owner can only be chosen from **active** users | `M0-I2` |
-| 9 | A recruiter allocated to a requisition must hold a recruiter role | `M0-I2` |
-| 10 | Site assignment distinguishes the 15 site-resident recruiters from the 7 floating ones | `M0-I2` |
-| 11 | Bulk import reports row-level errors **and still loads the valid rows** | `M0-I2` |
-| 12 | Removing a permission takes effect on the next **request**, not the next login | `M0-I3` |
-| 13 | A user with no role can sign in but reaches nothing — a proper screen, not an error on every page | `M0-I3` |
-| 14 | Every permission change is written to the audit trail | `M0-I3` |
-| 15 | The role set covers every Apollo user across every module — no module builds its own access rules | `M0-I3` |
-| 16 | Session expiry redirects to login **without losing unsaved form state** | `M1-I1` |
-| 17 | Switching between modules preserves filter state within a session | `M1-I1` |
-| 18 | Refresh token reuse revokes the whole family and raises a security event | `01-07` |
-| 19 | Calling any mutating endpoint as the wrong role returns 403 | `01-08` |
-
----
+| AC1 | A user signs in and reaches the console with the navigation their role permits | `M0-I1` |
+| AC2 | A session times out after the configured idle period and returns the user to login **without losing unsaved form state** | `M0-I1`, `M1-I1` |
+| AC3 | A password reset link works once and expires | `M0-I1` |
+| AC4 | Every login, failed login and lockout is written to the audit trail | `M0-I1` → `M0-I4` |
+| AC5 | Candidate logins are completely separate from staff logins — a candidate token on a staff route is a 401 | `M0-I1`, `AS-06` |
+| AC6 | A user can be created, assigned a role, and assigned to **one or more sites** | `M0-I2` |
+| AC7 | A deactivated user cannot sign in but stays visible on the records they created | `M0-I2` |
+| AC8 | A requisition owner can only be chosen from active users | `M0-I2`, `M3-I16` V1 |
+| AC9 | An allocated user must hold a recruiter role | `M0-I2`, `M3-I16` V2 |
+| AC10 | Site assignment distinguishes the 15 site-resident recruiters from the 7 floating ones | `M0-I2` |
+| AC11 | Bulk import reports row-level errors and still loads the valid rows | `M0-I2` |
+| AC12 | Removing a permission takes effect on the user's **next request**, not their next login | `M0-I3` |
+| AC13 | A user with no role can sign in but reaches nothing, rather than seeing an error on every page | `M0-I3` |
+| AC14 | Every permission change is written to the audit trail | `M0-I3` |
+| AC15 | The role set covers Apollo internal users across every module, so no module builds its own access rules | `M0-I3` |
+| AC16 | OTP delivery works over SMS **and** WhatsApp with a fallback | `M4-I22` |
+| AC17 | Rate limiting prevents OTP flooding of a number | `M4-I22` |
+| AC18 | A candidate changing their number recovers their account without creating a duplicate | `M4-I22` |
+| AC19 | Candidate sessions expire and refresh without forcing frequent re-authentication | `M4-I22` |
+| AC20 | A client user completes set-up from an invite and can sign in afterwards | `M10-I1` |
+| AC21 | An expired invite can be reissued without creating a second account | `M10-I1` |
+| AC22 | A client user cannot reach any Apollo internal screen | `M10-I1` |
+| AC23 | A client admin sees and manages **only** users belonging to their own client | `M10-I2` |
+| AC24 | Site-level access limits a portal user to their own hospitals | `M10-I2` |
+| AC25 | Apollo can suspend a client user without going through the client | `M10-I2` |
+| AC26 | Removing a portal user does not remove the records they created | `M10-I2` |
+| AC27 | **No portal query returns data belonging to another client, under any parameter** | `M10-I8` |
+| AC28 | A user limited to two sites cannot see a third | `M10-I8` |
+| AC29 | A new portal endpoint added later **fails closed** if scoping is not applied | `M10-I8` |
+| AC30 | Scoping is tested automatically, not by inspection | `M10-I8` |
 
 ## 11. Open questions
 
-| ID | Question | Impact | Working assumption |
+| Ref | Question | Working assumption | Blocks |
 |---|---|---|---|
-| **`OI-HS-01`** | Does a site-resident recruiter see only their own site's requisitions and candidates, or the whole base? | **Row-level scoping is a different build from screen-level permissions and touches every list in the platform.** Cheap now, expensive to retrofit. | **`AS-02`** — build the scope mechanism from day one and apply it in every repository, defaulting `recruiter` to `all`. Switching the default is then a config change. |
-| `OI-A-04` | Confirm R1 provisioning covers Apollo internal users only | D12 is deferred and A13 needs no login, so there should be no client-side identity in R1 | Apollo users only. `ClientUser` is created in `03-16`, not here. |
-| `OI-HS-08` | Candidate app platform — native or cross-platform | Affects the OTP/refresh flow only marginally, but store review cycles are calendar time | React Native; token flow is identical either way |
-| — | SSO / AD integration | Not requested anywhere in either client document | Not built. Design the auth layer so an OIDC provider could be added behind the same session mechanism, but do not build it. |
-
-**Escalate `OI-HS-01` in week one.** It is the single cheapest open item to close and one of the
-most expensive to leave open.
-
+| `OI-HS-01` | Does a site-resident recruiter see only their own site's data, or the whole base? | `AS-18` — every scoped query takes `scopeLocationIds` from day one; the Release 1 resolver returns all active locations, so behaviour is "sees everything". Closing this changes one resolver, not twenty queries. | Every list in the platform; cheap now, expensive later |
+| `X06` | Email and password, or federation to Apollo's identity provider? | Email + password with Argon2id (`AS-19`), with the credential layer isolated behind one interface so federation replaces it without touching sessions or permissions. **Decide before this is built.** | `M0-I1` |
+| `OI-A-04` | Does Release 1 provisioning cover Apollo internal users only? | Yes — expected to confirm. No client credential exists before Phase 6. | `M2-D1` scope |
+| `OI-HS-19` **[raised here]** | Is MFA required for staff, and for `finance` in particular? | Not built. No client document names it; the finance role can raise invoices, so it is worth a decision rather than an omission. | `M0-I1` |

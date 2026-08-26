@@ -1,0 +1,234 @@
+---
+title: "02-13 Market adapter layer"
+description: "Three interfaces — identity, certification, qualification — that any country's registries fit behind, returning green, amber or red on the same shape whichever registry answered,…"
+---
+
+**Package** `@apollo/adapters` · **Schema** `adapters` · **Plan** A12 · **Effort** ~32.0pd · **Risk** High `SPEC` / `EXT` · **Build in** Phase 1–2
+
+## 1. Purpose
+
+Three interfaces — **identity, certification, qualification** — that any country's registries fit
+behind, returning green, amber or red on the same shape whichever registry answered, so a new market is
+added by writing adapters rather than changing the platform. India is the only market implemented in
+Release 1; the interface must accept the US, Germany and Ireland later without change to core domain
+logic.
+
+The client's letter singles this pattern out as correct and asks for it to be applied on a second axis
+(candidate category), which is why the India adapter set now spans nursing councils, the NMC and state
+medical councils, the allied health councils and the Pharmacy Council. Several have no API at all and
+resolve to **document plus manual verification behind the same interface**.
+
+## 2. Scope
+
+### In scope
+
+- The three interface contracts and the common traffic-light response schema (`M1-I13`)
+- Registry configuration: which registries are active, how to reach each, credentials, manual mode
+  (`M1-I3`)
+- India adapters: INC/NUID → NRTS, NMC and state medical councils, allied health councils, Pharmacy
+  Council (`M1-I14`)
+- The verification aggregator fronting Aadhaar, PAN, EPFO and court checks — one integration instead of
+  five (`M1-I15`)
+- The manual fallback path: same interface, document plus a person
+- `AdapterCall` logging with per-check cost, and consent verification before every dispatch
+- Contract tests that fail if a core change breaks an existing adapter
+
+### Explicitly out of scope
+
+- Deciding **which** checks a candidate needs — `03-04` (`M4-I24`) resolves the check set by category
+  and dispatches through here.
+- The verification queue, pendency tracking and verification detail screens — `03-04`.
+- Document OCR — `04-10`, which also sits behind an interface but is a content extractor, not a
+  registry.
+- The candidate-facing document upload — `03-05`.
+
+### Explicitly not built
+
+- Adapters for the US, Germany and Ireland. India only. The interface must be able to take them later
+  **without changing the core app** — and which contracts must be proven against those three markets is
+  unresolved (`OI-A-01`).
+- Direct integrations for Aadhaar, PAN, EPFO or court checks. Aggregator-first, deliberately.
+- Any registry write. The platform reads and records outcomes; it never registers anyone.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M1-I3` | A12 | Registry settings — active registries, endpoints, credentials, manual mode | L | 3.0 |
+| `M1-I13` | A12 | The three interfaces and the common response schema | XL | 5.0 |
+| `M1-I14` | A12 | India registry adapters | XXL | 8.0 |
+| `M1-I15` | A12 | Verification aggregator (Aadhaar, PAN, EPFO, court) | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-01`, `02-03` (market configuration is one of the nine settings), `02-10`
+(every call is a `provider`-class job), `02-12` (**consent is verified before any dispatch**).
+
+**Consumed by:** `03-04` for every identity and credential check (`M4-I12`, `M4-I24`). `03-15`
+statutory identifiers. Without this component **no candidate can be verified at all**.
+
+**External:** `X14` verification aggregator contract (weeks of procurement; sandbox access is what
+unblocks the build), `X15` DigiLocker and Aadhaar access (regulated, consent framework is not a
+technical detail), `X16` council and registry access (several councils have no API at all).
+
+## 5. Data model
+
+```sql
+CREATE TABLE adapters.market (
+    code text PRIMARY KEY,                   -- 'IN' | 'US' | 'DE' | 'IE'
+    name text NOT NULL,
+    is_enabled boolean NOT NULL DEFAULT false -- only 'IN' enabled in Release 1
+);
+
+CREATE TABLE adapters.registry (
+    code text PRIMARY KEY,                   -- 'inc_nuid' | 'nrts' | 'nmc' | 'smc_tn' | 'pharmacy_council'
+                                             -- | 'aggregator_aadhaar' | 'aggregator_pan' | 'aggregator_epfo'
+    market_code text NOT NULL REFERENCES adapters.market(code),
+    interface text NOT NULL CHECK (interface IN ('identity','certification','qualification')),
+    name text NOT NULL,
+    mode text NOT NULL CHECK (mode IN ('api','manual','disabled')),
+    applies_to_categories text[] NOT NULL,   -- which candidate categories it serves
+    endpoint_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+    secret_ref text,                         -- Secrets Manager reference, never the credential
+    cost_per_check numeric(10,2), cost_currency text,
+    sla_hours integer,                       -- expected turnaround, drives pendency (M4-I11)
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE adapters.adapter_call (         -- append-only
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    registry_code text NOT NULL REFERENCES adapters.registry(code),
+    interface text NOT NULL,
+    subject_type text NOT NULL DEFAULT 'candidate',
+    subject_id uuid NOT NULL,
+    verification_case_id uuid,               -- candidates.verification_case
+    request jsonb NOT NULL,                  -- identifiers sent, personal values redacted
+    state text NOT NULL DEFAULT 'requested' CHECK (state IN
+      ('requested','responded','failed','retrying','manual_fallback','cancelled')),
+    outcome text CHECK (outcome IN ('green','amber','red')),
+    outcome_detail jsonb,                    -- the registry's own answer, verbatim
+    responded_at timestamptz,
+    attempts integer NOT NULL DEFAULT 0,
+    error jsonb,
+    cost_units numeric(10,4), cost_currency text,
+    consent_id uuid NOT NULL,                -- dp.consent — no call without it
+    correlation_id text NOT NULL,
+    requested_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON adapters.adapter_call (subject_id, requested_at DESC);
+CREATE INDEX ON adapters.adapter_call (registry_code, state, requested_at DESC);
+REVOKE UPDATE, DELETE ON adapters.adapter_call FROM PUBLIC;
+```
+
+### The three interfaces
+
+```ts
+interface IdentityAdapter {          // is this person who they say they are
+  verify(input: { candidateId, documentNumber, name, dob }): Promise<AdapterOutcome>
+}
+interface CertificationAdapter {     // is this registration real and current
+  verify(input: { candidateId, registrationNumber, council, category }): Promise<AdapterOutcome>
+}
+interface QualificationAdapter {     // is this qualification real
+  verify(input: { candidateId, qualification, institution, year }): Promise<AdapterOutcome>
+}
+
+type AdapterOutcome = {
+  outcome: 'green' | 'amber' | 'red'
+  detail: Record<string, unknown>     // the registry's own answer, kept verbatim
+  source: 'api' | 'manual'
+  registryCode: string
+  costUnits?: number
+}
+```
+
+**Every adapter returns this shape**, including the manual ones. A caller cannot tell from the type
+whether a council had an API.
+
+## 6. State machines
+
+### `AdapterCall` (`M1-I13`, `M1-I15`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | dispatched after consent assertion | `requested` | No consent, no call — throws before dispatch |
+| `requested` | registry answers | `responded` | Outcome green, amber or red on the common schema |
+| `requested` | transient failure | `retrying` | Provider-class backoff |
+| `retrying` | attempts exhausted, or registry has no API | `manual_fallback` | **Routes to a person, never fails the candidate** |
+| `requested` | registry permanently rejects the request | `responded` (`red`) | A rejection is an answer, not a failure |
+| `manual_fallback` | verifier records the outcome | `responded` | `source: 'manual'`, same schema |
+| `requested` | disabled adapter | `manual_fallback` | Disabling routes to manual rather than failing |
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/adapters/registries` | `adapter:read` | Every registry, its mode, category coverage and SLA |
+| `PATCH` | `/v1/adapters/registries/:code` | `adapter:manage` (**platform admin only**) | Enable, disable, switch to manual, set endpoint and secret reference |
+| `GET` | `/v1/adapters/calls?subjectId=` | `verification:read` | Call history for a candidate |
+| `POST` | `/v1/adapters/calls/:id/manual-outcome` | `verification:manage` | Record a manual result; reason required |
+| `POST` | `/v1/adapters/calls/:id/retry` | `verification:manage` | Re-run a check |
+| `GET` | `/v1/adapters/health` | `adapter:read` | Per-registry error rate and pendency — a registry outage must be visible |
+
+In-process, the only entry point `03-04` uses:
+
+```ts
+const outcome = await adapters.dispatch({
+  interface: 'certification', category: 'nurse', candidateId,
+  input: { registrationNumber, council: 'inc' },
+})   // asserts consent, resolves the registry, calls or queues manual, logs, returns the common shape
+```
+
+## 8. Events and jobs
+
+**Events emitted:** `adapters.call.requested` · `.responded` · `.manual_fallback` ·
+`adapters.registry.configured`.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `adapters.check` | on dispatch, `provider` class | Calls the registry, respecting its rate limit; records cost |
+| `adapters.poll-async` | every 5 min | Some registries answer asynchronously; polls outstanding calls |
+| `adapters.health-sweep` | hourly | Error rate per registry; a spike surfaces as awaiting-registry pendency in `03-04` |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Registry configuration — list, enable/disable, endpoint and credentials, manual mode | `/admin/registries` | `M1-I3` |
+| Registry health — error rate, pendency, last successful call per registry | `/admin/registries/health` | `M1-I3` |
+
+Verification-facing screens (queue, detail, evidence) belong to `03-04`. Credentials are shown as a
+Secrets Manager reference, never as a value.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A new market implements the three interfaces **without change to core domain logic** | `M1-I13` |
+| AC2 | All adapters return the same traffic-light response schema regardless of the underlying registry | `M1-I13` |
+| AC3 | A registry with no API satisfies the interface through a document-plus-manual implementation | `M1-I13`, `M1-I14` |
+| AC4 | Contract tests fail if a core change breaks an existing adapter | `M1-I13` |
+| AC5 | Adding a new market registers adapters **as configuration rather than a code change** | `M1-I3` |
+| AC6 | Disabling an adapter routes checks to the manual fallback rather than failing them | `M1-I3` |
+| AC7 | Only the platform administrator can change adapter configuration | `M1-I3` |
+| AC8 | A nurse registration resolves through INC NUID to NRTS and returns a traffic-light outcome | `M1-I14` |
+| AC9 | A doctor registration resolves through the NMC or the correct state council | `M1-I14` |
+| AC10 | An allied health credential resolves through the relevant council or falls back to manual | `M1-I14` |
+| AC11 | Category expansion to doctors and allied health is covered by **configuration, not new domain logic** | `M1-I14`, Part A CLOSED item |
+| AC12 | Each aggregator check type returns green, amber or red on the common schema | `M1-I15` |
+| AC13 | An aggregator outage routes to the manual fallback rather than failing the candidate | `M1-I15` |
+| AC14 | Per-check cost is logged so consumption is measurable against the SOW | `M1-I15` |
+| AC15 | **Consent for each check is captured and retained before the call is made** | `M1-I15`, `M4-I27` |
+| AC16 | Registry credentials are held as Secrets Manager references and never rendered | `01-10` |
+| AC17 | Every call is recorded append-only with request, outcome and the registry's verbatim answer | `M4-I12` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-01` | Which interface contracts must be proven against US, Germany and Ireland in Release 1? | All three interfaces are defined generically and a **stub adapter for one non-India market is built and contract-tested**, so the abstraction is proven rather than asserted. Which real markets to prove is Apollo's call. Without this, the layer risks being an India implementation with an interface drawn over it. | `M1-I13`, `M1-I14` |
+| `OI-HS-06` | Verification aggregator: IDfy or AuthBridge? They differ in registry coverage and response schema | Aggregator-first is settled; the choice is not. The adapter is written to the common schema with the mapping isolated in one file per aggregator, so selecting late is a mapping change rather than rework in the layer. **Selecting late still means rework** — decide before Phase 2. | `M1-I15`, `M4-I24` |
+| `X16` | Which councils have no API, and who does the manual checking? | Every council is configured `manual` by default and flipped to `api` when one is proven. This means the platform works on day one and improves, rather than waiting. | `M1-I14` |
+| `X15` | DigiLocker and Aadhaar access — through the aggregator or directly? | Through the aggregator, which changes both the build and the compliance position if it turns out to be direct | `M4-I24` |

@@ -1,0 +1,169 @@
+---
+title: "03-14 Client portal"
+description: "A logged-in website for clients. Until Phase 6 clients have only had one-off links with no password; this gives them accounts so they can raise vacancies themselves, see how their…"
+---
+
+**Package** `@apollo/portal` · **Schema** `clients`, `identity` · **Plan** D12 · **Effort** ~26.0pd · **Risk** Low `XMOD` · **Build in** Phase 6
+
+## 1. Purpose
+
+A logged-in website for clients. Until Phase 6 clients have only had one-off links with no password;
+this gives them accounts so they can raise vacancies themselves, see how their vacancies are
+progressing, review shortlists, approve timesheets and download invoices. Once it exists, the portal
+also becomes the **sixth intake channel**, which `03-02` already enumerates and leaves switched off.
+
+Everything the portal shows already exists. This module adds screens and a tenancy boundary, not new
+business logic.
+
+## 2. Scope
+
+### In scope
+
+- Raise a requisition, producing **the same record as one arriving by email**, marked source `portal`
+- My requisitions: status and fill, client-appropriate
+- Shortlists: the logged-in version of the shortlist link, same decisions and same taxonomy
+- Timesheets: the logged-in version of the approval link, same state and same window rule
+- Invoices: download their own, view rate card and contract read-only
+- Enabling the portal channel in `03-02` as configuration
+
+### Explicitly out of scope
+
+- Client identity, portal users and **portal data scoping** — `02-01` (`M10-I1`, `M10-I2`, `M10-I8`).
+  The tenancy boundary is a security concern and lives with the rest of authorisation.
+- The tokenised links — `02-14`. Both routes stay open; a client who never signs in still uses links.
+- Every underlying record — owned by `03-01`, `03-03`, `03-07`, `03-10`, `03-11`.
+
+### Explicitly not built
+
+- Clients editing their own rate card or contract terms. Those stay with Apollo.
+- Clients seeing candidate personal data beyond what the shortlist already shows.
+- Client-facing analytics or dashboards.
+- Client-side interview feedback (`OI-HS-11`).
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M10-I3` | D12 | Portal: raise requisition | L | 3.0 |
+| `M10-I4` | D12 | Portal: my requisitions | M | 2.0 |
+| `M10-I5` | D12 | Portal: shortlists | L | 3.0 |
+| `M10-I6` | D12 | Portal: timesheets | M | 2.0 |
+| `M10-I7` | D12 | Portal: invoices | M | 2.0 |
+
+`M10-I1`, `M10-I2` and `M10-I8` are `02-01`.
+
+**Specification basis:** D12 is named as deferred throughout Part A and **no client specification has
+been received**. Everything here is Hiresense analysis built from the capability name. All items carry
+Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` (the `client_user` realm **and** portal data scoping), `03-01`,
+`03-03`, `03-07`, `03-10`, `03-11`, `02-05`.
+
+**Consumed by:** `03-02` gains its sixth channel.
+
+**External:** none.
+
+## 5. Data model
+
+No tables of its own. `ClientUser`, `ClientUserRole` and `PortalSession` are `02-01`. Two additions
+elsewhere:
+
+```sql
+-- 03-02: the portal channel flips available, which is configuration not a schema change (AS-05)
+UPDATE demand.channel SET is_available = true WHERE code = 'portal';
+
+-- 03-03: source_channel already accepts 'portal'; no migration needed
+```
+
+That the portal requires **no schema change** anywhere is the test of whether `03-02` and `03-03` were
+built correctly in Phase 3.
+
+## 6. State machines
+
+**N/A** — the portal drives existing state machines. A requisition raised here enters
+`demand.requisition` at `incomplete`/`complete` exactly as an emailed one does; a shortlist response
+sets `matching.shortlist_entry.client_response`; a timesheet approval sets
+`timesheets.timesheet.approved`.
+
+`ClientUser` (`invited → registered → active → suspended`) is specified in `02-01`.
+
+## 7. API surface
+
+Every endpoint runs in the `client_user` realm and is scoped to `clientId` **and** `siteIds` by
+`02-01`. Scope is not a parameter.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/portal/requisitions` | `portal:requisition:create` | Same fields as the internal form, sites limited to the client's own |
+| `GET` | `/v1/portal/requisitions?state=` | `portal:requisition:read` | Status and positions filled |
+| `GET` | `/v1/portal/requisitions/:id` | `portal:requisition:read` | Client-appropriate detail, **no internal notes** |
+| `GET` | `/v1/portal/shortlists` | `portal:shortlist:read` | Candidates put forward per requisition |
+| `POST` | `/v1/portal/shortlists/:id/respond` | `portal:shortlist:respond` | Accept, reject with a reason, or request interview |
+| `GET` | `/v1/portal/timesheets?state=awaiting` | `portal:timesheet:read` | Awaiting approval |
+| `POST` | `/v1/portal/timesheets/:id/approve` · `/query` | `portal:timesheet:approve` | Same state as the link version |
+| `GET` | `/v1/portal/invoices` | `portal:invoice:read` | Their own only |
+| `GET` | `/v1/portal/invoices/:id/download` | `portal:invoice:read` | **Downloads are logged for audit** |
+| `GET` | `/v1/portal/contract` | `portal:contract:read` | Rate card and contract **visible, not editable** |
+
+Response payloads omit internal reason codes, ranking scores, recruiter notes and margin.
+
+## 8. Events and jobs
+
+**Events emitted:** `portal.requisition.raised` (source channel `portal`, feeding `03-12` channel
+performance) · `portal.invoice.downloaded` (audited) · `portal.shortlist.responded` ·
+`portal.timesheet.approved`.
+
+**Events subscribed:** none. The portal reads current state.
+
+**Jobs:** none of its own.
+
+## 9. Frontend
+
+`apps/portal`, a separate Vite build on its own subdomain with its own cookie namespace.
+
+| Screen | Route | Item |
+|---|---|---|
+| Raise a requisition — same fields as internal; sites and departments limited to the client; **completeness checked at submit so the chase loop is rarely needed** | `/requisitions/new` | `M10-I3` |
+| My requisitions — status and fill; **age matches the internal aging rule, excluding held days** | `/requisitions` | `M10-I4` |
+| Shortlists — candidates per requisition; accept, reject with a reason, request interview | `/shortlists` | `M10-I5` |
+| Timesheets — awaiting approval; approve, or query a line with a reason | `/timesheets` | `M10-I6` |
+| Invoices — list and download; rate card and contract read-only | `/invoices` | `M10-I7` |
+| Portal users | `/settings/users` | `M10-I2` (`02-01`) |
+
+Built from `02-05`, so the portal looks like the rest of the platform without a second design pass.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A requisition raised here produces **the same record as one arriving by email** | `M10-I3`, `M3` AC1 |
+| AC2 | The source channel is recorded as `portal` | `M10-I3` |
+| AC3 | **Enabling this channel is configuration in M3, not a schema change** | `M10-I3`, `AS-05` |
+| AC4 | The client only sees their own sites and departments | `M10-I3`, `M10-I8` |
+| AC5 | Completeness is checked at submit so the chase loop is rarely needed | `M10-I3` |
+| AC6 | A client sees only their own requisitions | `M10-I4` |
+| AC7 | Status shown is client-appropriate and **does not expose internal notes** | `M10-I4` |
+| AC8 | Age matches the internal aging rule, excluding held days | `M10-I4`, `M3` AC6 |
+| AC9 | Shortlist decisions write into **the same selection record as the link version** | `M10-I5`, `M7-I10` |
+| AC10 | The reason list is the same configured taxonomy used internally | `M10-I5`, `M0-I5` |
+| AC11 | **A client who never signs in can still use the one-off link — both routes stay open** | `M10-I5` |
+| AC12 | Timesheet approval sets the same state as the link version | `M10-I6`, `M7-I12` |
+| AC13 | The waiting-period rule still applies if the client does not respond | `M10-I6`, `M8-I16` |
+| AC14 | A queried line routes back to Apollo **without approving the rest** | `M10-I6` |
+| AC15 | A client sees only their own invoices | `M10-I7` |
+| AC16 | Rate card and contract are **visible but not editable** | `M10-I7` |
+| AC17 | Downloads are logged for audit | `M10-I7` |
+| AC18 | No portal response exposes an internal reason code, ranking score or recruiter note | `M4-I6`, `01-10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| — | **No client specification exists for D12.** Part A records only that it defers | Everything here is derived from the capability name. All items are Low confidence and the screens are the smallest set that delivers what the name promises. | All of `M10` |
+| Drafting point 2 | §5.1 says no external client-portal users are onboarded in the first six months, **and separately** that portal users for hospitals and home healthcare providers are onboarded in R2, which falls inside the six months. **The SOW contradicts itself.** | Built as though R2 onboarding happens inside the six months, since that is the later and more specific statement. Apollo has been asked to reconcile the clause. | Whether this module ships at all |
+| `OI-HS-01` | Whether client users are site-scoped | Yes — `client_user_site` exists from day one and `M10-I8` tests it | `M10-I2` |
+| `OI-A-04` | Confirms no client identity exists before Phase 6 | Correct; this module introduces the first | `M10-I1` |
+| `OI-A-06` | Confirms the portal channel is enumerated but not built in Release 1 | This module flips it on | `M10-I3` |
+| `OI-HS-38` **[raised here]** | Can a portal user raise a requisition on behalf of a site they are not assigned to? | No. Site scope applies to creation as well as reading. Worth confirming, because a central procurement contact raising vacancies for several hospitals is a plausible real-world pattern the strict rule would block. | `M10-I3` |

@@ -1,0 +1,196 @@
+---
+title: "06-19 M12 — Workforce Operations"
+description: "The day-to-day changes that happen once people are working: salary revisions for one person or in bulk, salary advances, and putting a salary on hold or releasing it. Each of these needs…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M12 · D23 · Months 5–6*
+
+`Release 2` · `6 items` · `26 conditions` · `38.0pd` · `0 high risk` · `Ops/Admin, Candidate App`
+
+The day-to-day changes that happen once people are working: salary revisions for one person or in bulk, salary advances, and putting a salary on hold or releasing it. Each of these needs two people — one to request it and one to approve it — so nobody can change their own pay. It also covers uploading attendance and pairing it against what was verified, and this is where location checking on shift check-in finally gets switched on and enforced.
+
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 11** — D22 records a location stamp without enforcing it, and geo-fencing enforcement only arrives in D23. In homecare, location is the only verification available, so unenforced is materially weaker there than in a facility.
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+The request-and-approve pattern built here is the same one M15 uses for timesheet approvals. Build it once.
+
+### Records this milestone owns
+
+- WorkforceRequest — one request to change something, with who asked, who approved, and the before and after values.
+- SalaryRevision — a change to what someone is paid, for one person or a batch.
+- SalaryAdvance, SalaryHold — money paid early, or pay stopped and later released.
+- AttendanceUpload — attendance brought in from outside and matched against what the app recorded.
+- GeoFence — a boundary around a site, used to accept or reject a shift check-in.
+
+### How records move
+
+- WorkforceRequest: drafted → submitted → approved or rejected with a reason → applied
+- SalaryHold: requested → approved → held → released
+- Check-in with enforcement on: inside the boundary → accepted. Outside → rejected, or flagged for someone to review.
+
+### Not in this milestone
+
+- Actually paying the money. That is M13.
+- Statutory filings.
+
+### Needs to exist first
+
+- M8 for placements and attendance. M11 for the associate profile. M1 for roles, since approvals depend on who someone is.
+
+### What breaks without it
+
+- M13 payroll reads approved salary changes, advances and holds.
+
+### Items — 6 to build · design 8.0pd, build 20.0pd, QA 10.0pd
+
+#### M12-I1 — Requests
+
+`D23` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SHARED` · `Low`
+
+**Who uses it: Ops, Fulfilment lead.** One place for every change that needs a second person to approve it. The maker-checker engine Part A names.
+
+##### Screens to build
+
+1. **Requests**
+  - Lists changes waiting to be approved with what they would change
+  - Approves or rejects a request with a reason
+  - Stops the person who raised it approving it
+
+##### Conditions it must satisfy
+
+- A request cannot be approved by the person who raised it
+- Every approval and rejection records who, when and why (M0-I4)
+- The before and after values are shown so the approver sees what changes
+- This same engine is reused for internal timesheet approval in M15
+
+Index **M12-I1** · Client ref **D23** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M0-I3, M0-I4**
+
+#### M12-I2 — Salary revision
+
+`D23` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Ops, Finance.** Changing what someone is paid, one person at a time or in a batch.
+
+##### Screens to build
+
+1. **Salary revision**
+  - Changes what one associate is paid, from a date
+  - Changes what a group of associates are paid in one go
+  - Sends the change for approval
+
+##### Conditions it must satisfy
+
+- A revision goes through the approval engine before it takes effect
+- A bulk revision produces one request per person, each individually auditable
+- An effective date in the past is either blocked or requires higher approval
+- Payroll in M13 reads only approved revisions
+
+Index **M12-I2** · Client ref **D23** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M12-I1, M13-I5**
+
+#### M12-I3 — Advances and holds
+
+`D23` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Ops, Finance.** Paying someone early, or stopping their pay and later restarting it.
+
+##### Screens to build
+
+1. **Advances and holds**
+  - Records money paid early and how it will be recovered
+  - Stops an associate's pay, and later restarts it
+  - Sends each for approval
+
+##### Conditions it must satisfy
+
+- An advance records how it will be recovered, not just that it was paid
+- A hold stops the next pay run for that person and is visible before the run
+- Release restores normal pay from the next cycle
+- All three go through the approval engine
+
+Index **M12-I3** · Client ref **D23** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M12-I1, M13-I5**
+
+#### M12-I4 — Attendance upload
+
+`D23` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `DATA` · `Low`
+
+**Who uses it: Ops.** Bringing attendance in from outside and matching it against what the app recorded.
+
+##### Screens to build
+
+1. **Attendance upload**
+  - Uploads attendance from outside the platform
+  - Matches it against the app check-ins and lists what does not match
+  - Resolves a mismatch with a reason
+
+##### Conditions it must satisfy
+
+- Uploaded attendance is matched against app check-ins and differences are surfaced
+- A mismatch is resolved by a person, not silently overwritten
+- Resolution is audited because it changes what gets invoiced and paid
+- Row-level errors are named and valid rows still load
+
+Index **M12-I4** · Client ref **D23** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M8-I7**
+
+#### M12-I5 — Geo-fence settings
+
+`D23` · `Config` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator.** Switching on the location check that M8 records but does not act on. Part A names this as a later-phase item.
+
+##### Screens to build
+
+1. **Geo-fence settings**
+  - Sets a boundary around each site for facility work, and around the visit address for home visits
+  - Sets whether a check-in outside the boundary is allowed, warned or blocked
+  - Sets the tolerance, since a phone indoors is less accurate than one outside
+
+##### Conditions it must satisfy
+
+- With enforcement off, behaviour is exactly as in M8 — location recorded, nothing blocked
+- With enforcement on, a check-in outside the boundary is rejected or flagged per the mode
+- The location field already exists from M8, so switching this on needs no data change
+- A breach report shows attempts outside the boundary
+- The same check runs for both cases; only the reference point differs - the site record for facility work, the visit address on the shift line for home visits
+- Tolerance is set wide enough that a phone indoors does not produce false rejections
+
+Index **M12-I5** · Client ref **D23** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M8-I7, M4-I7**
+
+#### M12-I6 — Request and approve engine
+
+`D23` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `SHARED` · `Low`
+
+**Who uses it: System.** The shared approval mechanism behind every workforce change.
+
+##### Screens to build
+
+1. **No screen**
+  - Holds the request-and-approve mechanism every workforce change runs through
+  - Enforces that the raiser cannot be the approver
+
+##### Conditions it must satisfy
+
+- A request type is added as configuration, not as a new build
+- Approval thresholds can vary by value, so a large revision needs a more senior approver
+- The raiser can never be the approver, enforced in the service not the screen
+- M15 reuses this engine for internal timesheet approval
+
+Index **M12-I6** · Client ref **D23** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **-** · Linked items **M0-I3, M0-I4**

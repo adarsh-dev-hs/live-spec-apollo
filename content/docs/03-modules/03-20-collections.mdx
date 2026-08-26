@@ -1,0 +1,219 @@
+---
+title: "03-20 Collections"
+description: "The money coming back in. 03-11 ends at invoice raised, receivable open; this module records payments received, matches them against invoices including part-payments and TDS, shows…"
+---
+
+**Package** `@apollo/billing` (extension) · **Schema** `billing` · **Plan** D25 (full) · **Effort** ~24.5pd · **Risk** Low `XMOD` · **Build in** Phase 7
+
+## 1. Purpose
+
+The money coming back in. `03-11` ends at *invoice raised, receivable open*; this module records
+payments received, matches them against invoices including **part-payments and TDS**, shows what is
+overdue and how overdue, chases automatically, and issues credit and debit notes to correct an invoice
+already raised.
+
+Together with `03-19` these turn the platform from one that raises invoices into one that tracks
+whether Apollo actually got paid.
+
+## 2. Scope
+
+### In scope
+
+- Payments received, matched across several invoices, with part-payments and unmatched payments queued
+- TDS recorded separately so gross and net are both visible
+- Overdue report with ageing **calculated from the contract payment terms**, not a flat rule
+- Chase history, so a client is not chased twice
+- Automatic dunning on a schedule, stopping the moment payment arrives
+- Credit and debit notes, approved before issue and exported alongside invoices
+
+### Explicitly out of scope
+
+- Invoicing and receivables — `03-11`, which this extends.
+- The finance system — `04-13`. This module still does not become the book of record.
+- The messaging layer — `02-09`.
+- The approval engine — `03-16`.
+
+### Explicitly not built
+
+- **Being the accounting system of record.** The finance system stays the book of record; this tracks
+  against it.
+- Bank statement import or automatic reconciliation. Payments are recorded, then matched by a person.
+- Legal escalation beyond a formal notice.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M15-I3` | D25 | Payments received and matching | XL | 5.0 |
+| `M15-I4` | D25 | Overdue invoices | L | 3.0 |
+| `M15-I5` | D25 | Credit and debit notes | L | 3.0 |
+| `M15-I7` | D25 | Overdue reminders | M | 2.0 |
+
+**Specification basis:** Part A lists these as remaining in the later release. No client module chapter.
+All items Low confidence — **except that `OI-A-13` may pull `M15-I5` forward into Phase 5–6.**
+
+## 4. Dependencies
+
+**Must exist first:** `03-11` (invoices and receivables), `03-01` (**contract payment terms drive
+ageing**, and the client owner receives escalations), `02-09` (reminders), `03-16` (approval for a
+credit note), `04-13` (notes export alongside invoices).
+
+**Consumed by:** `03-12` gains settlement data.
+
+**External:** `04-13` finance system — still **not named** (`OI-A-14`).
+
+## 5. Data model
+
+```sql
+CREATE TABLE billing.payment (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL,
+    amount numeric(14,2) NOT NULL,
+    currency text NOT NULL DEFAULT 'INR',
+    received_on date NOT NULL,
+    method text, reference text,
+    tds_amount numeric(14,2) NOT NULL DEFAULT 0,   -- recorded SEPARATELY: gross and net both visible
+    unmatched_amount numeric(14,2) NOT NULL,        -- sits in a queue, never forced onto the nearest invoice
+    state text NOT NULL DEFAULT 'received'
+      CHECK (state IN ('received','part_matched','matched')),
+    recorded_by uuid NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE billing.payment_allocation (       -- many-to-many: one payment across several invoices,
+    id uuid PRIMARY KEY DEFAULT uuidv7(),        -- one invoice taking several payments
+    payment_id uuid NOT NULL REFERENCES billing.payment(id),
+    invoice_id uuid NOT NULL REFERENCES billing.invoice(id),
+    amount numeric(14,2) NOT NULL CHECK (amount > 0),
+    allocated_by uuid NOT NULL, allocated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON billing.payment_allocation (invoice_id);
+
+CREATE TABLE billing.credit_note (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    reference text NOT NULL UNIQUE,
+    note_type text NOT NULL CHECK (note_type IN ('credit','debit')),
+    invoice_id uuid NOT NULL REFERENCES billing.invoice(id),
+    amount numeric(14,2) NOT NULL,
+    reason_code text NOT NULL REFERENCES settings.list_entry(code),
+                                                 -- includes 'replacement_within_guarantee' (OI-A-13)
+    reason_text text,
+    approval_request_id uuid,                    -- issuing REQUIRES approval: it changes revenue
+    state text NOT NULL DEFAULT 'draft'
+      CHECK (state IN ('draft','awaiting_approval','issued','exported','cancelled')),
+    document_id uuid,
+    issued_at timestamptz, exported_at timestamptz,
+    created_by uuid NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE billing.dunning_schedule (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid,                              -- null = platform default
+    steps jsonb NOT NULL,   -- [{daysOverdue, action:'reminder'|'owner'|'formal_notice', templateCode}]
+    is_enabled boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE billing.dunning_event (             -- so a client is not chased twice
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    invoice_id uuid NOT NULL REFERENCES billing.invoice(id),
+    step_index integer NOT NULL,
+    action text NOT NULL,
+    message_id uuid,                             -- messaging.message
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (invoice_id, step_index)
+);
+```
+
+## 6. State machines
+
+### `Receivable`, extended
+
+`open → part_settled → settled`, or `written_off`. Also reduced by an issued credit note.
+
+### `Payment` (`M15-I3`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | recorded | `received` | `unmatched_amount` = full amount |
+| `received` | allocated to one or more invoices | `part_matched` | **A payment can be matched across several invoices, and an invoice can take several payments** |
+| `part_matched` | fully allocated | `matched` | |
+| any | remainder | stays unmatched | **Sits in a queue rather than being forced onto the nearest invoice** |
+
+### `CreditNote` (`M15-I5`)
+
+`draft → awaiting_approval → issued → exported`. **Issuing requires approval, because it changes
+revenue.** A credit note reduces the receivable and is linked to the invoice it corrects.
+
+### Dunning (`M15-I7`)
+
+Steps fire on days-overdue thresholds: reminder → account owner → formal notice. **Stops as soon as
+payment arrives.** Every chase is logged.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/payments` | `payment:manage` | Record a payment with TDS |
+| `POST` | `/v1/payments/:id/allocate` | `payment:manage` | Across one or more invoices; **audited** |
+| `GET` | `/v1/payments?state=received` | `payment:read` | The unmatched queue |
+| `GET` | `/v1/invoices/:id/payments` | `invoice:read` | Allocations against one invoice |
+| `GET` | `/v1/receivables/overdue?ageBand=&client=` | `invoice:read` | Ageing from contract payment terms |
+| `GET` | `/v1/invoices/:id/dunning-history` | `invoice:read` | What has already been sent |
+| `GET`/`POST`/`PATCH` | `/v1/dunning-schedules` | `settings:edit` | Steps per client |
+| `POST` | `/v1/credit-notes` | `creditnote:create` | Raise against an invoice with a reason |
+| `POST` | `/v1/credit-notes/:id/submit` · `/issue` | `creditnote:approve` | Approval before issue |
+| `GET` | `/v1/credit-notes?state=` | `invoice:read` | |
+
+## 8. Events and jobs
+
+**Events emitted:** `billing.payment.recorded` · `.allocated` · `billing.receivable.settled` ·
+`billing.credit_note.issued` · `billing.dunning.sent`.
+
+**Events subscribed:** `billing.invoice.raised` → schedule dunning from the contract payment terms.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `billing.dunning` | daily | Fires the next due step; **stops the moment the invoice is paid** |
+| `billing.age-receivables` | daily | Recomputes ageing bands from contract terms |
+| `billing.export-notes` | on issue | Notes exported to the finance system **alongside invoices** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Payments received — record money, match across invoices and part payments, record TDS, unmatched queue | `/payments` | `M15-I3` |
+| Overdue invoices — grouped by how overdue, **with what has already been sent chasing each one** | `/receivables/overdue` | `M15-I4` |
+| Credit and debit notes — raise against an invoice with a reason, send for approval | `/credit-notes` | `M15-I5` |
+| Dunning schedule | `/admin/dunning` | `M15-I7` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | **A payment can be matched across several invoices, and an invoice can take several payments** | `M15-I3` |
+| AC2 | **TDS is recorded separately so the gross and net are both visible** | `M15-I3` |
+| AC3 | An unmatched payment **sits in a queue rather than being forced onto the nearest invoice** | `M15-I3` |
+| AC4 | Matching is audited because it changes what appears as outstanding | `M15-I3` |
+| AC5 | **Ageing is calculated from the payment terms on the contract, not a flat rule** | `M15-I4` |
+| AC6 | Chase history shows what has already been sent **so a client is not chased twice** | `M15-I4` |
+| AC7 | Escalation routes to the named client owner in M2 | `M15-I4`, `M2-I2` |
+| AC8 | **M9 shows ageing but does nothing with it; this is where it becomes actionable** | `M15-I4` |
+| AC9 | A credit note reduces the receivable and is linked to the invoice it corrects | `M15-I5` |
+| AC10 | **Issuing a note requires approval, because it changes revenue** | `M15-I5`, `M12-I6` |
+| AC11 | **A replacement placement inside the guarantee window is a named reason** | `M15-I5`, `OI-A-13` |
+| AC12 | Notes are exported to the finance system alongside invoices | `M15-I5`, `M9-I16` |
+| AC13 | Reminders fire on the configured schedule and **stop as soon as payment arrives** | `M15-I7` |
+| AC14 | Escalation moves from a reminder to the account owner to a formal notice | `M15-I7` |
+| AC15 | Delivery reuses the messaging layer from M5, **not a separate sender** | `M15-I7` |
+| AC16 | Every chase is logged so the client relationship is visible | `M15-I7` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-13` | **If the guarantee period runs past day 90, credit and debit notes return to Release 1** and this module's `M15-I5` moves out of Phase 7 into the earlier billing work | Built here as planned. **If the answer is "longer than 90 days", `M15-I5` moves to Phase 5–6 and `03-11` gains a correction path.** This is a scope change, not a number. **Estimate blocker.** | `M15-I5`, `M9-I12`, `M2-I8` |
+| `OI-A-14` | **The finance system has not been named** | Notes and payments export to the same generic contract as invoices, so the target attaches later without reopening the module | `M9-I16`, `04-13` |
+| — | **No client module chapter exists for D25's remainder** | Four items derived from the capability name. Low confidence throughout. | All of `M15` D25 |
+| `OI-HS-48` **[raised here]** | Does a payment arrive as a bank statement, a remittance advice, or by hand? | Recorded by hand by finance. Statement import is not in scope and would be an addition — worth stating, because manual entry is the practical throughput limit on collections. | `M15-I3` |
+| `OI-HS-49` **[raised here]** | Who signs off a formal notice? | The client owner in `03-01`, with the step configurable per client. Sending a formal notice to a hospital is a relationship act, not an automated one — so the last dunning step defaults to **draft-and-notify** rather than auto-send. | `M15-I7` |

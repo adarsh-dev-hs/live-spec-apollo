@@ -1,0 +1,159 @@
+---
+title: "06-18 M11 — Associate Onboarding"
+description: "The paperwork side of someone joining as a shift worker. Today this is collected and stored outside the platform. This milestone brings it in: an associate profile, the statutory forms…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M11 · D21 · Months 5–6*
+
+`Release 2` · `5 items` · `18 conditions` · `26.5pd` · `0 high risk` · `Candidate App, Ops/Admin`
+
+The paperwork side of someone joining as a shift worker. Today this is collected and stored outside the platform. This milestone brings it in: an associate profile, the statutory forms including PF and UAN transfer and gratuity nomination, a checklist of documents to collect, and a guided step-by-step flow in the mobile app so the candidate can do it themselves.
+
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+The document upload and storage built for M4 credentials is reused here. The guided flow lives in the same mobile app.
+
+### Records this milestone owns
+
+- AssociateProfile — the extra employment details needed once someone is actually working, beyond their candidate record.
+- StatutoryForm — PF and UAN transfer, gratuity nomination and the rest, with a completion state each.
+- OnboardingChecklist — which documents are needed and which have arrived.
+
+### How records move
+
+- AssociateProfile: not started → in progress → complete → verified
+- StatutoryForm: pending → submitted → verified. Or returned to the candidate with a reason.
+
+### Not in this milestone
+
+- Filing the statutory returns themselves. Filing is outside this contract entirely.
+- Onboarding for permanent placements. Those join the client directly, not Apollo.
+
+### Needs to exist first
+
+- M4 for the candidate record and document storage. M8 for the placement that triggers onboarding.
+
+### What breaks without it
+
+- M13 payroll needs a complete associate profile and statutory forms before anyone can be paid.
+
+### Items — 5 to build · design 7.0pd, build 13.0pd, QA 6.5pd
+
+#### M11-I1 — Associate details
+
+`D21` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `COMP` · `Low`
+
+**Who uses it: Ops, Associate.** The extra employment details needed once a shift worker actually starts, beyond their candidate record.
+
+##### Screens to build
+
+1. **Associate details**
+  - Takes the employment details needed once someone starts working
+  - Takes bank details and statutory identifiers
+  - Shows what is still missing
+
+##### Conditions it must satisfy
+
+- An associate profile builds on the candidate record rather than duplicating it
+- Bank details are stored encrypted and access is restricted (M4-I27)
+- A profile cannot be marked complete with mandatory statutory fields missing
+- Payroll in M13 cannot run for an incomplete profile
+
+Index **M11-I1** · Client ref **D21** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M4-I16, M13-I1**
+
+#### M11-I2 — Statutory forms
+
+`D21` · `Screen` · `L · 3.0pd` · `AI Medium` · `Medium` · `COMP` · `Low`
+
+**Who uses it: Associate, Ops.** PF and UAN transfer, gratuity nomination and the rest, collected in the platform instead of on paper.
+
+##### Screens to build
+
+1. **Statutory forms**
+  - Lists the forms the associate must complete
+  - Takes each form, including PF and UAN transfer and gratuity nomination
+  - Returns a form to the associate with a reason
+
+##### Conditions it must satisfy
+
+- Each form has its own completion state, not one overall flag
+- A returned form tells the candidate exactly what to fix
+- Completed forms are stored as documents and retained (M0-I6)
+- Filing the forms with the authorities is not in scope
+
+Index **M11-I2** · Client ref **D21** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M0-I6, M4-I27**
+
+#### M11-I3 — Document checklist
+
+`D21` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `XMOD` · `Low`
+
+**Who uses it: Ops.** Which documents are needed for this associate, and which have arrived.
+
+##### Screens to build
+
+1. **Document checklist**
+  - Lists which documents this associate must provide and which have arrived
+  - Chases a missing document
+
+##### Conditions it must satisfy
+
+- The checklist differs by role and by state where statutory requirements differ
+- A missing document blocks payroll but not the placement itself
+- Chasing goes out through the messaging layer (M3-I30)
+
+Index **M11-I3** · Client ref **D21** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Low** · Open items **-** · Linked items **M4-I8, M3-I30**
+
+#### M11-I4 — App: onboarding
+
+`D21` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SHARED` · `Low`
+
+**Who uses it: Associate.** A step-by-step flow in the mobile app so the associate completes onboarding themselves.
+
+##### Screens to build
+
+1. **App: onboarding**
+  - Walks the associate through onboarding one task at a time
+  - Takes photos of documents and fills in the forms
+  - Saves progress so it can be finished later
+
+##### Conditions it must satisfy
+
+- An associate can complete onboarding entirely in the app without an Ops user
+- Progress is saved so it can be finished across several sessions
+- Guided flows live in the app, not WhatsApp (Part A convention)
+- A rejected item reappears in the flow with the reason shown
+
+Index **M11-I4** · Client ref **D21** · Band **L** · Design **2.5pd** · Build **3.0pd** · QA **1.5pd** · Total **7.0pd** · Confidence **Low** · Open items **-** · Linked items **M4-D3**
+
+#### M11-I5 — Onboarding gate
+
+`D21` · `Service` · `M · 2.0pd` · `AI Medium` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: System.** Stops payroll running for someone whose paperwork is not finished.
+
+##### Screens to build
+
+1. **No screen**
+  - Stops a pay run for an associate whose forms are not complete
+
+##### Conditions it must satisfy
+
+- Payroll cannot run for an associate whose mandatory forms are incomplete
+- An override requires approval and is audited
+- Blocked associates are visible before the pay run, not during it
+
+Index **M11-I5** · Client ref **D21** · Band **M** · Design **0.0pd** · Build **2.0pd** · QA **1.0pd** · Total **3.0pd** · Confidence **Low** · Open items **-** · Linked items **M13-I5**

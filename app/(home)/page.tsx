@@ -1,143 +1,156 @@
 import Link from 'next/link';
-import {
-  ArrowRight,
-  Boxes,
-  Cable,
-  Compass,
-  Layers,
-  Rocket,
-  Ruler,
-  type LucideIcon,
-} from 'lucide-react';
 
-const sections: {
-  href: string;
-  title: string;
-  icon: LucideIcon;
-  description: string;
-  count: string;
-}[] = [
+const READING_ORDER = [
   {
     href: '/docs/00-foundation/00-01-product-context',
-    title: 'Foundation',
-    icon: Compass,
-    description: 'What the business does, how the system is shaped, every entity in one place.',
-    count: '6 documents',
+    title: 'Product context',
+    body: 'The business, the two ways money reaches Apollo, and the actors. Nothing else makes sense without it.',
   },
   {
-    href: '/docs/01-standards/01-01-repository-layout',
+    href: '/docs/00-foundation/00-02-system-architecture',
+    title: 'System architecture',
+    body: 'The shape of the system and why it is that shape.',
+  },
+  {
+    href: '/docs/00-foundation/00-04-component-map',
+    title: 'Component map',
+    body: 'What exists, what depends on what, and where each of the 208 plan items lives.',
+  },
+  {
+    href: '/docs/01-standards',
     title: 'Standards',
-    icon: Ruler,
-    description: 'House rules. Read once, obey always — every spec below assumes them.',
-    count: '10 documents',
+    body: 'All ten. Read once, obeyed always.',
   },
   {
-    href: '/docs/02-platform/02-01-identity-and-access',
-    title: 'Platform',
-    icon: Layers,
-    description: 'Shared components, each a dependency of two or more business modules.',
-    count: '13 components',
-  },
-  {
-    href: '/docs/03-modules/03-01-clients',
-    title: 'Modules',
-    icon: Boxes,
-    description: 'The business modules. One spec = one implementation session.',
-    count: '21 modules',
-  },
-  {
-    href: '/docs/04-integrations/04-01-integration-register',
-    title: 'Integrations',
-    icon: Cable,
-    description: 'Every external system the platform touches, with status and failure modes.',
-    count: '6 documents',
-  },
-  {
-    href: '/docs/05-delivery/05-01-build-order',
-    title: 'Delivery',
-    icon: Rocket,
-    description: 'Dependency-ordered build sequence, the playbook, and the open decisions.',
-    count: '3 documents',
+    href: '/docs/05-delivery/05-02-implementation-playbook',
+    title: 'Implementation playbook',
+    body: 'How to take one spec from this site to a merged pull request.',
   },
 ];
 
-const stack = [
-  ['Backend', 'Node.js 22 · TypeScript · Express 5'],
-  ['Frontend', 'React 19 + Vite · TanStack Query · Tailwind'],
-  ['Database', 'PostgreSQL 16 (RDS, ap-south-1)'],
-  ['Cache / queue', 'Redis 7 · BullMQ'],
-  ['Object store', 'Amazon S3 (versioned, KMS)'],
-  ['Hosting', 'AWS ap-south-1 only · ECS Fargate'],
+const SECTIONS = [
+  { href: '/docs/00-foundation', title: 'Foundation', body: 'Context, read once.' },
+  { href: '/docs/01-standards', title: 'Standards', body: 'House rules, obeyed always.' },
+  { href: '/docs/02-platform', title: 'Platform', body: 'Shared components, built once.' },
+  { href: '/docs/03-modules', title: 'Modules', body: 'One spec per implementable unit.' },
+  { href: '/docs/04-integrations', title: 'Integrations', body: 'Every external system.' },
+  { href: '/docs/05-delivery', title: 'Delivery', body: 'Sequence, playbook, open decisions.' },
+  {
+    href: '/docs/06-source-plan',
+    title: 'Source plan',
+    body: "The client's plan, reproduced verbatim.",
+  },
 ];
 
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="mx-auto w-full max-w-5xl px-6 pt-20 pb-12">
-        <p className="text-sm font-medium text-fd-muted-foreground">
-          Apollo Knowledge Services
+      <section className="mx-auto w-full max-w-5xl px-6 py-16 md:py-24">
+        <p className="text-fd-muted-foreground text-sm font-medium tracking-wide uppercase">
+          Hiresense · Apollo Knowledge Services
         </p>
-        <h1 className="mt-3 text-4xl font-bold tracking-tight sm:text-5xl">
-          Engineering documentation
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+          Apollo Knowledge GWD
         </h1>
-        <p className="mt-5 max-w-2xl text-lg text-fd-muted-foreground">
-          The engineering translation of the six-month delivery plan — organised by what gets built
-          and deployed rather than by when it is sold. 34 components, each a self-contained,
-          independently implementable spec.
+        <p className="text-fd-muted-foreground mt-4 max-w-3xl text-lg">
+          Engineering documentation for the AI-native healthcare talent platform: permanent placement
+          and contractual shift staffing for nurses, doctors and allied health professionals, across
+          hospital and home healthcare settings, in India.
         </p>
+
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
             href="/docs"
-            className="inline-flex items-center gap-2 rounded-lg bg-fd-primary px-4 py-2.5 text-sm font-medium text-fd-primary-foreground transition-opacity hover:opacity-90"
+            className="bg-fd-primary text-fd-primary-foreground rounded-md px-4 py-2 text-sm font-medium"
           >
             Read the documentation
-            <ArrowRight className="size-4" />
           </Link>
           <Link
-            href="/docs/00-foundation/00-01-product-context"
-            className="inline-flex items-center gap-2 rounded-lg border border-fd-border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent"
+            href="/docs/00-foundation/00-04-component-map"
+            className="border-fd-border rounded-md border px-4 py-2 text-sm font-medium"
           >
-            Start with product context
+            Component map
+          </Link>
+          <Link
+            href="/requirement-doc"
+            className="border-fd-border rounded-md border px-4 py-2 text-sm font-medium"
+          >
+            The original plan
           </Link>
         </div>
-      </section>
 
-      <section className="mx-auto w-full max-w-5xl px-6 pb-14">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {sections.map(({ href, title, icon: Icon, description, count }) => (
-            <Link
-              key={href}
-              href={href}
-              className="group rounded-xl border border-fd-border bg-fd-card p-5 transition-colors hover:bg-fd-accent"
-            >
-              <Icon className="size-5 text-fd-muted-foreground" />
-              <h2 className="mt-3 font-semibold">{title}</h2>
-              <p className="mt-1.5 text-sm text-fd-muted-foreground">{description}</p>
-              <p className="mt-3 text-xs font-medium text-fd-muted-foreground">{count}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto w-full max-w-5xl px-6 pb-24">
-        <h2 className="text-sm font-semibold tracking-wide text-fd-muted-foreground uppercase">
-          Stack
-        </h2>
-        <dl className="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2">
-          {stack.map(([layer, choice]) => (
-            <div
-              key={layer}
-              className="flex flex-wrap items-baseline justify-between gap-2 border-b border-fd-border pb-3"
-            >
-              <dt className="text-sm font-medium">{layer}</dt>
-              <dd className="text-sm text-fd-muted-foreground">{choice}</dd>
+        <dl className="border-fd-border mt-12 grid grid-cols-2 gap-6 border-t pt-8 md:grid-cols-4">
+          {[
+            ['71', 'specifications'],
+            ['208', 'buildable items'],
+            ['1,062', 'conditions'],
+            ['96', 'open decisions'],
+          ].map(([n, label]) => (
+            <div key={label}>
+              <dt className="text-3xl font-semibold">{n}</dt>
+              <dd className="text-fd-muted-foreground text-sm">{label}</dd>
             </div>
           ))}
         </dl>
-        <p className="mt-6 text-sm text-fd-muted-foreground">
-          All personal data stays in <code className="text-fd-foreground">ap-south-1</code>. That is
-          a DPDP requirement, not a preference.
-        </p>
+      </section>
+
+      <section className="border-fd-border border-t">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14">
+          <h2 className="text-2xl font-semibold tracking-tight">
+            What this is, and what it is not
+          </h2>
+          <p className="text-fd-muted-foreground mt-3 max-w-3xl">
+            The requirement document is organised by <strong>when work is sold and scheduled</strong>.
+            This is the engineering translation, organised by{' '}
+            <strong>what gets built and deployed</strong>. Nothing here is invented scope: every
+            requirement traces back to the source, and where the source is silent it is recorded as an
+            open decision with an explicit working assumption rather than a quiet guess.
+          </p>
+        </div>
+      </section>
+
+      <section className="border-fd-border border-t">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14">
+          <h2 className="text-2xl font-semibold tracking-tight">
+            First time on this project — read these five, in order
+          </h2>
+          <ol className="mt-6 space-y-3">
+            {READING_ORDER.map((item, i) => (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className="border-fd-border hover:bg-fd-accent flex gap-4 rounded-lg border p-4 transition-colors"
+                >
+                  <span className="text-fd-muted-foreground w-6 shrink-0 text-sm font-medium">
+                    {i + 1}
+                  </span>
+                  <span>
+                    <span className="block font-medium">{item.title}</span>
+                    <span className="text-fd-muted-foreground text-sm">{item.body}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section className="border-fd-border border-t">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14">
+          <h2 className="text-2xl font-semibold tracking-tight">Sections</h2>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {SECTIONS.map((s) => (
+              <Link
+                key={s.href}
+                href={s.href}
+                className="border-fd-border hover:bg-fd-accent rounded-lg border p-4 transition-colors"
+              >
+                <span className="block font-medium">{s.title}</span>
+                <span className="text-fd-muted-foreground text-sm">{s.body}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
       </section>
     </main>
   );

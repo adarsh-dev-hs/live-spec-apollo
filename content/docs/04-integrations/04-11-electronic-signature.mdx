@@ -1,0 +1,101 @@
+---
+title: "04-11 Electronic signature"
+description: "Gets an offer signed. Without it an accepted offer produces no signed document, and the permanent chain has no joining event — which means no placement, no trial, no day-90 record…"
+---
+
+**Package** `@apollo/integration-esign` · **Schema** `selection` · **Plan** D20 · **Effort** ~7.0pd · **Risk** Medium `EXT` · **Build in** Phase 5
+
+## 1. Purpose
+
+Gets an offer signed. **Without it an accepted offer produces no signed document, and the permanent
+chain has no joining event** — which means no placement, no trial, no day-90 record and no invoice.
+
+**No provider is named** in either client document.
+
+## 2. Scope
+
+**In scope:** sending an offer for signature, receiving the signed document and signer evidence, status
+updates without polling delay, per-envelope cost recording, and the provider interface.
+
+**Explicitly out of scope:** offer generation and templates (`03-08`); offer delivery over WhatsApp
+(`04-01`); the offer-to-contract mapping that follows signature (`03-08`); signing the **client**
+contract, which happens outside the platform.
+
+**Explicitly not built:** in-person or wet signature capture; witness or notarisation flows; signing
+anything other than an offer.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M7-I15` | D20 | Electronic signature | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-08` (the generated offer), `02-04` (the rendered and signed documents),
+`02-02` (signer evidence is audit material), `02-10`.
+
+**Consumed by:** `03-08` — signature moves the offer to `signed` and triggers the contract mapping,
+which produces the joining event `03-09` consumes.
+
+**External:** `X26` — **name the supplier; confirm the signature is valid for Indian employment offers;
+confirm per-envelope pricing.**
+
+## 5. Data model
+
+`selection.offer_version.esign_envelope_id` and `signed_document_id` (`03-08`).
+
+```ts
+interface ESignProvider {
+  send(i: { documentId: string; signerName: string; signerPhone: string; signerEmail?: string;
+            callbackUrl: string }): Promise<{ envelopeId: string }>
+  getStatus(envelopeId: string): Promise<{
+    state: 'sent' | 'viewed' | 'signed' | 'declined' | 'expired'
+    signedDocumentUrl?: string
+    signerEvidence?: Record<string, unknown>    // retained for audit
+    costUnits: number
+  }>
+}
+```
+
+## 6. State machines
+
+Drives `selection.offer`: `sent → opened → signed`, or `declined` / `expired`. **Status updates arrive
+by callback, not polling**, so the offer state is not stale on screen.
+
+## 7. API surface
+
+| Direction | Endpoint | Purpose |
+|---|---|---|
+| Outbound | in-process `esign.send()` | Called by `03-08` only |
+| Inbound | `POST /hooks/esign/:provider` (via `edge-webhook`) | Signature status callback |
+
+## 8. Events and jobs
+
+`esign.send` on the `provider` class; `esign.reconcile` hourly as a backstop for a missed callback.
+Events flow through `03-08` (`selection.offer.signed`).
+
+## 9. Frontend
+
+**N/A** — offer tracking is `03-08`, which distinguishes **viewed-but-unsigned from undelivered**.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | An offer is signed digitally and the signed document is **retrieved and stored** | `M7-I15` |
+| AC2 | Signature status updates the offer state **without polling delay** | `M7-I15` |
+| AC3 | **Signer identity evidence is retained for audit** | `M7-I15`, `M0-I4`, `M0-I6` |
+| AC4 | The provider sits behind an interface **so it can be replaced without domain change** | `M7-I15` |
+| AC5 | A declined signature captures a reason feeding the A8 write-back | `M7-I7` |
+| AC6 | Per-envelope cost is recorded | `OI-HS-05` |
+| AC7 | An expired envelope is reissued as a **new offer version**, not reopened | `M7-I7` |
+| AC8 | A missed callback is caught by reconciliation rather than leaving an offer permanently `sent` | `M7-I7` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-07` | **Who supplies electronic signature?** | Stub behind the interface. **Cannot be sized against an unknown API.** Estimate blocker. | `M7-I15` |
+| `X26` | Supplier, validity for Indian employment offers, pricing | **Without it an accepted offer produces no signed document and the permanent chain has no joining event.** | `M7-I15`, `M8-I1` |
+| `OI-HS-58` **[raised here]** | Does the offer require Aadhaar-based eSign (legally stronger, more friction) or a simple electronic signature? | Simple electronic signature. Aadhaar eSign changes the candidate journey materially and pulls `04-09` into the offer stage — worth deciding before the supplier is chosen, not after. | `M7-I15` |

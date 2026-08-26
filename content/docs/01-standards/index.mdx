@@ -1,39 +1,37 @@
 ---
-title: "Standards"
-description: "House rules. Every component spec assumes these."
+title: "01 Standards"
+description: "10 documents in 01 Standards."
 ---
 
-This section contains 10 documents.
-
 <Cards>
-  <Card title="01-01 · Repository Layout" href="/docs/01-standards/01-01-repository-layout">
-  One repository. Backend, frontends and infrastructure together, because the API contract is shared and a split would mean versioning it across repos for no benefit at this team…
+  <Card title="01-01 Repository layout" href="/docs/01-standards/01-01-repository-layout">
+    Nx + npm workspaces, one repository, six deployables and eight shared packages. Nx enforces the module boundaries that 00-02 says the monolith depends on.
   </Card>
-  <Card title="01-02 · Backend Conventions" href="/docs/01-standards/01-02-backend-conventions">
-  Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino
+  <Card title="01-02 Backend conventions" href="/docs/01-standards/01-02-backend-conventions">
+    Fastify 5 on Node 22, TypeScript strict, no ORM. These rules are assumed by every spec's §7 API surface and §8 events and jobs.
   </Card>
-  <Card title="01-03 · Frontend Conventions" href="/docs/01-standards/01-03-frontend-conventions">
-  React 19 · Vite · TypeScript · TanStack Query · React Router · React Hook Form + Zod · Tailwind
+  <Card title="01-03 Frontend conventions" href="/docs/01-standards/01-03-frontend-conventions">
+    Four client surfaces, one design system. React 19 + TypeScript everywhere; Vite for the three web apps, Expo for the app.
   </Card>
-  <Card title="01-04 · API Contract" href="/docs/01-standards/01-04-api-contract">
-  Every endpoint in the platform follows this. No module invents its own shape.
+  <Card title="01-04 API contract" href="/docs/01-standards/01-04-api-contract">
+    REST/JSON over HTTPS, schema-first. @apollo/contracts is the single definition of every request and response; the API validates against it, the OpenAPI document is generated from…
   </Card>
-  <Card title="01-05 · Database Conventions" href="/docs/01-standards/01-05-database-conventions">
-  PostgreSQL 16 · Drizzle ORM · SQL migrations
+  <Card title="01-05 Database conventions" href="/docs/01-standards/01-05-database-conventions">
+    One PostgreSQL 16 database, one schema per module, hand-written SQL, forward-only plain-SQL migrations. No ORM (AS-09).
   </Card>
-  <Card title="01-06 · Events and Background Jobs" href="/docs/01-standards/01-06-events-and-jobs">
-  Transactional outbox · BullMQ on Redis · append-only event store
+  <Card title="01-06 Events and jobs" href="/docs/01-standards/01-06-events-and-jobs">
+    Two separate mechanisms that are often confused. Events are a record that something happened, kept for reporting (F14). Jobs are work to be executed later (02-10).
   </Card>
-  <Card title="01-07 · Authentication, Authorisation and Data Scope" href="/docs/01-standards/01-07-auth-and-rbac">
-  The plan is explicit that these must not be conflated: "Candidate logins are completely separate from this — they use phone and code in M4" (M0-I1).
+  <Card title="01-07 Auth and RBAC" href="/docs/01-standards/01-07-auth-and-rbac">
+    Four principal kinds, one permission model, deny by default. 02-01 implements this; every other component obeys it.
   </Card>
-  <Card title="01-08 · Testing and Quality" href="/docs/01-standards/01-08-testing-and-quality">
-  353 person-days of QA sit against this build, back-loaded into months 4–6. The point of this document is to make sure that effort finds real defects rather than re-testing the…
+  <Card title="01-08 Testing and quality" href="/docs/01-standards/01-08-testing-and-quality">
+    The plan carries 1,062 conditions across 208 items. Each is a statement an item must satisfy, and each becomes at least one automated test.
   </Card>
-  <Card title="01-09 · Infrastructure and Deployment" href="/docs/01-standards/01-09-infrastructure-and-deployment">
-  Covers plan items M1-I5 (deploy to Apollo's AWS account, 10pd) and M1-I16 (environments and monitoring, 10pd). Build this in month one, not when M1 is scheduled — everything is…
+  <Card title="01-09 Infrastructure and deployment" href="/docs/01-standards/01-09-infrastructure-and-deployment">
+    Everything runs in AWS ap-south-1 (Mumbai) in an Apollo-owned account. Docker images for every service, GitHub Actions for CI/CD, EC2 for the long-running processes and Lambda for…
   </Card>
-  <Card title="01-10 · Security and Data Protection" href="/docs/01-standards/01-10-security-and-data-protection">
-  Covers plan item M4-I26 / F13 — data protection: consent, residency, retention (XL, 5pd build, High risk, COMP). This is a platform concern, not a module feature, which is why it…
+  <Card title="01-10 Security and data protection" href="/docs/01-standards/01-10-security-and-data-protection">
+    The platform holds personal and health-related data about healthcare professionals in India, plus billing evidence that must survive a dispute years later. 02-12 implements…
   </Card>
 </Cards>

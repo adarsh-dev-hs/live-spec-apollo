@@ -1,0 +1,96 @@
+---
+title: "04-05 Speech-to-text"
+description: "Clients send vacancies as WhatsApp voice notes. This turns the audio into text so it can be parsed to the same requisition schema as WhatsApp text — and keeps the audio playable so…"
+---
+
+**Package** `@apollo/integration-stt` · **Schema** `inbound` · **Plan** A1 · **Effort** ~11.0pd · **Risk** High `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+Clients send vacancies as WhatsApp voice notes. This turns the audio into text so it can be parsed to
+the same requisition schema as WhatsApp text — and **keeps the audio playable** so a recruiter can
+listen when the machine could not read it.
+
+The audio is recorded in a hospital corridor, not a studio. **Language coverage must be proven against
+field-captured audio**, not sample files.
+
+## 2. Scope
+
+**In scope:** transcribing an audio payload; language detection and coverage; retaining audio against
+the inbound record; routing failures and over-length notes to manual entry with audio intact;
+per-minute cost recording.
+
+**Explicitly out of scope:** parsing the transcript into fields (`03-02`); the manual entry queue
+(`03-02`); voice **calls** (`04-04`).
+
+**Explicitly not built:** speaker diarisation; transcription of trial check-in calls (`04-04` returns
+its own transcript); a transcription review screen beyond the manual entry queue.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I23` | A1 | Voice note transcription | XXL | 8.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-08` (the inbound record and the manual entry route), `02-04` (audio storage),
+`04-01` (media download), `02-10`.
+
+**Consumed by:** `03-02` parsers.
+
+**External:** `X25` — **name the supplier; confirm it handles the Indian languages clients actually
+send voice notes in; decide whether it is the same supplier as outbound voice; confirm per-minute
+pricing.**
+
+## 5. Data model
+
+No tables. `inbound.inbound_record.transcript` holds the text; `raw_document_id` points at the audio in
+`02-04`.
+
+```ts
+interface SpeechToTextProvider {
+  transcribe(i: { documentId: string; languageHints: string[] }): Promise<{
+    text: string; detectedLanguage: string; confidence: number; durationSeconds: number; costUnits: number
+  }>
+}
+```
+
+## 6. State machines
+
+Within `02-08`'s `InboundRecord`: `identified → parsed` on success;
+`identified → unparseable` on transcription failure **with the audio retained and playable**, and the
+same for a note beyond the accepted duration — **routed to manual entry rather than rejected**.
+
+## 7. API surface
+
+In-process `stt.transcribe()`, called by the `inbound.classify` pipeline. No public endpoint.
+
+## 8. Events and jobs
+
+`stt.transcribe` on the `provider` queue class, rate-limited, cost recorded.
+
+## 9. Frontend
+
+**N/A** — the audio player and transcript appear in `03-02`'s manual entry queue, built from `02-04`'s
+`<FileViewer>`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A WhatsApp voice note is transcribed and parsed **to the same requisition schema as WhatsApp text** | `M3-I23` |
+| AC2 | Audio is retained against the inbound record and **remains playable** | `M3-I23` |
+| AC3 | Transcription failure routes to manual entry **with audio retained** | `M3-I23` |
+| AC4 | A voice note beyond the accepted duration routes to manual entry **rather than being rejected** | `M3-I23` |
+| AC5 | **Language coverage is proven against field-recorded audio, not studio samples** | `M3-I23` |
+| AC6 | Per-minute cost is recorded for consumption modelling | `OI-HS-05` |
+| AC7 | Low transcription confidence routes to manual entry rather than producing a confident wrong requisition | `OI-M3-06` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-05` | **Which speech-to-text provider — the same as `04-04` or separate?** | Stub behind the interface. **Determines one integration or two, and whether language coverage is proven once.** | `M3-I23`, `M5-A5` |
+| `X25` | Supplier, language coverage against real voice notes, pricing | Apollo's to name | Phase 3 |
+| `OI-HS-52` **[raised here]** | What is "the accepted duration" for a voice note? | 5 minutes, held in `02-03`. Longer notes go to manual entry. Nothing in the plan states a number, and it directly sets both cost and the manual queue load. | `M3-I23` |

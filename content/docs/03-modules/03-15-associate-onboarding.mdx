@@ -1,0 +1,215 @@
+---
+title: "03-15 Associate onboarding"
+description: "The paperwork side of someone joining as a shift worker. Today it is collected and stored outside the platform."
+---
+
+**Package** `@apollo/onboarding` · **Schema** `onboarding` · **Plan** D21 · **Effort** ~26.5pd · **Risk** Low `COMP` · **Build in** Phase 6
+
+## 1. Purpose
+
+The paperwork side of someone joining as a shift worker. Today it is collected and stored outside the
+platform. This module brings it in: an associate profile with the employment details that only matter
+once someone is actually working, the statutory forms including PF/UAN transfer and gratuity
+nomination, a checklist of documents to collect, and a guided step-by-step flow in the app so the
+candidate can do it themselves.
+
+**Payroll cannot run for an associate whose paperwork is incomplete**, which is the operational reason
+this exists.
+
+## 2. Scope
+
+### In scope
+
+- Associate profile: employment details, bank details, statutory identifiers, completeness
+- Statutory forms, each with its own completion state, returnable with a reason
+- Document checklist, differing by role and by state
+- The guided in-app onboarding flow
+- The onboarding gate that blocks a pay run for an incomplete associate
+
+### Explicitly out of scope
+
+- The candidate record — `03-04`. The associate profile **builds on it rather than duplicating it**.
+- Document storage and virus scanning — `02-04`.
+- Chasing messages — `02-09`.
+- The pay run itself — `03-17`.
+
+### Explicitly not built
+
+- **Filing the statutory returns.** Filing is outside this contract entirely; the forms are collected
+  and stored.
+- Onboarding for permanent placements. Those candidates join the client directly, not Apollo.
+- Offer or contract generation for associates — `03-08` covers offers.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M11-I1` | D21 | Associate details | L | 3.0 |
+| `M11-I2` | D21 | Statutory forms | L | 3.0 |
+| `M11-I3` | D21 | Document checklist | M | 2.0 |
+| `M11-I4` | D21 | App: onboarding | L | 3.0 |
+| `M11-I5` | D21 | Onboarding gate | M | 2.0 |
+
+**Specification basis:** named in Part A as D21 with its contents listed; no client module chapter.
+All items Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `03-04` (the candidate record), `03-09` (the placement that triggers onboarding),
+`02-04`, `02-12` (**bank details are encrypted and access-restricted**), `03-05` (the app shell the
+guided flow runs in), `02-09`.
+
+**Consumed by:** `03-17` — **payroll needs a complete associate profile and statutory forms before
+anyone can be paid**.
+
+**External:** none. Statutory form content is Indian regulation, not an API.
+
+## 5. Data model
+
+```sql
+CREATE TABLE onboarding.associate_profile (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL UNIQUE,        -- builds on the candidate record, never duplicates it
+    placement_id uuid,
+    employment_type text NOT NULL,
+    date_of_joining date,
+    -- encrypted at column level, access audited (01-10)
+    bank_account_enc bytea, bank_ifsc_enc bytea, bank_name text,
+    pan_enc bytea, uan_enc bytea, aadhaar_ref_enc bytea, esic_number_enc bytea,
+    emergency_contact jsonb,
+    state text NOT NULL DEFAULT 'not_started' CHECK (state IN
+      ('not_started','in_progress','complete','verified')),
+    missing_mandatory text[] NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE onboarding.statutory_form (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    associate_profile_id uuid NOT NULL REFERENCES onboarding.associate_profile(id),
+    form_code text NOT NULL,                  -- 'pf_form_11' | 'uan_transfer' | 'gratuity_nomination' …
+    state text NOT NULL DEFAULT 'pending' CHECK (state IN
+      ('pending','submitted','returned','verified')),   -- its OWN state, not one overall flag
+    payload jsonb,
+    document_id uuid,
+    returned_reason text,
+    submitted_at timestamptz, verified_at timestamptz, verified_by uuid,
+    UNIQUE (associate_profile_id, form_code)
+);
+
+CREATE TABLE onboarding.checklist_item (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    associate_profile_id uuid NOT NULL REFERENCES onboarding.associate_profile(id),
+    document_type text NOT NULL,
+    is_mandatory boolean NOT NULL DEFAULT true,
+    blocks_payroll boolean NOT NULL DEFAULT true,   -- blocks payroll, NOT the placement
+    state text NOT NULL DEFAULT 'awaiting'
+      CHECK (state IN ('awaiting','received','accepted','rejected')),
+    document_id uuid, rejection_reason text,
+    last_chased_at timestamptz
+);
+
+CREATE TABLE onboarding.checklist_template (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    role_code text, state_code text,          -- differs by role and by state
+    document_types jsonb NOT NULL,
+    is_active boolean NOT NULL DEFAULT true
+);
+```
+
+## 6. State machines
+
+### `AssociateProfile`
+
+`not_started → in_progress → complete → verified`. **Cannot be marked complete with mandatory statutory
+fields missing.**
+
+### `StatutoryForm`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | required for this associate | `pending` | **Each form has its own state, not one overall flag** |
+| `pending` | associate submits | `submitted` | Stored as a document and retained |
+| `submitted` | Ops returns it | `returned` | **Tells the candidate exactly what to fix**; reappears in the app flow with the reason |
+| `submitted` | Ops verifies | `verified` | |
+
+### `ChecklistItem`
+
+`awaiting → received → accepted | rejected`. **A missing document blocks payroll but not the placement
+itself.**
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST`/`PATCH` | `/v1/associates/:candidateId/profile` | `onboarding:manage` | Details; bank and statutory identifiers |
+| `GET` | `/v1/associates/:id/forms` | `onboarding:read` | Each form and its own state |
+| `POST` | `/v1/associates/:id/forms/:code/submit` | candidate or `onboarding:manage` | |
+| `POST` | `/v1/associates/:id/forms/:code/return` | `onboarding:manage` | **Reason required** |
+| `POST` | `/v1/associates/:id/forms/:code/verify` | `onboarding:manage` | |
+| `GET` | `/v1/associates/:id/checklist` | `onboarding:read` | Required documents and what has arrived |
+| `POST` | `/v1/associates/:id/checklist/:itemId/chase` | `onboarding:manage` | Through `02-09` |
+| `GET` | `/v1/associates/blocked` | `payroll:read` | **Who cannot be paid, and why — visible before the run** |
+| `GET` | `/v1/me/onboarding` | candidate | The guided flow's state |
+| `POST` | `/v1/me/onboarding/:step` | candidate | Saves progress |
+
+## 8. Events and jobs
+
+**Events emitted:** `onboarding.profile.completed` · `onboarding.form.submitted` · `.returned` ·
+`.verified` · `onboarding.checklist.item_received` · `onboarding.associate.blocked`.
+
+**Events subscribed:** `placement.placement.joined` where `service_line = 'contractual'` → create the
+associate profile and the checklist from the template.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `onboarding.chase-documents` | daily | Chases missing checklist items through `02-09` |
+| `onboarding.evaluate-gate` | before each pay run, and daily | Recomputes who is blocked |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Associate details — employment details, bank details, statutory identifiers, what is still missing | `/associates/:id` | `M11-I1` |
+| Statutory forms — the list, each form, return with a reason | `/associates/:id/forms` | `M11-I2` |
+| Document checklist — required vs received, chase a missing document | `/associates/:id/checklist` | `M11-I3` |
+| **App: onboarding** — one task at a time, photo capture, saved progress, rejected items reappearing with the reason | mobile stack | `M11-I4` |
+| Blocked associates | `/payroll/blocked` | `M11-I5` |
+
+The app flow is built against `03-05`'s shell per the confirmed scope decision — this module owns the
+screen, `03-05` owns the app it runs in.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | An associate profile **builds on the candidate record rather than duplicating it** | `M11-I1` |
+| AC2 | Bank details are stored encrypted and access is restricted | `M11-I1`, `M4-I27` |
+| AC3 | A profile cannot be marked complete with mandatory statutory fields missing | `M11-I1` |
+| AC4 | Payroll cannot run for an incomplete profile | `M11-I1`, `M11-I5` |
+| AC5 | **Each form has its own completion state, not one overall flag** | `M11-I2` |
+| AC6 | A returned form tells the candidate **exactly what to fix** | `M11-I2` |
+| AC7 | Completed forms are stored as documents and retained | `M11-I2` → `M0-I6` |
+| AC8 | **Filing the forms with the authorities is not in scope** | `M11-I2` |
+| AC9 | The checklist differs by role and by state where statutory requirements differ | `M11-I3` |
+| AC10 | **A missing document blocks payroll but not the placement itself** | `M11-I3` |
+| AC11 | Chasing goes out through the messaging layer | `M11-I3` → `M3-I30` |
+| AC12 | An associate can complete onboarding **entirely in the app without an Ops user** | `M11-I4` |
+| AC13 | Progress is saved so it can be finished across several sessions | `M11-I4` |
+| AC14 | **Guided flows live in the app, not WhatsApp** | `M11-I4` |
+| AC15 | A rejected item reappears in the flow with the reason shown | `M11-I4` |
+| AC16 | Payroll cannot run for an associate whose mandatory forms are incomplete | `M11-I5` |
+| AC17 | An override **requires approval and is audited** | `M11-I5` |
+| AC18 | **Blocked associates are visible before the pay run, not during it** | `M11-I5` |
+| AC19 | Every read of an encrypted bank or statutory field writes an audit entry | `01-10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| — | **No client module chapter exists for D21**; only the deliverable name and its listed contents | The five items are the smallest set delivering what the name promises. Low confidence throughout. | All of `M11` |
+| `OI-HS-39` **[raised here]** | Which statutory forms exactly, and does the set vary by state? | Seeded with PF Form 11, UAN transfer and gratuity nomination — the three Part A names — with the template varying by role and state so more can be added as data. The authoritative list needs an Apollo compliance owner. | `M11-I2` |
+| `OI-HS-40` **[raised here]** | Who verifies a submitted statutory form, and against what? | An Ops role with the `onboarding:manage` permission. Whether verification means "the field is filled" or "the document is genuine" is not stated, and the second is a materially larger job. | `M11-I2` |
+| `OI-HS-14` | Retention for bank details and statutory forms against DPDP | Follows the finance retention period, not the candidate period (`AS-23`) | `M11-I1` |

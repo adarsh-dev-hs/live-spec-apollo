@@ -1,0 +1,195 @@
+---
+title: "02-03 Settings and reference data"
+description: "One admin area for every configurable list and waiting period in the platform. There are at least nine; without a shared home they become nine separate screens built by five…"
+---
+
+**Package** `@apollo/settings` · **Schema** `settings` · **Plan** F05 · **Effort** ~11.0pd · **Risk** Medium `SHARED` · **Build in** Phase 1
+
+## 1. Purpose
+
+One admin area for every configurable list and waiting period in the platform. There are at least nine;
+without a shared home they become nine separate screens built by five different people. It also holds
+the three candidate categories and the two care settings **as data rather than code**, which is the
+client's explicit condition (letter items 1 and 14) for the platform being category-aware — a core
+built to one category makes doctors a migration rather than a module.
+
+## 2. Scope
+
+### In scope
+
+- The settings register: every configurable list and waiting period, in one place
+- Reference data: candidate categories, care settings, service lines — data, not code
+- Editable lists: add, rename, reorder, deactivate an entry
+- Waiting periods with a **platform default and a per-client override**
+- Platform-level defaults an unconfigured client falls back to, so invoicing never stalls
+- Versioning: changing a setting does not retrospectively alter records created under the old value
+
+### Explicitly out of scope
+
+- Per-client contract windows themselves — the *values* live on `ClientWindowConfig` in `03-01`; this
+  component holds the **platform defaults** they fall back to and the screen that edits them.
+- Ranking weights (`03-07`), message templates (`02-09`), category attribute definitions (`03-04`),
+  channel configuration (`03-02`). Each is domain configuration with its own editor; they register
+  here so the register is complete, but they are edited in their own module.
+- Environment configuration. That is deployment (`01-09`), not business settings.
+
+### Explicitly not built
+
+- Audit retention as a setting. Fixed policy, per the plan's scope discipline.
+- A generic "custom fields" builder. The plan asks for named lists, not an extensibility platform.
+- Per-user preferences. Saved views belong to `02-07`; notification preferences to `02-09`.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M0-I5` | F05 | Settings list, reference data, edit list, edit waiting period | XL | 6.0 |
+
+The nine settings the plan names: close reason · hold reason · rejection reason · required fields per
+category · contact schedule · retention confirmation window · timesheet approval window · follow-up
+window · market configuration.
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` (only `platform_admin` may edit), `02-02` (every change is audited).
+
+**Consumed by:** everything. `03-03` close and hold reasons (`M3-I15`, `OI-M3-11`); `03-02` required
+fields and follow-up window (`M3-I7`, `M3-I8`); `03-08`/`03-07` rejection reason taxonomy — one list,
+two consumers (Part A coupling 1); `03-01` window fallbacks (`M2-I10`); `02-13` market configuration;
+`03-09` check-in question sets; `03-06` contact schedules.
+
+**External:** `OI-A-05` — Apollo has not supplied the default values for the deemed-confirmation and
+deemed-approval windows.
+
+## 5. Data model
+
+```sql
+CREATE TABLE settings.list (
+    code        text PRIMARY KEY,       -- 'close_reason' | 'hold_reason' | 'rejection_reason'
+                                        -- | 'candidate_category' | 'care_setting' | 'service_line' …
+    name        text NOT NULL,
+    description text NOT NULL,
+    is_system   boolean NOT NULL DEFAULT false,  -- system lists cannot be deleted, only extended
+    owner_component text NOT NULL       -- '02-03' | '03-04' | '03-07' — where it is edited
+);
+
+CREATE TABLE settings.list_entry (
+    code           text PRIMARY KEY,    -- stable, referenced by business tables
+    list_code      text NOT NULL REFERENCES settings.list(code),
+    label          text NOT NULL,
+    sort_order     integer NOT NULL DEFAULT 0,
+    attributes     jsonb NOT NULL DEFAULT '{}'::jsonb,  -- e.g. category → which attribute set applies
+    deactivated_at timestamptz,         -- deactivated entries stay readable on existing records
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL,
+    UNIQUE (list_code, label)
+);
+CREATE INDEX ON settings.list_entry (list_code, sort_order) WHERE deactivated_at IS NULL;
+
+CREATE TABLE settings.setting (
+    code          text PRIMARY KEY,     -- 'retention_confirmation_window_days' | 'session_idle_minutes' …
+    name          text NOT NULL,
+    value_type    text NOT NULL CHECK (value_type IN ('integer','decimal','boolean','text','duration','json')),
+    default_value jsonb NOT NULL,       -- the platform-level default (OI-A-05)
+    is_client_overridable boolean NOT NULL DEFAULT false,
+    unit          text,                 -- 'days' | 'minutes'
+    description   text NOT NULL,
+    owner_component text NOT NULL
+);
+
+CREATE TABLE settings.setting_version (  -- append-only; a change never rewrites the past
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    setting_code text NOT NULL REFERENCES settings.setting(code),
+    value jsonb NOT NULL,
+    effective_from timestamptz NOT NULL DEFAULT now(),
+    created_by uuid NOT NULL,
+    note text
+);
+CREATE INDEX ON settings.setting_version (setting_code, effective_from DESC);
+```
+
+Seeded by migration on day one: the three candidate categories (`nurse`, `doctor`, `allied_health`),
+the two care settings (`hospital`, `home_healthcare`), the two service lines, and every one of the nine
+lists and windows above with a documented default.
+
+## 6. State machines
+
+### `ListEntry`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | administrator adds | `active` | `code` is generated and immutable; the label may change |
+| `active` | rename / reorder | `active` | Existing records keep their `code`, so nothing is rewritten |
+| `active` | deactivate | `deactivated` | Not offered in new pickers; **stays readable** on records that already used it |
+| `deactivated` | reactivate | `active` | |
+
+### `Setting`
+
+A setting has no lifecycle; it accumulates `setting_version` rows. Resolution is
+`client override → platform default`, evaluated at the moment of use, and a change **does not
+retrospectively alter deadlines already running** (`M0-I5`, `M2-I10`).
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/settings/lists` | `settings:read` | The register — every list and where it is edited |
+| `GET` | `/v1/settings/lists/:code/entries?includeInactive=` | `settings:read` | Entries for a picker |
+| `POST` | `/v1/settings/lists/:code/entries` | `settings:edit` | Add |
+| `PATCH` | `/v1/settings/lists/:code/entries/:entryCode` | `settings:edit` | Rename, reorder, deactivate |
+| `GET` | `/v1/settings` | `settings:read` | All settings with current values |
+| `PUT` | `/v1/settings/:code` | `settings:edit` | New version, effective now |
+| `GET` | `/v1/settings/:code/resolve?clientId=` | any authenticated service | **The resolution endpoint every consumer uses** — returns value plus `source: 'client' \| 'default'` |
+| `GET` | `/v1/reference/categories` · `/care-settings` | any | Cached reference data for the console, app and portal |
+
+Resolution is also available in-process as `settings.resolve(code, { clientId })` so a service does not
+make an HTTP call to itself.
+
+## 8. Events and jobs
+
+**Events emitted**
+
+| Event | When | Consumed by |
+|---|---|---|
+| `settings.list_entry.changed` | add, rename, reorder, deactivate | Console cache invalidation |
+| `settings.setting.changed` | new version | `02-09`, `03-06`, `03-11` re-read on next use |
+| `settings.reference.changed` | a category or care setting is added | Every surface — adding a category must be a data change, not a deploy |
+
+**Jobs:** none scheduled. Reference data is cached in-process with a 60-second TTL and busted by the
+events above.
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Settings list — every configurable list and window with where it is edited | `/admin/settings` | `M0-I5` |
+| Reference data — categories, care settings, service lines | `/admin/settings/reference` | `M0-I5` |
+| Edit list — add, rename, reorder, deactivate | `/admin/settings/lists/:code` | `M0-I5` |
+| Edit waiting period — platform default plus per-client values | `/admin/settings/windows/:code` | `M0-I5` |
+
+The waiting-period editor shows the platform default alongside every client override and warns that
+changing the default does not alter deadlines already running. Deactivating a list entry warns how many
+existing records use it.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Close reasons, hold reasons, rejection reasons and category fields are all edited here, not in nine screens | `M0-I5` |
+| AC2 | A per-client value overrides the platform default; with no client value the default applies | `M0-I5` |
+| AC3 | A deactivated list entry stays readable on records that already used it | `M0-I5` |
+| AC4 | Changing a setting does not retrospectively alter records created under the old value | `M0-I5` |
+| AC5 | The nine named settings all exist: close reason, hold reason, rejection reason, required fields per category, contact schedule, retention confirmation window, timesheet approval window, follow-up window, market configuration | `M0-I5` |
+| AC6 | Platform-level defaults live here, including the fallback windows an unconfigured client resolves to | `M0-I5`, `M2-I10` |
+| AC7 | The three candidate categories are held as data — adding a fourth is a data change, not a build | `M0-I5`, letter item 1 |
+| AC8 | The two care settings are held as data on the same basis | `M0-I5`, letter item 10 |
+| AC9 | Only `platform_admin` can change settings, and every change is audited | `M0-I5` → `M0-I3`, `M0-I4` |
+| AC10 | A resolution call returns the value **and its source**, so a screen can show "platform default" rather than implying a client chose it | `M2-I10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-05` | Apollo has not supplied the default values for the deemed-confirmation and deemed-approval windows | Seeded at **14 days** each, clearly labelled as a Hiresense placeholder in the UI, so an unconfigured client never stalls invoicing while the real number is awaited | `M9-D8`, `M8-D22`, `M2-D13` |
+| `OI-M3-11` | Close-reason taxonomy, and whether a hold-reason taxonomy is wanted | Both lists exist and are seeded empty; close reason is **mandatory** so the list must be populated before close can be tested | `M3-I15` |
+| `OI-M3-07` | Required-field set per candidate category — no doctors owner is named | The list exists per category; the doctors set is seeded empty and **blocks publish for that category rather than passing silently** (`M3-I7`) | `M3-I7`, `M3-I22` |

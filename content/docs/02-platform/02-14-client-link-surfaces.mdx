@@ -1,0 +1,304 @@
+---
+title: "02-14 Client link surfaces"
+description: "The entire client relationship in Release 1. There is no client login anywhere until Phase 6, so every interaction a hospital has with the platform is a tokenised link sent over…"
+---
+
+**Package** `@apollo/client-links`, `@apollo/links` (app) · **Schema** `links` · **Plan** A13 · **Effort** ~63.0pd · **Risk** High `SHARED` · **Build in** Phase 4
+
+## 1. Purpose
+
+The entire client relationship in Release 1. There is no client login anywhere until Phase 6, so every
+interaction a hospital has with the platform is a **tokenised link sent over the channel they already
+use**, reached without a password or an account.
+
+One mechanism, built once, instantiated by four configurable link types: shortlist response, trial
+check-in at day 30 and 60, day-90 retention, and timesheet approval. Three other components consume it.
+**Only the day-90 instance is a billing trigger** — day 30 and day 60 capture signal and must not
+create a second trigger path.
+
+Without this component there is no shortlist response path, no trial check-in, no timesheet approval
+and no retention trigger. D12 is deferred, so no alternative client surface exists.
+
+## 2. Scope
+
+### In scope
+
+- The link mechanism: unguessable expiring tokens, issue, send, open, answer, expire, reissue
+  (`M7-I17`)
+- Four link types as configuration on one mechanism, with the billing-trigger flag settable on exactly
+  one of them (`M7-I8`)
+- Link recipients: who at the client receives which type, modelled so the unresolved scope question is
+  a data change (`M7-I9`)
+- The three public pages: shortlist response, trial check-in, timesheet approval (`M7-I10`, `M7-I11`,
+  `M7-I12`)
+- Answer routing to the right consumer, with duplicate-submission protection (`M7-I18`)
+- The link log finance uses to justify an invoice (`M7-I13`)
+- Deemed handling on expiry — **only** for day-90 and timesheet types
+
+### Explicitly out of scope
+
+- What the answers mean. A shortlist response writes into `03-08`'s selection record; a day-90 answer
+  produces `03-09`'s `RetentionRecord`; a timesheet approval sets `03-10`'s state. This component
+  routes; it does not interpret.
+- The client contact records themselves — `03-01` (`M2-I4`).
+- Message delivery — `02-09` sends the link over WhatsApp or email.
+- Offer delivery and signature — `03-08` and `04-11`. An offer is not a link type.
+
+### Explicitly not built
+
+- Any client login or account. Links need no password (`A13`).
+- A fifth link type for **client-side interview feedback**. Part A names four and interview feedback is
+  not among them — raised as `OI-HS-11`, not assumed in.
+- Letting day 30 or day 60 trigger an invoice. The flag is not editable on those types.
+- A link inbox or history for the recipient. One link, one record, one action.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M7-I8` | A13 | Link types — four instances on one mechanism | L | 3.0 |
+| `M7-I9` | A13 | Link recipients | L | 3.0 |
+| `M7-I10` | A13 | Client page: shortlist | XL | 5.0 |
+| `M7-I11` | A13 | Client page: check-in (day 30, 60, 90) | XL | 5.0 |
+| `M7-I12` | A13 | Client page: timesheet approval | XL | 5.0 |
+| `M7-I13` | A13 | Link log | L | 3.0 |
+| `M7-I17` | A13 | Client link mechanism | XL | 5.0 |
+| `M7-I18` | A13 | Link answer routing | L | 3.0 |
+
+Part A CLOSED: the mechanism is priced once and each type as an instance.
+
+## 4. Dependencies
+
+**Must exist first:** `03-01` (client contacts and per-client windows), `02-09` (delivery), `02-05`
+(the link-page components), `02-03` (rejection reason taxonomy shown on the shortlist page), `02-01`
+(the `link` realm principal).
+
+**Consumed by:** `03-07`/`03-08` shortlist submission, `03-09` trial check-ins and the retention
+record, `03-10` timesheet approval, `03-11` billing evidence.
+
+**Build order:** **before** its three consumers (Part A coupling 5). The client's letter goes further
+and asks for one real link in month 2 — *"one client, one nurse, one link"* — because the permanent
+billing chain rests on an untested assumption about client behaviour. That spike is gate G2 in `00-05`.
+
+**External:** `X05` DNS subdomain — links are sent to hospitals over WhatsApp and must resolve at an
+address that looks legitimate. `X29` client link recipients — Apollo must collect a named person per
+client and confirm each is content to answer by link.
+
+## 5. Data model
+
+```sql
+CREATE TABLE links.link_type (
+    code text PRIMARY KEY,                  -- 'shortlist_response' | 'day_30_check_in'
+                                            -- | 'day_60_check_in' | 'day_90_retention'
+                                            -- | 'timesheet_approval'
+    name text NOT NULL,
+    validity_hours integer NOT NULL,
+    is_billing_trigger boolean NOT NULL DEFAULT false,
+    can_be_billing_trigger boolean NOT NULL DEFAULT false,  -- immutable seed; false for day 30/60
+    supports_deemed boolean NOT NULL DEFAULT false,         -- day_90 and timesheet only
+    deemed_window_setting text,             -- settings code resolved per client
+    consumer_component text NOT NULL,
+    is_enabled boolean NOT NULL DEFAULT true
+);
+-- guard: is_billing_trigger may only be true where can_be_billing_trigger is true
+ALTER TABLE links.link_type ADD CONSTRAINT billing_flag_guard
+  CHECK (NOT is_billing_trigger OR can_be_billing_trigger);
+
+CREATE TABLE links.link_recipient (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_contact_id uuid NOT NULL,        -- clients.client_contact(id)
+    link_type_code text NOT NULL REFERENCES links.link_type(code),
+    -- exactly one scope column is non-null — this is how OI-A-12 becomes a data change
+    client_id      uuid,
+    location_id    uuid,
+    requisition_id uuid,
+    placement_id   uuid,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    CONSTRAINT exactly_one_scope CHECK (
+      num_nonnulls(client_id, location_id, requisition_id, placement_id) = 1)
+);
+
+CREATE TABLE links.client_link (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    link_type_code text NOT NULL REFERENCES links.link_type(code),
+    token_hash text NOT NULL UNIQUE,        -- ≥128 bits of entropy, stored hashed only
+    recipient_id uuid NOT NULL REFERENCES links.link_recipient(id),
+    client_id uuid NOT NULL,
+    subject_type text NOT NULL,             -- 'shortlist' | 'placement' | 'timesheet'
+    subject_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'issued' CHECK (state IN
+      ('issued','sent','opened','answered','expired','deemed','revoked')),
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    sent_at timestamptz, first_opened_at timestamptz, answered_at timestamptz,
+    expires_at timestamptz NOT NULL,
+    deemed_at timestamptz,
+    deemed_window_days integer,             -- what was applied
+    deemed_window_source text CHECK (deemed_window_source IN ('client','platform_default')),
+    reissued_from uuid REFERENCES links.client_link(id),
+    message_id uuid,                        -- messaging.message
+    created_by uuid NOT NULL
+);
+CREATE INDEX ON links.client_link (subject_type, subject_id);
+CREATE INDEX ON links.client_link (state, expires_at) WHERE state IN ('issued','sent','opened');
+
+CREATE TABLE links.link_response (          -- append-only; one per link, ever
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_link_id uuid NOT NULL UNIQUE REFERENCES links.client_link(id),
+    responded_at timestamptz NOT NULL DEFAULT now(),
+    recipient_id uuid NOT NULL,             -- who answered — what makes the invoice defensible
+    payload jsonb NOT NULL,                 -- shape per link type
+    ip inet, user_agent text,
+    routed_at timestamptz, routed_to text
+);
+REVOKE UPDATE, DELETE ON links.link_response FROM PUBLIC;
+
+CREATE TABLE links.link_open (              -- every open, for the log
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_link_id uuid NOT NULL REFERENCES links.client_link(id),
+    opened_at timestamptz NOT NULL DEFAULT now(),
+    ip inet, user_agent text
+);
+```
+
+## 6. State machines
+
+### `ClientLink` (`M7-I17`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | consumer requests a link | `issued` | Token generated, hashed, bound to one recipient and one subject |
+| `issued` | delivered via `02-09` | `sent` | WhatsApp, email fallback |
+| `sent` | recipient opens | `opened` | Every open recorded |
+| `opened` | recipient submits | `answered` | Response is append-only and **unique per link** |
+| `answered` | recipient resubmits | `answered` | **Returns the original answer**; no second response created |
+| `issued`/`sent`/`opened` | `expires_at` passes | `expired` | |
+| `expired` | per-client window passes, type supports deemed | `deemed` | **Only `day_90_retention` and `timesheet_approval`** |
+| any | reissued | `revoked` | New token issued; **the original is invalidated** |
+
+Day 30 and day 60 can reach `expired` but never `deemed`, and never carry a billing trigger.
+
+### Deemed resolution
+
+```
+window = ClientWindowConfig[client].<type>_window_days        (03-01)
+      ?? settings.default.<type>_window_days                   (02-03, OI-A-05)
+deemed_window_source records which one applied, and it is shown on the record
+```
+
+## 7. API surface
+
+### Public (the `link` realm — no account)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/l/:token` | Resolves the token, records an open, returns the page payload for its type |
+| `POST` | `/l/:token/respond` | Submits the answer; idempotent — a second submission returns the first |
+
+Both are rate-limited per token and per IP. There is **no collection endpoint of any kind** — a link
+reaches exactly one record. The payload omits internal reason codes, ranking scores and notes.
+
+### Internal
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/links` | `link:issue` | Issue a link of a type for a subject and recipient |
+| `POST` | `/v1/links/:id/reissue` | `link:issue` | New token; original invalidated |
+| `POST` | `/v1/links/:id/revoke` | `link:manage` | |
+| `GET` | `/v1/links?type=&state=&subjectId=&cursor=` | `link:read` | The link log |
+| `GET`/`POST`/`PATCH` | `/v1/link-types` | `settings:edit` | Validity period per type; billing flag where permitted |
+| `GET`/`POST`/`PATCH` | `/v1/link-recipients` | `client:manage` | Who receives which type, at which scope |
+
+## 8. Events and jobs
+
+**Events emitted:** `links.link.issued` · `.sent` · `.opened` · `.answered` · `.expired` · `.deemed` ·
+`.revoked`.
+
+**Events subscribed:** `matching.shortlist.submitted` (issue a shortlist link),
+`placement.trial_event.due` (issue the day 30/60/90 link),
+`timesheets.timesheet.sent_for_approval` (issue the timesheet link).
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `links.issue` | on demand | Creates the token and hands the message to `02-09` |
+| `links.expire-and-deem` | hourly | Expires links; applies the deemed transition **only** to the two eligible types. **A stalled run silently stops invoicing, so it pages.** |
+| `links.route-answer` | on answer | Dispatches to the consumer per `M7-I18` |
+| `links.remind` | daily | Chases an unanswered link before its window closes, so the countdown is not the first anyone hears of it |
+
+### Routing table (`M7-I18`)
+
+| Link type | Answer routes to | Effect |
+|---|---|---|
+| `shortlist_response` | `03-08` selection record | Per-candidate accept, reject with a structured reason, or request interview |
+| `day_30_check_in` | `03-09` trial response | **Signal only** |
+| `day_60_check_in` | `03-09` trial response | **Signal only** — client intent, no trigger |
+| `day_90_retention` | `03-09` `RetentionRecord` → `03-11` `BillingTrigger` | The permanent invoice trigger |
+| `timesheet_approval` | `03-10` timesheet state | `approved`; a queried line routes back to Ops without approving the rest |
+
+## 9. Frontend
+
+Three pages in `apps/links`. Mobile-first, single column, no navigation, ≤120KB gzipped, no third-party
+script.
+
+| Page | Route | Content | Item |
+|---|---|---|---|
+| Shortlist | `/l/:token` (type-dispatched) | Candidates put forward with the agreed details; per candidate: accept, reject **with a structured reason from the same taxonomy used internally**, or request interview | `M7-I10` |
+| Check-in day 30 / 60 | `/l/:token` | How is the placement going — attendance, salary timeliness, preceptor, accommodation, adjusted for care setting | `M7-I11` |
+| Check-in day 90 | `/l/:token` | **One question, one action**: is the person still there | `M7-I11` |
+| Timesheet | `/l/:token` | Shifts worked in the period with times and hours; approve, or query a line with a reason | `M7-I12` |
+
+States: expired, already answered, revoked — each a **clear state, never an error page**. Every page
+ends with an explicit confirmation that the response was received.
+
+Console side: link log (`/links`) filterable by type, state and client, marking links that expired
+without an answer and moved to deemed, with reissue. **Finance can read it without recruiter
+permissions** (`M7-I13`).
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | The mechanism is built once and each link type is an instance on top of it | `M7-I8`, `M7-I17` |
+| AC2 | Instances serve M7 shortlist, M8 day 30/60/90 check-in and M9 timesheet approval | `M7-I17` |
+| AC3 | **Only the day-90 instance can be configured as a billing trigger**; the flag is not editable on day 30 or day 60 | `M7-I8` |
+| AC4 | A new link type is added as configuration, not as a new build | `M7-I8` |
+| AC5 | Tokens are unguessable, expire, and are invalidated on reissue | `M7-I17`, `M7-I13` |
+| AC6 | A response is timestamped against the identified recipient | `M7-I17`, `M7-I9` |
+| AC7 | The mechanism is built **ahead of** the three consuming modules | `M7-I17` |
+| AC8 | A link is issued to an identified recipient so the response is attributable | `M7-I9` |
+| AC9 | Recipients are maintained **without login or account provisioning** | `M7-I9` |
+| AC10 | A recipient change does not invalidate links already issued and responded to | `M7-I9` |
+| AC11 | The client responds per candidate: accept, reject with a structured reason, or request interview | `M7-I10` |
+| AC12 | The shortlist response writes into the selection record in D6 | `M7-I10`, `M7-I18` |
+| AC13 | The page is reached without login or account provisioning | `M7-I10` |
+| AC14 | An expired or already-used link shows a clear state rather than an error | `M7-I10` |
+| AC15 | The page renders on a phone, since it arrives over WhatsApp | `M7-I10` |
+| AC16 | Structured rejection reasons use the same taxonomy as internal decisions | `M7-I10` → `M0-I5` |
+| AC17 | Day 90 presents **one question and one action** | `M7-I11` |
+| AC18 | Day 30 and day 60 capture signal only and cannot create a second trigger path | `M7-I11` |
+| AC19 | A day-90 response produces a timestamped acknowledgement against an identified recipient | `M7-I11` |
+| AC20 | Where no response arrives, contract terms deem retention confirmed after the configured window | `M7-I11`, `M2-I10` |
+| AC21 | Either path produces an auditable trigger record capable of supporting a billing query | `M7-I11` |
+| AC22 | The deemed path is **visibly distinguished** from the acknowledged path | `M7-I11`, `M9-I3` |
+| AC23 | The client sets the timesheet approval state through the link | `M7-I12` |
+| AC24 | The per-client deemed-approval window applies, with a platform default so an unconfigured client does not stall invoicing | `M7-I12`, `OI-A-05` |
+| AC25 | A queried line routes back to Ops **without approving the whole timesheet** | `M7-I12` |
+| AC26 | Every link and its lifecycle state is retrievable | `M7-I13` |
+| AC27 | A link that expired without response and moved to deemed is visibly marked as such | `M7-I13` |
+| AC28 | Reissuing produces a new token and invalidates the original | `M7-I13` |
+| AC29 | The log supports a billing query on any day-90 trigger record | `M7-I13` |
+| AC30 | Finance can read the log without recruiter permissions | `M7-I13` |
+| AC31 | A duplicate submission from a re-opened link does not create a second response | `M7-I18` |
+| AC32 | Day 30 and day 60 responses write signal only and **cannot reach the billing trigger path**, proven by a negative test | `M7-I18`, `01-08` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-12` | Are recipients held per client, per location, per requisition or per placement, and how are they maintained without account provisioning? | `link_recipient` carries **all four scope columns with exactly one non-null**, so the decision is a data change rather than a migration. Resolution walks placement → requisition → location → client and takes the most specific active recipient. **This is the highest-impact unresolved design in M7 — the billing trigger is not defensible without a recipient model.** | `M7-A13`, `M9-D8`, `X29` |
+| `OI-A-05` | Platform default values for the deemed windows | 14 days each, seeded and labelled as a Hiresense placeholder (`02-03`) | `M7-I11`, `M7-I12` |
+| `OI-HS-11` | Is client-side interview feedback in scope as a fifth link type? Part A names four and it is not among them | **Not built.** Either feedback is Apollo-entered on the client's behalf, or a fifth type is needed — a decision, not an assumption. The mechanism supports adding one as configuration. | `M7-I3`, `M7-I8` |
+| `X29` | Apollo must decide the recipient scope, collect a named person per client, and confirm each client will answer by link | Two hops through Apollo's own clients — the slowest dependency track. Started week one. | `M7-I9`, `M9-I14` |
+| `OI-HS-29` **[raised here]** | Will a hospital contact actually click a link to confirm retention at day 90? | Untested. This is the **single riskiest behavioural assumption in the plan** and the entire permanent billing chain rests on it. Settled at gate G2, week 8, with one real client and one real link. | Permanent billing |

@@ -1,0 +1,189 @@
+---
+title: "03-19 Timesheet extensions"
+description: "The three things 03-10 deliberately left out of the thin slice: leave categorisation, overtime treatment, and an internal Apollo approval route before a timesheet reaches the…"
+---
+
+**Package** `@apollo/timesheets` (extension) · **Schema** `timesheets` · **Plan** D22 (full) · **Effort** ~19.5pd · **Risk** Low `XMOD` · **Build in** Phase 7
+
+## 1. Purpose
+
+The three things `03-10` deliberately left out of the thin slice: **leave categorisation, overtime
+treatment, and an internal Apollo approval route** before a timesheet reaches the client. The same
+timesheet then feeds both the client invoice and the payroll input, with no second calculation.
+
+## 2. Scope
+
+### In scope
+
+- Leave types and leave records
+- Overtime rules, varying by client and by state
+- Internal timesheet approval routing, **reusing the `03-16` approval engine**
+- The full timesheet calculation applying leave and overtime **on top of** the M8 attendance data
+
+### Explicitly out of scope
+
+- Shift attendance, the thin-slice timesheet, client approval and the deemed window — `03-10`.
+- The approval engine itself — `03-16` (`M12-I6`), built first of the two deliberately.
+- Payroll — `03-17`, which consumes the fuller timesheet.
+
+### Explicitly not built
+
+- Leave entitlement, accrual or balance tracking. Leave is **categorised**, not administered.
+- Absence management or return-to-work workflows.
+- A second calculation path. One timesheet feeds both invoicing and payroll.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M15-I1` | D22 | Leave and overtime rules | L | 3.0 |
+| `M15-I2` | D22 | Internal timesheet approval | L | 3.0 |
+| `M15-I6` | D22 | Full timesheet build | XL | 5.0 |
+
+**Specification basis:** Part A lists these as remaining in the later release. No client module chapter.
+All items Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `03-10` (the thin slice this extends), `03-16` (**the approval engine — build it
+first of the two**), `03-01` (client and state variation), `02-03`.
+
+**Consumed by:** `03-17` reads the fuller timesheet including leave and overtime; `03-11` invoices
+against it unchanged.
+
+**External:** none.
+
+## 5. Data model
+
+```sql
+CREATE TABLE timesheets.leave_type (
+    code text PRIMARY KEY,                    -- configurable, NOT hardcoded
+    name text NOT NULL,
+    is_paid boolean NOT NULL,
+    counts_towards_hours boolean NOT NULL,
+    is_active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE timesheets.leave_record (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL,
+    leave_type_code text NOT NULL REFERENCES timesheets.leave_type(code),
+    from_date date NOT NULL, to_date date NOT NULL,
+    shift_demand_line_id uuid,                -- when it displaces a specific shift
+    recorded_by uuid NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now(),
+    note text
+);
+CREATE INDEX ON timesheets.leave_record (candidate_id, from_date, to_date);
+
+CREATE TABLE timesheets.overtime_rule (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid,                           -- rules differ by client…
+    state_code text,                          -- …and by state
+    threshold_hours numeric(6,2) NOT NULL,
+    threshold_basis text NOT NULL CHECK (threshold_basis IN ('per_shift','per_week','per_period')),
+    multiplier numeric(4,2) NOT NULL,
+    effective_from date NOT NULL,
+    is_active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE timesheets.approval_route (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid, location_id uuid,
+    required_role text NOT NULL,
+    min_value numeric(14,2),
+    is_enabled boolean NOT NULL DEFAULT true
+);
+
+-- 03-10's timesheet gains two columns rather than a parallel table
+ALTER TABLE timesheets.timesheet
+  ADD COLUMN internal_approval_request_id uuid,     -- workforce.request (03-16)
+  ADD COLUMN internally_approved_at timestamptz;
+
+ALTER TABLE timesheets.timesheet_line
+  ADD COLUMN leave_record_id uuid REFERENCES timesheets.leave_record(id),
+  ADD COLUMN overtime_hours numeric(6,2) NOT NULL DEFAULT 0,
+  ADD COLUMN overtime_rule_id uuid REFERENCES timesheets.overtime_rule(id),
+  ADD COLUMN overtime_value numeric(14,2) NOT NULL DEFAULT 0;
+```
+
+Extending the existing tables rather than shadowing them is what makes AC "one timesheet feeds both the
+client invoice and the payroll input, with no second calculation" achievable.
+
+## 6. State machines
+
+### `Timesheet`, extended (`M15-I2`)
+
+```
+ building ──▶ built ──▶ internally_approved ──▶ sent_for_approval ──▶ approved | deemed_approved ──▶ invoiced
+                  │                                     ▲
+                  └──▶ returned with a reason ───────────┘  (does not reach the client until corrected)
+```
+
+The state was **declared in `03-10`'s enum and unused** until now, so adding this step is not a
+migration of live data.
+
+**The client-side waiting period only starts once the client link is actually sent** — internal
+approval does not consume any of it.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST`/`PATCH` | `/v1/leave-types` | `settings:edit` | Configurable list |
+| `GET`/`POST` | `/v1/leave-records` | `timesheet:manage` | Record leave against a candidate and period |
+| `GET`/`POST`/`PATCH` | `/v1/overtime-rules` | `settings:edit` | By client and state, effective-dated |
+| `GET` | `/v1/timesheets?state=built` | `timesheet:read` | Awaiting internal approval |
+| `POST` | `/v1/timesheets/:id/internal-approve` | `timesheet:approve` | Through the `03-16` engine |
+| `POST` | `/v1/timesheets/:id/internal-return` | `timesheet:approve` | **Reason required; stops it reaching the client** |
+| `GET`/`POST`/`PATCH` | `/v1/approval-routes` | `settings:edit` | Who approves what |
+
+## 8. Events and jobs
+
+**Events emitted:** `timesheets.timesheet.internally_approved` · `.internally_returned` ·
+`timesheets.leave.recorded` · `timesheets.overtime.applied`.
+
+**Events subscribed:** `timesheets.timesheet.built` → raise an internal approval request through
+`03-16`; `workforce.request.approved` (type `timesheet_internal_approval`) → move to
+`internally_approved`.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `timesheets.apply-leave-overtime` | on build | Applies leave and overtime **on top of** attendance, without replacing it |
+| `timesheets.recalculate` | on correction | Produces a consistent result on recalculation |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Leave and overtime rules — leave types, and when extra hours are paid at a different rate | `/admin/leave-overtime` | `M15-I1` |
+| Internal timesheet approval — timesheets waiting for Apollo approval **before they go to the client**; approve or return with a reason | `/timesheets/internal-approval` | `M15-I2` |
+
+The `03-10` timesheet screen gains leave and overtime lines; it is not replaced.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Leave types are **configurable, not hardcoded** | `M15-I1` |
+| AC2 | Overtime rules can differ **by client and by state** | `M15-I1` |
+| AC3 | A rule change **does not alter timesheets already approved** | `M15-I1` |
+| AC4 | A timesheet is approved internally **before the client link is issued** | `M15-I2`, `M8-I8` |
+| AC5 | Routing uses **the same approval engine built in M12** | `M15-I2`, `M12-I6` |
+| AC6 | Returning a timesheet **stops it reaching the client until corrected** | `M15-I2` |
+| AC7 | **The client-side waiting period only starts once the client link is actually sent** | `M15-I2`, `M8-I16` |
+| AC8 | Leave and overtime are applied **on top of the M8 attendance data without replacing it** | `M15-I6` |
+| AC9 | A recalculation after a correction produces a consistent result | `M15-I6` |
+| AC10 | **The same timesheet feeds both the client invoice and the payroll input, with no second calculation** | `M15-I6` |
+| AC11 | **Internal routing sits before the client link, not instead of it** | `M15-I6` |
+| AC12 | The raiser of a timesheet cannot be its internal approver | `M12-I6` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| — | **No client module chapter exists for D22's remainder** | Three items derived from the capability name. Low confidence throughout. | All of `M15` D22 |
+| `OI-HS-46` **[raised here]** | Is leave paid, and does a paid leave day appear on the **client invoice** or only in payroll? | `leave_type.is_paid` and `counts_towards_hours` are separate flags, so a day can be paid to the associate without being billed to the client. Which combination applies is a commercial decision nobody has stated. | `M15-I1`, `M15-I6` |
+| `OI-HS-47` **[raised here]** | Who records leave — the associate in the app, or Ops? | **Ops.** The app has no leave screen in this scope, and adding one would be a `03-05` addition. | `M15-I1` |
+| `OI-A-16` | Volume ceiling from manual payroll | Applies until `03-17` ships | `M15-I6` |

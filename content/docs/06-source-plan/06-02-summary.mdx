@@ -1,0 +1,198 @@
+---
+title: "06-02 Summary"
+description: "Effort by milestone, and the seven open items blocking a committable estimate."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+| Measure | Value | Detail |
+|---|---|---|
+| Milestones | **16** | M0 foundations, M1–M9 from the client Release 1 list, M10–M15 from Release 2. |
+| Buildable items | **208** | Screens, services and integrations, each with an engineering index. |
+| Conditions | **1062** | Each is a statement an item must satisfy. |
+| Foundation items | **6** | M0 — assumed by the client list but named nowhere in it. |
+| Open decisions | **49** | 18 raised by Hiresense. |
+| Estimate blockers | **7** | Must close before a fixed price is committed. |
+| Person-days | **1362** | Design 224 · build 780 · QA 358. |
+| High-risk items | **91** | 97 at Low confidence. |
+
+## Effort by milestone
+
+| ID | Milestone | Client deliverables | Release | Items | Scen. | Design | Build | QA | Total pd | High risk |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M0 | Platform Foundations | F01–F06 | `Foundations` | 6 | 32 | 10.5 | 27.0 | 10.5 | 48.0 | 1 |
+| M1 | Platform Foundations & Migration | D11, A10, A12, F10, F12 | `Release 1` | 16 | 79 | 14.0 | 84.0 | 30.5 | 128.5 | 10 |
+| M2 | Client, Contract & Rate Card | D1, D13, F08 | `Release 1` | 14 | 64 | 16.5 | 45.0 | 19.5 | 81.0 | 6 |
+| M3 | Demand Intake & Allocation | D2, A1, D14 (thin), F07, F14 | `Release 1` | 32 | 186 | 27.0 | 127.0 | 54.0 | 208.0 | 15 |
+| M4 | Candidate Record & Credentials | D3, D4, D16, A2, A9, F13 | `Release 1` | 27 | 139 | 36.0 | 100.5 | 48.0 | 184.5 | 10 |
+| M5 | Engagement & Availability | D10, D29, A3, A4, A5, A14 | `Release 1` | 16 | 89 | 9.5 | 66.5 | 31.5 | 107.5 | 12 |
+| M6 | Matching & Ranking | D5, D18, A8 | `Release 1` | 10 | 60 | 9.0 | 43.0 | 20.0 | 72.0 | 6 |
+| M7 | Selection, Offer & Client Response | D6, D20, A13 | `Release 1` | 18 | 104 | 24.5 | 68.0 | 34.0 | 126.5 | 10 |
+| M8 | Placement, Trial & Shift Attendance | D7, A6, D22 (thin) | `Release 1` | 17 | 96 | 16.5 | 58.5 | 29.0 | 104.0 | 12 |
+| M9 | Billing, Revenue & Reporting | D8, A7, D25 (thin), D9, D28, A11 | `Release 1` | 17 | 78 | 15.5 | 48.0 | 25.0 | 88.5 | 6 |
+| M10 | Client Portal | D12 | `Release 2` | 8 | 30 | 10.5 | 22.0 | 11.5 | 44.0 | 1 |
+| M11 | Associate Onboarding | D21 | `Release 2` | 5 | 18 | 7.0 | 13.0 | 6.5 | 26.5 | 0 |
+| M12 | Workforce Operations | D23 | `Release 2` | 6 | 26 | 8.0 | 20.0 | 10.0 | 38.0 | 0 |
+| M13 | Payroll | D24 | `Release 2` | 5 | 19 | 6.0 | 20.0 | 9.0 | 35.0 | 2 |
+| M14 | Demand Prioritisation & Approval | D14 (full) | `Release 2` | 4 | 15 | 5.5 | 14.0 | 7.0 | 26.5 | 0 |
+| M15 | Timesheet Operations & Collections | D22 (full), D25 (full) | `Release 2` | 7 | 27 | 8.0 | 24.0 | 12.0 | 44.0 | 0 |
+| Six-month total | 208 | 1062 | 224.0 | 780.5 | 358.0 | 1362.5 | 91 |  |  |  |
+
+> **Where the effort sits.** M0 foundations plus the client Release 1 list comes to 1148 person-days. The Release 2 list comes to 214. That ratio is the point: because nine deliverables were pulled forward and fourteen added, roughly 84% of the six-month effort now sits in the foundations plus what is still labelled Release 1.
+
+## What is blocking a committable estimate
+
+7 of the 49 open items have to close before a fixed price can be put on this work. Each one names the exact items it holds up, by engineering index, so the effect is countable rather than general.
+
+#### OI-M3-03 — How many client HR or recruitment systems must we connect to?
+
+`3 items held` · `22.0pd affected` · `Part B M3 #3`
+
+A1 lists 'client HRMS/ATS' as one of the five ways a vacancy can reach the platform. Some clients will push vacancies straight from their own system rather than emailing them. Every one of those systems is a separate connector with its own payload shape, its own credentials and its own test data - so 'two clients' and 'nine clients' are completely different pieces of work. Nobody has said which client systems are in scope or how many.
+
+##### Items it holds up
+
+- **M3-I26** — Client HR system feed (M3, 11.0pd, integration)
+- **M3-I20** — Parsers (M3, 7.5pd, service)
+- **M3-I5** — Channel settings (M3, 3.5pd, config)
+
+##### Why it blocks the estimate
+
+The connector framework can be built without the answer, but the number of connectors cannot be priced. Quoting a fixed price now means guessing how many client systems Apollo will name later.
+
+##### Who decides
+
+Suman, Head of Enterprise Partnerships India — needed before the A1 estimate is finalised.
+
+#### OI-M3-04 — How many different client spreadsheet layouts must we read?
+
+`2 items held` · `16.5pd affected` · `Part B M3 #4`
+
+Several clients send their vacancies as a spreadsheet in their own format - different column names, different order, sometimes several vacancies per file. We build one mapping screen, but each client format then needs its own mapping set up and its own sample file to test against. The number of formats drives the effort; nobody has stated it.
+
+##### Items it holds up
+
+- **M3-I6** — Spreadsheet mapping (M3, 9.0pd, screen)
+- **M3-I20** — Parsers (M3, 7.5pd, service)
+
+##### Why it blocks the estimate
+
+Same exposure as OI-M3-03. The mapping screen is priceable; the per-client mapping work is not until the count is known.
+
+##### Who decides
+
+Shallu Kakkar, Head of Global Fulfillment — needed before the A1 estimate is finalised.
+
+#### OI-A-02 — How much data is in CPAL, and what condition is it in?
+
+`6 items held` · `31.0pd affected` · `Part A M1`
+
+A10 moves Apollo's existing candidate data out of the old tool and into the platform, after which the platform becomes the system of record and the old tool is switched off. We have never seen this data. We do not know how many records there are, how complete they are, how many duplicates it contains, or whether fields map cleanly onto the new model. Part A says a joint profiling exercise will settle this, and Apollo will provide access. It has not happened yet.
+
+##### Items it holds up
+
+- **M1-I10** — CPAL data profiling (M1, 6.0pd, service)
+- **M1-I11** — Migration pipeline (M1, 11.0pd, service)
+- **M1-I12** — Duplicate resolution on migrated data (M1, 8.0pd, service)
+- **M1-I2** — Migration screens (M1, 6.0pd, screen)
+- **M1-I2** — Migration screens (M1, 6.0pd, screen)
+- **M1-I2** — Migration screens (M1, 6.0pd, screen)
+
+##### Why it blocks the estimate
+
+A10 cannot be sized at all. The figures shown against these six items are placeholders to hold the shape of the plan, not estimates. This is the single largest unpriced item in the six months.
+
+##### Who decides
+
+Apollo (provides access), Hiresense (runs the profiling) — needed before any estimate is committed.
+
+#### OI-A-09 — Which provider will make the automated phone calls?
+
+`5 items held` · `44.0pd affected` · `Part A M5`
+
+A5 calls nurses who have not responded on any other channel, asks whether they are still available, and writes the answer back. Apollo buys the calling service; we build the integration and the part that turns a spoken answer into structured data. Different providers differ enormously in how conversations are handled, what the transcript looks like, and which Indian languages are covered. Apollo has not named one.
+
+##### Items it holds up
+
+- **M5-I12** — Voice provider (M5, 11.0pd, integration)
+- **M5-I13** — Voice answer extraction (M5, 7.5pd, service)
+- **M5-I6** — Voice campaigns (M5, 6.0pd, config)
+- **M5-I7** — Replies to review (M5, 8.5pd, screen)
+- **M3-I23** — Voice note transcription (M3, 11.0pd, integration)
+
+##### Why it blocks the estimate
+
+The integration cannot be sized against an unknown API, and language coverage cannot be tested. It also affects M3: if the same provider does speech-to-text for inbound voice notes we build one integration, otherwise two.
+
+##### Who decides
+
+Apollo — needed before the M5 estimate is committed.
+
+#### OI-A-13 — How long is the guarantee period, and does it run past day 90?
+
+`4 items held` · `28.5pd affected` · `Part A M9`
+
+Apollo now invoices a permanent placement once the client confirms at day 90 that the person is still there. That timing removes the need to reverse an invoice if someone leaves early. But if the contract guarantees a replacement for longer than 90 days - six months, say - then a candidate leaving in month five means an invoice already raised has to be corrected. That requires credit and debit notes, which are currently out of scope until M15.
+
+##### Items it holds up
+
+- **M9-I12** — Permanent invoice (M9, 7.5pd, service)
+- **M9-I1** — Invoices (M9, 6.0pd, screen)
+- **M2-I8** — Contract details (M2, 9.0pd, screen)
+- **M15-I5** — Credit and debit notes (M15, 6.0pd, screen)
+
+##### Why it blocks the estimate
+
+This changes scope, not just a number. If the guarantee runs past day 90, credit and debit notes move from M15 into the earlier billing work and the contract screen has to capture the period.
+
+##### Who decides
+
+Apollo — needed before any estimate is committed.
+
+#### OI-HS-05 — How many messages will the platform actually send per month?
+
+`4 items held` · `30.5pd affected` · `Hiresense`
+
+The client's own Part B asks us for this. WhatsApp is billed per conversation, transcription per minute and automated calls per minute, so running cost depends on volume rather than on the build. The trouble is that volume is set by the contact schedule - the shift pool is contacted every three to four days across the whole base - and that schedule is configuration nobody has settled yet. So the question runs both ways: Apollo needs a cost figure from us, and we need their expected base size and contact frequency to produce one.
+
+##### Items it holds up
+
+- **M3-I24** — WhatsApp inbound and follow-up (M3, 7.5pd, integration)
+- **M5-I8** — Message sender (M5, 7.0pd, service)
+- **M5-I3** — Delivery log (M5, 5.5pd, screen)
+- **M5-I5** — Contact schedule (M5, 10.5pd, config)
+
+##### Why it blocks the estimate
+
+Running cost cannot be modelled, which is a commercial exposure rather than a build one. If the shift pool is larger than assumed, per-conversation cost could exceed the build cost of the module that sends the messages.
+
+##### Who decides
+
+Shallu Kakkar with Hiresense — needed before the estimate response goes back.
+
+#### OI-HS-07 — Who supplies document reading, electronic signature and WhatsApp?
+
+`4 items held` · `27.5pd affected` · `Hiresense (M4/M7)`
+
+Three separate suppliers are needed and neither client document names any of them. Document OCR reads registration certificates and ID documents so the verification team is not retyping them. Electronic signature gets offers signed. The WhatsApp Business Solution Provider carries every message the platform sends to candidates and clients, and also has to approve each message template before it can be used - which takes weeks and is outside our control.
+
+##### Items it holds up
+
+- **M4-I23** — Document text extraction (M4, 7.0pd, integration)
+- **M7-I15** — Electronic signature (M7, 7.0pd, integration)
+- **M3-I24** — WhatsApp inbound and follow-up (M3, 7.5pd, integration)
+- **M5-I1** — Message templates (M5, 6.0pd, screen)
+
+##### Why it blocks the estimate
+
+Three integrations cannot be sized against unknown APIs. The WhatsApp one is worse than an estimate problem: template approval is a calendar dependency that no amount of team size removes, and it gates the whole contact schedule going live in M5.
+
+##### Who decides
+
+Tamajit Mukherjee with Mr. Sriram, PMO — needed before M4 and M7 build starts.
+
+> **Scope divergence with the signed SOW.** The client's current Release 1 is not the Release 1 the signed functional SOW describes. Candidate scope is now nurses, doctors and allied health rather than nurses only, and the client portal is deferred so there is no client login anywhere until M10. Until the client's deliverables are mapped against the 24 capability blocks in the signed SOW (OI-HS-03), the two documents describe different projects.

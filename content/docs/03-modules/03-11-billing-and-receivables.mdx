@@ -1,0 +1,259 @@
+---
+title: "03-11 Billing and receivables"
+description: "Two invoice paths and the evidence behind each. A permanent placement invoices once the client confirms at day 90 that the person is still there — not at placement."
+---
+
+**Package** `@apollo/billing` · **Schema** `billing` · **Plan** D8, A7, D25 (thin slice) · **Effort** ~45.0pd · **Risk** High `XMOD` · **Build in** Phase 5–6
+
+## 1. Purpose
+
+Two invoice paths and the evidence behind each. A **permanent placement** invoices once the client
+confirms at day 90 that the person is still there — not at placement. A **contractual engagement**,
+including a locum doctor paid per session, invoices from a client-approved timesheet. The trigger
+follows the **service line, not the candidate category**.
+
+Both must keep the evidence that caused them, because Apollo may be asked months later to justify a
+charge. The chain ends at *invoice raised, receivable open*; collections are Phase 7.
+
+## 2. Scope
+
+### In scope
+
+- Invoice list across both types, each linked to the evidence that allowed it
+- Billing evidence: who confirmed, when, against which contract terms, acknowledged or deemed
+- Receivables — money owed, with ageing displayed
+- Permanent invoice generation from the day-90 record, at the terms in force at the trigger
+- The immutable day-90 record store with snapshotted terms
+- Contract-terms resolution at the trigger event, recorded on the invoice
+- Shift invoice generation from an approved (or deemed-approved) timesheet
+- Duplicate prevention on both paths
+
+### Explicitly out of scope
+
+- The invoice API and file export for a finance system — `04-13` (`M9-I16`).
+- Reporting — `03-12`. Two workstreams sharing nothing but the event data.
+- The day-90 record's creation — `03-09` writes it; this module reads it.
+- Timesheet approval — `03-10` and `02-14`.
+
+### Explicitly not built
+
+- **Payment receipt, reconciliation including part-payments and TDS, ageing action, reminders,
+  dunning, and credit or debit notes.** All Phase 7 (`03-20`) — unless `OI-A-13` moves credit notes
+  forward.
+- The finance system itself. Nobody has said which one it is (`OI-A-14`).
+- Demand forecasting.
+- Any client-facing invoice view before Phase 6.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M9-I1` | D8 | Invoices list | L | 3.0 |
+| `M9-I2` | D8 | Money owed | M | 2.0 |
+| `M9-I3` | A7 | Billing evidence | L | 3.0 |
+| `M9-I4` | D25 | Shift invoices list | M | 2.0 |
+| `M9-I12` | D8 | Permanent invoice (service) | XL | 5.0 |
+| `M9-I13` | A7 | Day 90 record store | L | 3.0 |
+| `M9-I14` | D8 | Contract terms at trigger | M | 2.0 |
+| `M9-I15` | D25 | Shift invoice (service) | L | 3.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-09` (the day-90 record), `03-10` (the approved timesheet), `02-14` (the link
+that captures the confirmation), `03-01` (**contract terms read at the moment of invoicing — there is
+no fallback**), `02-11`.
+
+**Consumed by:** `04-13` finance export, `03-12` revenue reporting, `03-14` client invoice download,
+`03-20` collections.
+
+**External:** `04-13` finance system — **not named** (`OI-A-14`).
+
+## 5. Data model
+
+```sql
+CREATE TABLE billing.billing_trigger (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    trigger_type text NOT NULL CHECK (trigger_type IN ('retention_day_90','approved_timesheet')),
+    placement_id uuid,                         -- permanent
+    retention_record_id uuid,                  -- placement.retention_record
+    timesheet_id uuid,                         -- contractual
+    client_id uuid NOT NULL,
+    contract_version_id uuid NOT NULL,
+    terms_snapshot jsonb NOT NULL,             -- what was read, not a reference to be re-resolved
+    basis text NOT NULL CHECK (basis IN ('acknowledged','deemed')),
+    recipient_id uuid,                         -- who acknowledged (null when deemed)
+    evidence_link_id uuid,                     -- links.client_link
+    state text NOT NULL DEFAULT 'pending'
+      CHECK (state IN ('pending','confirmed','consumed','void')),
+    occurred_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT one_source CHECK (num_nonnulls(retention_record_id, timesheet_id) = 1)
+);
+-- a placement can produce exactly one permanent trigger, ever
+CREATE UNIQUE INDEX ON billing.billing_trigger (placement_id)
+  WHERE trigger_type = 'retention_day_90' AND state <> 'void';
+CREATE UNIQUE INDEX ON billing.billing_trigger (timesheet_id)
+  WHERE trigger_type = 'approved_timesheet' AND state <> 'void';
+REVOKE UPDATE (terms_snapshot, basis, recipient_id, occurred_at)
+  ON billing.billing_trigger FROM PUBLIC;
+
+CREATE TABLE billing.invoice (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    reference text NOT NULL UNIQUE,            -- INV-2026-000118
+    invoice_type text NOT NULL CHECK (invoice_type IN ('permanent_placement','shift')),
+    billing_trigger_id uuid NOT NULL UNIQUE REFERENCES billing.billing_trigger(id),
+    client_id uuid NOT NULL,
+    contract_version_id uuid NOT NULL,         -- recorded for audit (M9-I1)
+    period_start date, period_end date,        -- shift invoices
+    subtotal numeric(14,2) NOT NULL,
+    tax numeric(14,2) NOT NULL DEFAULT 0,
+    total numeric(14,2) NOT NULL,
+    currency text NOT NULL DEFAULT 'INR',
+    state text NOT NULL DEFAULT 'draft'
+      CHECK (state IN ('draft','raised','exported','cancelled')),
+    document_id uuid,                          -- rendered invoice
+    raised_at timestamptz, exported_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE billing.invoice_line (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    invoice_id uuid NOT NULL REFERENCES billing.invoice(id),
+    description text NOT NULL,
+    candidate_id uuid, placement_id uuid, timesheet_line_id uuid,
+    quantity numeric(10,2) NOT NULL DEFAULT 1,
+    unit_rate numeric(14,2) NOT NULL,
+    amount numeric(14,2) NOT NULL,
+    basis jsonb NOT NULL                       -- CTC and fee %, or hours and shift rate
+);
+
+CREATE TABLE billing.receivable (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    invoice_id uuid NOT NULL UNIQUE REFERENCES billing.invoice(id),
+    client_id uuid NOT NULL,
+    amount_due numeric(14,2) NOT NULL,
+    amount_settled numeric(14,2) NOT NULL DEFAULT 0,   -- moved by 03-20 in Phase 7
+    due_date date,                                     -- from contract payment terms
+    state text NOT NULL DEFAULT 'open'
+      CHECK (state IN ('open','part_settled','settled','written_off')),
+    opened_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON billing.receivable (client_id, state, due_date);
+```
+
+## 6. State machines
+
+### `BillingTrigger` (`M9-I12`, `M9-I15`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | day-90 record written, or timesheet approved/deemed | `pending` | Terms **snapshotted at creation** |
+| `pending` | validated — active contract, no prior invoice | `confirmed` | |
+| `pending` | no active contract at trigger time | `void` | **Raises an exception rather than invoicing on defaults** |
+| `confirmed` | invoice raised | `consumed` | **A duplicate trigger cannot produce a second invoice for the same placement** |
+
+### `Invoice`
+
+`draft → raised → exported`. `cancelled` exists only for a genuine error and requires the same approval
+a credit note will require in Phase 7. Raising opens a `Receivable`.
+
+### Which trigger applies
+
+```
+service_line = 'permanent'    ──▶ RetentionRecord at day 90 (acknowledged or deemed)
+service_line = 'contractual'  ──▶ Timesheet in state approved or deemed_approved
+```
+
+A **locum doctor is contractual** and invoices per session against an approved timesheet, even though
+the candidate category is doctor. The trigger follows the service line (`M9-I1`, letter item 9).
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/invoices?type=&client=&state=&period=` | `invoice:read` | Both types in one list |
+| `GET` | `/v1/invoices/:id` | `invoice:read` | Lines, contract version read, evidence link |
+| `GET` | `/v1/invoices/:id/evidence` | `invoice:read` | **The trigger record in one hop** |
+| `POST` | `/v1/invoices/:id/raise` | `invoice:raise` | Renders the document, opens the receivable |
+| `POST` | `/v1/invoices/:id/cancel` | `invoice:cancel` | Reason required, audited |
+| `GET` | `/v1/receivables?client=&state=&ageBand=` | `invoice:read` | Money owed with ageing displayed |
+| `GET` | `/v1/billing-triggers?state=&type=` | `invoice:read` | The billing evidence screen |
+| `GET` | `/v1/billing-triggers/:id` | `invoice:read` | Who confirmed, when, terms, acknowledged vs deemed |
+| `GET` | `/v1/timesheets/:id/invoice` | `invoice:read` | The invoice raised from a timesheet |
+
+## 8. Events and jobs
+
+**Events emitted:** `billing.trigger.created` · `.voided` · `billing.invoice.raised` · `.cancelled` ·
+`billing.receivable.opened`.
+
+**Events subscribed:** `placement.retention.confirmed` and `.deemed` → create a permanent trigger;
+`timesheets.timesheet.approved` and `.deemed_approved` → create a shift trigger;
+`clients.contract.terminated` → flag affected pending triggers.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `billing.trigger-sweep` | daily | Validates pending triggers and raises invoices |
+| `billing.render-invoice` | on raise | Produces the document into `02-04` |
+| `billing.export` | on raise | Hands to `04-13`; **a re-export does not duplicate in the target** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Invoices — client, type, value, state; opens lines and **the record that allowed it to be raised** | `/invoices` | `M9-I1` |
+| Invoice detail | `/invoices/:id` | `M9-I1` |
+| Money owed — raised and unpaid by client, with how long outstanding | `/receivables` | `M9-I2` |
+| Billing evidence — day-90 records invoices were raised against; **who confirmed, when, which terms; acknowledged vs deemed visibly distinguished** | `/billing/evidence` | `M9-I3` |
+| Shift invoices — with the timesheet each came from | `/invoices?type=shift` | `M9-I4` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A permanent invoice links to the day-90 trigger record it fired against | `M9-I1` |
+| AC2 | A shift invoice links to the approved timesheet it derives from | `M9-I1` |
+| AC3 | Each invoice records **which contract version supplied its terms** | `M9-I1`, `M2-I12` |
+| AC4 | Finance can trace any invoice back to its trigger evidence **in two clicks** | `M9-I1` |
+| AC5 | The chain ends at invoice raised and receivable open; collections are out of scope | `M9-I1` |
+| AC6 | **A permanent placement invoices from the day-90 record; a contractual engagement — including a locum doctor paid per session — invoices from the approved timesheet. The trigger follows the service line, not the candidate category.** | `M9-I1`, letter item 9 |
+| AC7 | A receivable is opened against every raised invoice | `M9-I2` |
+| AC8 | Payment receipt, reconciliation, part-payments, TDS, ageing action, dunning and credit/debit notes are **all outside Release 1** | `M9-I2` |
+| AC9 | Ageing is displayed but not acted on, since dunning is out of scope | `M9-I2` |
+| AC10 | The receivable is exportable so the eventual target attaches without reopening the module | `M9-I2`, `M9-I16` |
+| AC11 | Each trigger record is auditable and supports a billing query: **who acknowledged, when, and against which contract terms** | `M9-I3` |
+| AC12 | An acknowledged trigger is **visibly distinguished from a deemed-confirmed one** | `M9-I3` |
+| AC13 | The recipient identity is shown | `M9-I3`, `OI-A-12` |
+| AC14 | Invoicing at day 90 removes the need to reverse a pre-confirmation failure | `M9-I3` |
+| AC15 | A shift invoice generates from the client-approved timesheet and contract | `M9-I4`, `M9-I15` |
+| AC16 | The approval evidence — **explicit or deemed** — is linked from the invoice | `M9-I4` |
+| AC17 | Internal approval routing, debit and credit notes and automated reminders remain in the later release | `M9-I4` |
+| AC18 | The invoice generates against the day-90 client-acknowledged retention record, **not at placement** | `M9-I12` |
+| AC19 | Terms resolve to the contract version **in force at the trigger event** | `M9-I12`, `M9-I14` |
+| AC20 | The placement fee is 5–6% of CTC, **held per contract rather than as a constant** | `M9-I12` |
+| AC21 | **A duplicate trigger cannot produce a second invoice for the same placement** | `M9-I12` |
+| AC22 | **Without D13 there are no contract terms at trigger time and permanent billing does not run at all — no fallback** | `M9-I12`, `M2-I12` |
+| AC23 | The day-90 record is **immutable once created, cannot be edited from any surface, and stays auditable years later** | `M9-I13` |
+| AC24 | It captures whether retention was acknowledged or deemed, and by whom | `M9-I13` |
+| AC25 | **The contract terms in force are snapshotted, not resolved again later** | `M9-I13` |
+| AC26 | The record is queryable long after the placement closes, for a billing dispute | `M9-I13` |
+| AC27 | Retention follows the finance retention period, which may exceed DPDP candidate retention | `M9-I13`, `OI-HS-14` |
+| AC28 | A client with **no active contract at trigger time raises an exception rather than invoicing on defaults** | `M9-I14` |
+| AC29 | The invoice records which contract version it read, for audit | `M9-I14` |
+| AC30 | A **deemed-approved** timesheet is as valid an input as an explicitly approved one | `M9-I15`, `M8-I16` |
+| AC31 | A timesheet cannot be invoiced twice for the same period | `M9-I15` |
+| AC32 | Rates resolve against the contract version in force for the period | `M9-I15`, `M2-I11` |
+| AC33 | Debit and credit notes are out of scope **unless the guarantee period changes the position** | `M9-I15`, `OI-A-13` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-13` | **How long is the guarantee period, and does it run past day 90?** | Aligned to the 90-day trial. If longer, **credit and debit notes move from Phase 7 into this module** and the contract screen must capture the period. This changes scope, not just a number. **Estimate blocker.** | `M9-I12`, `M9-I1`, `M2-I8`, `M15-I5` |
+| `OI-A-14` | **The finance system invoices post to has not been named** | The invoice object is built **addressable by API and file export to a generic contract**, per Part A's direct instruction, so the target attaches later without reopening the module | `M9-I16`, `04-13` |
+| `OI-A-12` | The recipient identity model | Without it the trigger is not defensible; `02-14` holds the four-column model and `03-09` flags placements missing a recipient | `M9-I3`, `M9-D8` |
+| `OI-A-05` | Platform default deemed windows | 14 days, from `02-03` | `M9-I12`, `M9-I14` |
+| `OI-A-16` | Contractual volume ceiling imposed by manual payroll | Bounds what the shift path must support; an Apollo input, not a deliverable | `M9-I4` |
+| `OI-HS-14` | Finance retention vs DPDP candidate retention | `AS-23` — triggers and invoices survive pseudonymisation, retaining recipient and placement identifiers plus snapshotted terms | `M9-I13` |
+| `OI-HS-35` **[raised here]** | GST treatment — rate, place of supply, and whether a reverse charge ever applies | Invoices carry client GST and a single tax line at the configured rate. Nothing in either client document specifies GST handling, and it is on the face of every invoice. | `M9-I1`, `M9-I12` |

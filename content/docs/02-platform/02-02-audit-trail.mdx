@@ -1,259 +1,161 @@
 ---
-title: "P02 · Audit Trail"
-description: "One place that records who did what and when. Five milestones need this — M3 status changes, M6 overrides, M7 selection decisions and link responses, M8 trial records, M9 billing…"
+title: "02-02 Audit trail"
+description: "One place that records who did what and when. Five milestones need it — M3 status changes, M6 overrides, M7 selection decisions and link responses, M8 corrections, M9 invoice…"
 ---
 
-**Package** `@apollo/audit` · **Schema** `platform` · **Plan** F04 (M0-I4)
-**Effort** ~5pd · **Risk** Medium (COMP) · **Build in** Phase 1
-
----
+**Package** `@apollo/audit` · **Schema** `audit` · **Plan** F04 · **Effort** ~5.0pd · **Risk** Medium `COMP` · **Build in** Phase 1
 
 ## 1. Purpose
 
-One place that records who did what and when. Five milestones need this — M3 status changes, M6
-overrides, M7 selection decisions and link responses, M8 trial records, M9 billing triggers — and
-building it six times would produce six different answers.
-
-The plan states the business reason directly: **without the audit record the day-90 billing trigger
-cannot be defended.** This is not a compliance checkbox; it is the evidence layer behind revenue.
-
----
+One place that records who did what and when. Five milestones need it — M3 status changes, M6
+overrides, M7 selection decisions and link responses, M8 corrections, M9 invoice raising — and building
+it six times would be six different answers. It is also the evidence layer behind the day-90 billing
+trigger: without a defensible record of who did what, an invoice cannot be justified in a billing
+query.
 
 ## 2. Scope
 
-**In**
-- Append-only audit store, written by every module
-- `audit.record()` API, transaction-aware
-- Activity timeline component, embedded in requisition, candidate and placement screens
-- Auditor export: everything touching one record for a given period
-- Database-level append-only enforcement
+### In scope
 
-**Out**
-- Domain events for reporting → `02-09`. **These are different things** (see §11).
-- Status transitions specific to requisitions → owned by `03-04`, but also audited here
-- Log aggregation → CloudWatch (`01-09`)
+- An append-only entry per audited action: actor, timestamp, entity, action, before and after values
+- The `audit.record()` call every service makes **inside its own transaction**
+- The shared activity-timeline component rendered on the requisition, candidate and placement screens
+- Export of everything touching one record for a given period
 
----
+### Explicitly out of scope
+
+- Business events for reporting. Different mechanism, different table, different purpose — `02-11`.
+  Audit answers "who did this"; events answer "how many happened".
+- Notification and message delivery history — `02-09`.
+- Version history of a record's content (`RequisitionVersion`, `ContractVersion`, `OfferVersion`).
+  Those are business records owned by their modules; audit records the *act* of versioning.
+
+### Explicitly not built
+
+- Audit retention configuration. It is a fixed policy, not a configuration screen — the plan removes
+  this explicitly in its scope discipline.
+- A global audit search screen. The trail is reached from the record it belongs to, plus the export.
+- Tamper-proofing beyond append-only grants (no hash chain, no WORM storage). Raised as `OI-HS-20`
+  rather than assumed in.
 
 ## 3. Plan traceability
 
-| Item | Covered by |
-|---|---|
-| `M0-I4` Activity trail (F04, Service, XL, 5pd) | All sections |
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M0-I4` | F04 | Activity trail service + panel | XL | 3.0 |
 
----
+Referenced as a requirement by `M0-I1`, `M0-I3`, `M2-I2`, `M3-I2`, `M3-I4`, `M3-I10`, `M3-I15`,
+`M4-I12`, `M4-I21`, `M7-I4`, `M7-I13`, `M7-I15`, `M8-I7`, `M9-I13`, `M12-I1`, `M12-I6`.
 
 ## 4. Dependencies
 
-**Needs first:** nothing. Build alongside P01.
-**Consumed by:** every module without exception. Explicitly named by M3, M6, M7, M8, M9 and P11.
+**Must exist first:** `02-01` (an actor to attribute to). Built alongside it — sign-in must be audited
+from the first login.
 
----
+**Consumed by:** every component that changes state. The timeline panel is embedded by `03-03`
+(requisition), `03-04` (candidate) and `03-09` (placement) — the same component, not three.
+
+**External:** none.
 
 ## 5. Data model
 
 ```sql
-CREATE TABLE platform.audit_entry (
-  id           uuid PRIMARY KEY,
-  entity_type  text NOT NULL,              -- 'requisition' | 'candidate' | 'placement' | ...
-  entity_id    uuid NOT NULL,
-  action       text NOT NULL,              -- 'created' | 'status_changed' | 'allocated' | ...
-  actor_type   actor_type_enum NOT NULL,   -- 'user' | 'candidate' | 'client_user' | 'link' | 'system'
-  actor_id     uuid,                       -- NULL only for anonymous link opens
-  actor_label  text NOT NULL,              -- denormalised: 'Priya Sharma (recruiter)' — survives deactivation
-  before       jsonb,
-  after        jsonb,
-  reason_code  text,
-  note         text,
-  request_id   text,
-  ip_address   inet,
-  user_agent   text,
-  occurred_at  timestamptz NOT NULL DEFAULT now()
+CREATE TABLE audit.audit_entry (
+    id            uuid PRIMARY KEY DEFAULT uuidv7(),
+    entity_type   text NOT NULL,      -- 'requisition' | 'candidate' | 'placement' | 'invoice' | …
+    entity_id     uuid NOT NULL,
+    action        text NOT NULL,      -- 'hold' | 'close' | 'override' | 'raise_invoice' | …
+    actor_type    text NOT NULL CHECK (actor_type IN ('staff','candidate','client_user','link','system')),
+    actor_id      uuid,               -- null when actor_type = 'system'
+    actor_label   text NOT NULL,      -- denormalised name at the time, so a rename does not rewrite history
+    occurred_at   timestamptz NOT NULL DEFAULT now(),
+    correlation_id text,
+    summary       text NOT NULL,      -- human sentence rendered on the panel
+    before        jsonb,              -- only the changed fields, personal data redacted
+    after         jsonb,
+    reason_code   text,               -- FK-by-value to settings.list_entry where the action needs a reason
+    reason_text   text,
+    context       jsonb NOT NULL DEFAULT '{}'::jsonb   -- ip, user agent, link token id, job id
 );
 
-CREATE INDEX idx_audit_entry__entity
-  ON platform.audit_entry (entity_type, entity_id, occurred_at DESC);
-CREATE INDEX idx_audit_entry__actor
-  ON platform.audit_entry (actor_id, occurred_at DESC);
-CREATE INDEX idx_audit_entry__time
-  ON platform.audit_entry (occurred_at DESC);
-CREATE INDEX idx_audit_entry__action
-  ON platform.audit_entry (entity_type, action, occurred_at DESC);
+CREATE INDEX ON audit.audit_entry (entity_type, entity_id, occurred_at DESC);
+CREATE INDEX ON audit.audit_entry (actor_id, occurred_at DESC);
+CREATE INDEX ON audit.audit_entry (occurred_at);       -- BRIN candidate once volume is known
+
+REVOKE UPDATE, DELETE ON audit.audit_entry FROM PUBLIC;   -- and from every app_* role
 ```
 
-### Append-only, enforced by grant
-
-```sql
-REVOKE UPDATE, DELETE ON platform.audit_entry FROM apollo_app;
-```
-
-A database grant, not a code convention: *"Records can be added but never edited or deleted, **from
-any screen or any service**"* (`M0-I4`). A convention protects against the code you wrote; a grant
-protects against the code someone writes next year.
-
-### Why `actor_label` is denormalised
-
-A deactivated user must stay visible on records they created (`M0-I2`), and an audit entry must still
-read correctly in seven years when the role has been renamed and the user has left. Storing the label
-at write time is the only version of this that survives.
-
-### Partitioning
-
-Monthly range partitions on `occurred_at` from the outset. Seven-year retention across every module's
-writes makes this a large table; partitioning makes retention pruning and time-range queries cheap,
-and adding it later is a migration nobody wants.
-
----
+`before`/`after` hold **only changed fields** and are redacted by the same rules as logging: no phone,
+email, Aadhaar, PAN, bank details or document text — ids and field names only (`01-10`).
 
 ## 6. State machines
 
-**N/A** — audit entries are immutable facts. They have no lifecycle.
-
----
+**N/A** — entries are immutable facts with no lifecycle. The one invariant: an entry can be inserted
+and never modified or removed, from any screen or any service (`M0-I4`).
 
 ## 7. API surface
 
-### 7.1 Exported service — the primary interface
-
-```ts
-export const audit = {
-  /** Called inside the caller's transaction. Never opens its own. */
-  record(tx: Tx, entry: {
-    entityType: string
-    entityId:   string
-    action:     string
-    actor:      Actor
-    before?:    unknown
-    after?:     unknown
-    reasonCode?: string
-    note?:      string
-  }): Promise<void>
-
-  /** Timeline for one record, newest first, cursor-paginated. */
-  timeline(entityType: string, entityId: string, opts?): Promise<AuditEntry[]>
-
-  /** Everything touching one record in a period, for an auditor. */
-  export(entityType: string, entityId: string, from: Date, to: Date): Promise<AuditExport>
-}
-```
-
-`record()` takes the transaction because an audit entry for a rolled-back change is worse than no
-audit entry — it asserts something happened that did not.
-
-### 7.2 HTTP — `/api/v1/audit`
-
-| Method | Path | Permission | Notes |
+| Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/:entityType/:entityId` | `platform.audit.read` + read on the entity | Cursor-paginated timeline |
-| POST | `/export` | `platform.audit.export` | 202 + job → S3 link. Every export is itself audited. |
+| `GET` | `/v1/audit?entityType=&entityId=&cursor=` | `audit:read` scoped to the entity's own permission | Timeline for one record, newest first |
+| `GET` | `/v1/audit/export?entityType=&entityId=&from=&to=` | `audit:export` | CSV/JSON of everything touching one record in a period |
+| `GET` | `/v1/audit/by-actor?actorId=&from=&to=` | `audit:export` | Supports a regulatory or HR query |
 
-There is no POST to create an entry. Entries are written only through the service, inside a
-transaction, by the module making the change.
-
-### 7.3 Automatic capture helper
+There is **no** write endpoint. Entries are created only through the in-process `audit.record(tx, …)`
+call, which is why the write cannot happen outside the business transaction.
 
 ```ts
-await withAudit(tx, { entityType: 'requisition', entityId: id, action: 'hold', actor },
-  () => requisitionRepo.update(tx, id, patch))
-// captures before/after by reading the row on either side of the mutation
+// the only way to write
+await audit.record(tx, {
+  entityType: 'placement', entityId, action: 'retention_deemed',
+  actor: SYSTEM, summary: 'Retention deemed confirmed — client did not respond within 14 days',
+  after: { retentionRecordId }, context: { linkId, windowDays: 14, windowSource: 'client_config' },
+})
 ```
-
-Convenience only. Explicit `audit.record()` is preferred where the meaningful before/after is not
-simply the row diff — a status change with a reason, for example.
-
----
 
 ## 8. Events and jobs
 
-**Emits:** nothing. Audit is a sink, not a source.
+**Events emitted:** none. Audit is a sink, not a source — mirroring it as events would double every
+write for no consumer.
 
-**Subscribes:** nothing. Modules call `audit.record()` directly and synchronously, in their own
-transaction. Deriving audit from events asynchronously would mean a gap between the change and the
-record of it, and a lost event would mean a missing audit entry — unacceptable for the day-90 trigger.
+**Events subscribed:** none.
 
 **Jobs**
 
-| Job | Cadence | Does |
+| Job | Schedule | Purpose |
 |---|---|---|
-| `audit.export` | On demand | Builds the auditor export, writes to S3, returns a presigned link |
-| `audit.prune-partitions` | Monthly | Drops partitions past the 7-year retention (`01-10 §6`) |
-
----
+| `audit.export` | on demand | Builds a large export in the background and delivers a signed link (`02-04`) |
 
 ## 9. Frontend
 
-### Activity panel — a shared component, not a screen
+| Component | Where it appears | Item |
+|---|---|---|
+| `<ActivityTrail entityType entityId />` | Requisition (`03-03`), candidate (`03-04`), placement (`03-09`) — **one component, three screens** | `M0-I4` |
+| Export control | Inside the panel, permission-gated | `M0-I4` |
 
-`<ActivityPanel entityType entityId />` from `@apollo/ui`. Embedded in:
-
-| Screen | Module |
-|---|---|
-| Requisition record | `03-04` |
-| Candidate record | `03-05` |
-| Placement record | `03-11` |
-| Contract detail | `03-02` |
-| Invoice / billing evidence | `03-13` |
-| Verification detail | `03-06` |
-| Link log | `02-10` |
-
-Behaviour: newest first, infinite scroll, one row per entry showing **what changed, who changed it,
-and when**. Field-level diff on expand. Filter by action type. Relative time with an absolute
-timestamp on hover — an auditor needs the exact instant.
-
-*"The same timeline component appears on the requisition, candidate and placement screens"*
-(`M0-I4`) — one component, not three.
-
-### Auditor export — `/settings/audit`
-
-Entity type, entity id or reference, date range, export. Produces a structured file with the entries
-and a manifest. Permission-gated and itself audited.
-
----
+Renders newest first, grouped by day, each line reading as a sentence: *"Priya Nair placed the
+requisition on hold — 14 Aug 2026, 09:12"*. System actions are attributed to "Apollo platform" with the
+cause named. Loading, empty ("Nothing has happened to this record yet"), error and no-permission states
+per `01-03`.
 
 ## 10. Acceptance criteria
 
-| # | Criterion | Source |
+| # | Criterion | Traces to |
 |---|---|---|
-| 1 | Every status change, allocation, decision and configuration change is recorded with who did it | `M0-I4` |
-| 2 | Records can be added but never edited or deleted, from any screen or any service | `M0-I4` |
-| 3 | The same timeline component appears on the requisition, candidate and placement screens | `M0-I4` |
-| 4 | An auditor can export everything touching one record for a given period | `M0-I4` |
-| 5 | M3 status transitions, M7 selection trail and M9 billing trigger all appear in the trail | `M0-I4` |
-| 6 | An `UPDATE` or `DELETE` against `audit_entry` fails at the database, not just in code | §5 |
-| 7 | A rolled-back transaction leaves **no** audit entry | §7.1 |
-| 8 | An entry written by a deactivated user still shows their name and role | §5 |
-| 9 | A `system` actor is distinguishable from a user actor — "who deemed this approved" has an answer | `01-07 §8` |
-| 10 | Every export of the audit trail is itself audited | §7.2 |
-| 11 | Timeline for an entity with 10,000 entries loads its first page in &lt; 500ms | §5 indexes |
-
----
+| AC1 | Every status change, allocation, decision and configuration change is recorded with who did it | `M0-I4` |
+| AC2 | Records can be added but never edited or deleted, from any screen or any service | `M0-I4` |
+| AC3 | The same timeline component appears on the requisition, candidate and placement screens | `M0-I4` |
+| AC4 | An auditor can export everything touching one record for a given period | `M0-I4` |
+| AC5 | M3 status transitions, M7 selection decisions and the M9 billing trigger are all present in the trail | `M0-I4` |
+| AC6 | An entry is written in the **same transaction** as the change it describes — a rolled-back change leaves no entry, and a committed change always leaves one | `M0-I4`, `01-02` |
+| AC7 | A system action is attributed to `system` with the cause named, never to the last human who touched the record | `M0-I4` |
+| AC8 | Actor name is captured at the time, so renaming a user does not rewrite history | `M0-I4` |
+| AC9 | No entry contains personal data beyond identifiers | `M4-I27`, `01-10` |
+| AC10 | An `UPDATE` or `DELETE` against the table raises, proven by test | `01-08` |
 
 ## 11. Open questions
 
-None blocking. Two design notes worth stating, because they are the two things people get wrong:
-
-### Audit ≠ events
-
-| | Audit entry (P02) | Domain event (P09) |
-|---|---|---|
-| Answers | *Who did this, and what changed?* | *What happened, so other things can react and be reported?* |
-| Written | Synchronously, in the transaction | To the outbox, in the transaction, relayed after |
-| Consumed by | Humans, auditors, support | Modules, projections, reports |
-| Payload | Before/after, actor, reason, IP | The facts a subscriber needs |
-| If lost | A compliance failure | A reporting gap |
-
-**A state change writes both.** They are not redundant — one is evidence, the other is plumbing.
-
-### What must be audited
-
-The list in `01-07 §11` is the contract. Every mutating action in every module writes an entry, and
-the module's definition of done checks it. The ones that are not obvious and get missed:
-
-- Every **client link issued, opened and answered** — this is the day-90 evidence
-- Every **deemed** decision made by a scheduler, attributed to `system`
-- Every **merge** of duplicate records, on both surviving and merged-away ids
-- Every **manual override** of a system decision — recruiter override on ranking, priority override,
-  attendance mismatch resolution
-- Every **export of personal data**
-- Every **cross-client access attempt** in the portal
-
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-14` | Finance retention for audit and billing evidence against DPDP candidate retention | Audit entries follow the **finance** period where they relate to a billing trigger, and pseudonymise with the candidate otherwise (`AS-23`) | Retention job in `02-12` |
+| `OI-HS-20` **[raised here]** | Is cryptographic tamper-evidence required, or are append-only grants sufficient? | Append-only grants plus restricted database access. A hash chain is cheap to add now and awkward later, so the decision is worth taking rather than defaulting. | Nothing today; would change the table |

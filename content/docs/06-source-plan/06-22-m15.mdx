@@ -1,0 +1,205 @@
+---
+title: "06-22 M15 — Timesheet Operations & Collections"
+description: "Two things left out of the thin slices. First, the full timesheet: leave types, overtime rules, and an internal approval route inside Apollo before it goes to the client. Second, the…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M15 · D22 (full), D25 (full) · Months 6–6*
+
+`Release 2` · `7 items` · `27 conditions` · `44.0pd` · `0 high risk` · `Ops/Admin, Client link`
+
+Two things left out of the thin slices. First, the full timesheet: leave types, overtime rules, and an internal approval route inside Apollo before it goes to the client. Second, the money coming back in: recording payments received, matching them against invoices including part-payments and TDS, an overdue report, automatic reminders and chasing, and credit and debit notes. Together these turn the platform from one that raises invoices into one that tracks whether Apollo actually got paid.
+
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+Internal timesheet approval uses the same request-and-approve pattern built in M12. Chasing reminders use the messaging layer from M5.
+
+### Records this milestone owns
+
+- LeaveType, LeaveRecord — categories of absence and who took what.
+- OvertimeRule — when extra hours are paid at a different rate.
+- TimesheetApprovalRoute — who inside Apollo must approve before it reaches the client.
+- Payment, PaymentAllocation — money received, and which invoices it was matched to.
+- CreditNote, DebitNote — corrections to an invoice already raised.
+- DunningSchedule — when and how overdue invoices get chased.
+
+### How records move
+
+- Timesheet gains: built → internally approved → sent to client → client approved → invoiced
+- Invoice: raised → partly paid → fully paid. Or credited.
+- Payment: received → matched to invoices → any remainder left unmatched
+
+### Not in this milestone
+
+- Being the accounting system of record. The finance system stays the book of record; this tracks against it.
+
+### Needs to exist first
+
+- M8 for timesheets. M9 for invoices and receivables. M2 for contract payment terms.
+
+### What breaks without it
+
+- M13 payroll reads the fuller timesheet including leave and overtime.
+
+### Items — 7 to build · design 8.0pd, build 24.0pd, QA 12.0pd
+
+#### M15-I1 — Leave and overtime rules
+
+`D22` · `Config` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Finance, Platform administrator.** The categories and rules the thin-slice timesheet in M8 deliberately leaves out.
+
+##### Screens to build
+
+1. **Leave and overtime rules**
+  - Lists the leave types and the overtime rules
+  - Sets when extra hours are paid at a different rate
+
+##### Conditions it must satisfy
+
+- Leave types are configurable, not hardcoded
+- Overtime rules can differ by client and by state
+- A rule change does not alter timesheets already approved
+
+Index **M15-I1** · Client ref **D22** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M8-I8, M0-I5**
+
+#### M15-I2 — Internal timesheet approval
+
+`D22` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Fulfilment lead, Finance.** An Apollo-side approval before the timesheet goes to the client. M8 sends straight to the client; this adds a step in front.
+
+##### Screens to build
+
+1. **Internal timesheet approval**
+  - Lists timesheets waiting for Apollo approval before they go to the client
+  - Approves one, or returns it with a reason
+
+##### Conditions it must satisfy
+
+- A timesheet is approved internally before the client link is issued (M8-I8 extension)
+- Routing uses the same approval engine built in M12
+- Returning a timesheet stops it reaching the client until corrected
+- The client-side waiting period only starts once the client link is actually sent
+
+Index **M15-I2** · Client ref **D22** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M12-I6, M8-I8**
+
+#### M15-I3 — Payments received
+
+`D25` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Finance.** Recording money that arrives and matching it against invoices, including part-payments and tax deducted at source.
+
+##### Screens to build
+
+1. **Payments received**
+  - Records money received against invoices
+  - Matches a payment across several invoices, and part payments
+  - Records tax deducted at source
+  - Lists payments that have not been matched
+
+##### Conditions it must satisfy
+
+- A payment can be matched across several invoices, and an invoice can take several payments
+- TDS is recorded separately so the gross and net are both visible
+- An unmatched payment sits in a queue rather than being forced onto the nearest invoice
+- Matching is audited because it changes what appears as outstanding
+
+Index **M15-I3** · Client ref **D25** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.5pd** · Total **9.5pd** · Confidence **Low** · Open items **-** · Linked items **M9-I2**
+
+#### M15-I4 — Overdue invoices
+
+`D25` · `Screen` · `L · 3.0pd` · `AI High` · `Low` · `XMOD` · `Low`
+
+**Who uses it: Finance.** What is overdue, by how long, and what is being done about it.
+
+##### Screens to build
+
+1. **Overdue invoices**
+  - Lists unpaid invoices grouped by how overdue they are
+  - Shows what has already been sent chasing each one
+
+##### Conditions it must satisfy
+
+- Ageing is calculated from the payment terms on the contract, not a flat rule
+- Chase history shows what has already been sent so a client is not chased twice
+- Escalation routes to the named client owner in M2
+- M9 shows ageing but does nothing with it; this is where it becomes actionable
+
+Index **M15-I4** · Client ref **D25** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M9-I2, M2-I2**
+
+#### M15-I5 — Credit and debit notes
+
+`D25` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Finance.** Correcting an invoice already raised. Part A says these return to scope if the guarantee period runs longer than the 90-day trial.
+
+##### Screens to build
+
+1. **Credit and debit notes**
+  - Raises a note against an invoice with a reason
+  - Sends it for approval before it is issued
+
+##### Conditions it must satisfy
+
+- A credit note reduces the receivable and is linked to the invoice it corrects
+- Issuing a note requires approval, because it changes revenue
+- A replacement placement inside the guarantee window is a named reason (OI-A-13)
+- Notes are exported to the finance system alongside invoices
+
+Index **M15-I5** · Client ref **D25** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-13** · Linked items **M9-I1, M9-I16**
+
+#### M15-I6 — Full timesheet build
+
+`D22` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: System.** The complete timesheet calculation: leave, overtime and internal routing on top of the M8 thin slice.
+
+##### Screens to build
+
+1. **No screen**
+  - Applies leave and overtime rules on top of the shift attendance
+  - Produces one timesheet used by both invoicing and payroll
+
+##### Conditions it must satisfy
+
+- Leave and overtime are applied on top of the M8 attendance data without replacing it
+- A recalculation after a correction produces a consistent result
+- The same timesheet feeds both the client invoice and the payroll input, with no second calculation
+- Internal routing sits before the client link, not instead of it
+
+Index **M15-I6** · Client ref **D22** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **-** · Linked items **M8-I15, M13-I5**
+
+#### M15-I7 — Overdue reminders
+
+`D25` · `Service` · `M · 2.0pd` · `AI High` · `Low` · `SHARED` · `Low`
+
+**Who uses it: System.** Automatically chasing overdue invoices on a schedule.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends reminders on overdue invoices on a schedule
+  - Stops as soon as the invoice is paid
+
+##### Conditions it must satisfy
+
+- Reminders fire on the configured schedule and stop as soon as payment arrives
+- Escalation moves from a reminder to the account owner to a formal notice
+- Delivery reuses the messaging layer from M5, not a separate sender
+- Every chase is logged so the client relationship is visible
+
+Index **M15-I7** · Client ref **D25** · Band **M** · Design **0.0pd** · Build **2.0pd** · QA **1.0pd** · Total **3.0pd** · Confidence **Low** · Open items **-** · Linked items **M3-I30, M15-I4**

@@ -1,0 +1,109 @@
+---
+title: "04-13 Finance system"
+description: "Where raised invoices, credit notes and open receivables go. Nobody has said which system it is."
+---
+
+**Package** `@apollo/integration-finance` · **Schema** `billing` · **Plan** D8, D25 · **Effort** ~4.5pd · **Risk** Medium `SPEC` · **Build in** Phase 6
+
+## 1. Purpose
+
+Where raised invoices, credit notes and open receivables go. **Nobody has said which system it is.**
+Part A gives a direct instruction rather than leaving it open: build the invoice object **addressable
+by API or file export**, so the target attaches later without reopening the module.
+
+## 2. Scope
+
+**In scope:** a versioned export contract for invoices, lines, credit and debit notes and receivables;
+an API endpoint and a scheduled file export against the same contract; export audit; re-export
+protection.
+
+**Explicitly out of scope:** invoice generation (`03-11`); payments and reconciliation (`03-20`); being
+the book of record — the finance system stays that.
+
+**Explicitly not built:** a connector to any named system; a general ledger; tax filing; posting rules
+or chart-of-accounts mapping.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M9-I16` | D25 | Invoice export | L | 3.0 |
+
+**This is a direct instruction in Part A, not a Hiresense assumption.**
+
+## 4. Dependencies
+
+**Must exist first:** `03-11` (invoices and receivables), `02-04` (export files), `02-02`.
+
+**Consumed by:** `03-20` exports credit and debit notes **alongside invoices** on the same contract.
+
+**External:** `OI-A-14` — the finance system is not named.
+
+## 5. Data model
+
+No tables of its own; `settings.export_run` (`02-07`) records each export.
+
+```ts
+// The versioned contract. Independent of the platform's release train (01-04 §7).
+interface FinanceExportV1 {
+  invoices: Array<{
+    reference: string; type: 'permanent_placement' | 'shift'
+    clientRef: string; clientGst: string | null
+    contractVersionRef: string
+    periodStart?: string; periodEnd?: string
+    lines: Array<{ description: string; quantity: number; unitRate: string; amount: string }>
+    subtotal: string; tax: string; total: string; currency: 'INR'
+    raisedAt: string
+    evidenceRef: string           // the billing trigger — what justifies the charge
+  }>
+  creditNotes: Array<{ reference: string; invoiceRef: string; amount: string; reasonCode: string }>
+  receivables: Array<{ invoiceRef: string; amountDue: string; dueDate: string | null }>
+}
+```
+
+## 6. State machines
+
+`billing.invoice`: `raised → exported`. A **re-export does not duplicate in the target** — the contract
+is keyed on `reference` and the export is idempotent by design, because it must be safe to re-run
+against an unknown counterparty.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/finance-export?from=&to=&format=json\|csv` | `invoice:export` | Pull, against the versioned contract |
+| `POST` | `/v1/finance-export/runs` | `invoice:export` | Produce a file into `02-04`, delivered as an expiring link |
+| `GET` | `/v1/finance-export/runs` | `invoice:read` | **Export activity is audited** |
+
+Two routes, one contract. Whichever the eventual system prefers, both already exist.
+
+## 8. Events and jobs
+
+`billing.export` on raise; `finance.scheduled-export` daily if enabled.
+Events: `billing.invoice.exported`.
+
+## 9. Frontend
+
+Export controls sit on `03-11`'s invoice list. No screen of its own.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | The invoice object is **addressable by API or file export so the target attaches later without reopening the module** | `M9-I16` |
+| AC2 | The finance system has not been named; the export is built to a **generic contract** | `M9-I16`, `OI-A-14` |
+| AC3 | **A re-export does not duplicate the invoice in the target** | `M9-I16` |
+| AC4 | Export activity is audited | `M9-I16` |
+| AC5 | **This is a direct instruction in Part A, not a Hiresense assumption** | `M9-I16` |
+| AC6 | The receivable is exportable alongside the invoice | `M9-I2` |
+| AC7 | Credit and debit notes export on the same contract | `M15-I5` |
+| AC8 | The contract is versioned independently of the platform release train | `01-04` §7 |
+| AC9 | Every exported invoice carries a reference to the evidence that justified it | `M9-I1` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-14` | **The finance system invoices post to has not been named** | Build the generic contract regardless — Part A's instruction. **Once named, the connector is a mapping, not a redesign.** | `M9-I16` |
+| `OI-HS-60` **[raised here]** | Does the finance system need a chart-of-accounts or cost-centre code on each line? | Not carried today. Most Indian finance systems want one, and adding it later means re-exporting historic invoices. Cheap to add to the contract now. | `M9-I16` |
+| `OI-HS-61` **[raised here]** | Push or pull? | Both routes exist. If the target expects a push with authentication, that credential and endpoint is a further dependency to add to `X`-list once the system is named. | `M9-I16` |

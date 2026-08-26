@@ -1,0 +1,142 @@
+---
+title: "02-06 Console shell"
+description: "The page frame every Ops screen sits inside: navigation, header, global search, user menu, and the application of role-based access to every route."
+---
+
+**Package** `@apollo/console` · **Schema** `n/a` · **Plan** D11 · **Effort** ~5.5pd · **Risk** Low `SHARED` · **Build in** Phase 1
+
+## 1. Purpose
+
+The page frame every Ops screen sits inside: navigation, header, global search, user menu, and the
+application of role-based access to every route. Build it once — around thirty screens across nine
+modules render inside it.
+
+## 2. Scope
+
+### In scope
+
+- The application frame: left navigation, header, breadcrumb, content area
+- Navigation rendered from the signed-in user's **permissions**, not hardcoded
+- Route-level permission enforcement, with the no-permission page for a direct URL
+- Global search entry point (delegating to each module's search)
+- User menu, sign-out, session expiry handling that preserves unsaved form state
+- Filter-state preservation across module switches within a session
+- The console's routing, error boundary, query client and toast host
+
+### Explicitly out of scope
+
+- Screens. Every screen is owned by its module.
+- The permission model itself (`02-01`) and the design system (`02-05`).
+- The portal and link-page shells. `03-14` and `02-14` have their own, much smaller frames.
+
+### Explicitly not built
+
+- A dashboard or landing page with widgets. The plan has no such deliverable; the console opens on the
+  fulfilment board for operational roles and the invoice list for finance.
+- In-app notification centre for staff. Alerts route by email and WhatsApp through `02-09`; the
+  per-user notification log is candidate-facing.
+- Customisable navigation or user-arranged layouts.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M1-I1` | D11 | Console frame — navigation, header, search, user menu, RBAC application | M | 2.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` (`M0-I1`, `M0-I3` — the roles it applies), `02-05` (the components it is
+built from).
+
+**Consumed by:** every console screen in `03-01` … `03-20`.
+
+**External:** none.
+
+## 5. Data model
+
+**N/A** — no persistence of its own. Filter state lives in the URL (`01-03` §4) and unsaved form drafts
+in `sessionStorage`.
+
+## 6. State machines
+
+**N/A** — but two behaviours are stateful and specified:
+
+| Behaviour | Rule |
+|---|---|
+| Session expiry | On a 401, the current route and any unsaved form draft are captured, the sign-in dialog is shown in place, and on success the user returns to exactly where they were with the draft restored (`M1-I1`) |
+| Permission change | `role_version` mismatch on a response causes a silent refetch of `/v1/auth/me`; navigation re-renders on the **next request**, not the next login (`M0-I3`) |
+
+## 7. API surface
+
+Consumes only; exposes none.
+
+| Endpoint | Used for |
+|---|---|
+| `GET /v1/auth/me` | Principal, permissions, navigation entitlements |
+| `POST /v1/auth/staff/logout` | Sign out |
+| `GET /v1/search?q=` | Global search, fanned out to module search providers |
+
+## 8. Events and jobs
+
+**N/A**.
+
+## 9. Frontend
+
+### Navigation, and the permission that reveals each entry
+
+| Group | Entries | Permission |
+|---|---|---|
+| Demand | Fulfilment board · Requisitions · Inbound · Unmatched senders · Manual entry · Suspected duplicates | `requisition:read`, `inbound:read` |
+| Candidates | Candidate list · Verification queue · Pendency | `candidate:read`, `verification:read` |
+| Matching | Search · Saved searches · Talent segments | `candidate:search` |
+| Selection | Interviews · Offers · Shortlists | `selection:read` |
+| Placement | Placements · Trial dashboard · Attendance · Timesheets | `placement:read`, `timesheet:read` |
+| Billing | Invoices · Billing evidence · Money owed | `invoice:read` |
+| Reporting | Funnel · Fill and time to fill · Trial survival · Drop-out · Performance · Monthly pack · Rate variance | `report:read` |
+| Clients | Clients · Contracts · Rate cards · Client contacts · Link recipients | `client:read` |
+| Admin | Users · Roles · Settings · Channels · Templates · Ranking weights · Registries · Link types | `settings:read`, `user:read` |
+
+An entry the user cannot reach is **not rendered at all**. A direct URL to a forbidden route renders
+`<NoPermission>`, not an error (`M0-I3`).
+
+### Frame
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│ Apollo   [ global search ⌘K ]                    Priya Nair ▾  Sign out│
+├──────────────┬────────────────────────────────────────────────────────┤
+│ Demand       │  Clients › Apollo Hospitals Chennai › REQ-2026-000431  │
+│ Candidates   │                                                        │
+│ Matching     │  ┌──────────────────────────────────────────────────┐  │
+│ Selection    │  │  screen content, owned by the module             │  │
+│ Placement    │  └──────────────────────────────────────────────────┘  │
+│ Billing      │                                                        │
+│ Reporting    │                                                        │
+│ Clients      │                                                        │
+│ Admin        │                                                        │
+└──────────────┴────────────────────────────────────────────────────────┘
+```
+
+Collapsible navigation, keyboard-reachable, `⌘K` opens search. Responsive to tablet width — recruiters
+in hospitals use tablets — but not to phone width; the console is a desktop tool and the phone surfaces
+are the app and the link pages.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A user sees only the navigation entries their role permits | `M1-I1` → `M0-I3` |
+| AC2 | Switching between modules preserves filter state within a session | `M1-I1` |
+| AC3 | Session expiry redirects to login **without losing unsaved form state** | `M1-I1` |
+| AC4 | A direct URL to a forbidden route renders the no-permission page, not an error | `M0-I3` |
+| AC5 | A permission removed takes effect on the next request, and navigation re-renders without a sign-out | `M0-I3` |
+| AC6 | The frame is built once and every Ops screen renders inside it | `M1-I1` |
+| AC7 | Every navigation entry is keyboard reachable with a visible focus ring | `01-03` §6 |
+| AC8 | A user with no role signs in, sees an empty navigation and a page explaining it, rather than an error on every route | `M0-I3` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-01` | Whether a site-resident recruiter's navigation or data differs | Navigation is identical; only the row set differs, via `AS-18` in `01-07` | Nothing today |
+| `OI-HS-24` **[raised here]** | Which screen does each role land on after sign-in? | Fulfilment board for `recruiter` and `fulfilment_lead`; invoices for `finance`; verification queue for `verification`; clients for `bd`; reporting for `leadership`; settings for `platform_admin` | Nothing; a one-line map |

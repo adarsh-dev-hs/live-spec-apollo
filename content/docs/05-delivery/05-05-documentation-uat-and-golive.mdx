@@ -1,0 +1,135 @@
+---
+title: "05-05 Documentation, UAT and go-live"
+description: "Four named contract deliverables that are not components and not screens: the technical documentation, the user guides, UAT support, and the cutover that makes the platform the…"
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** D11 · **Effort** ~26.5pd · **Risk** High `DATA` · **Build in** Phases 1–6
+
+## 1. Purpose
+
+Four named contract deliverables that are not components and not screens: the technical documentation,
+the user guides, UAT support, and the cutover that makes the platform the system of record and turns
+the legacy tool off.
+
+The plan is explicit that these are **named D11 deliverables, not by-products**.
+
+## 2. Scope
+
+### In scope
+
+- Technical documentation: architecture, data model, API reference, runbooks, adapter contracts
+- User guides per internal role, plus in-app help content for candidates
+- UAT support: defect intake, severity triage, turnaround, evidenced retest
+- Go-live: cutover, system-of-record switch, legacy retirement, hypercare
+
+### Explicitly out of scope
+
+- These documents. `docs/` is engineering specification; the D11 technical documentation is generated
+  from the shipped system (`01-04` §8) and covers what was actually built.
+- Environments and the pipeline — `02-15`.
+- The migration itself — `03-13`. Cutover **depends on** its reconciliation.
+- Training delivery. Guides are produced; running training sessions is not scoped.
+
+### Explicitly not built
+
+- A customer-facing help centre or knowledge base.
+- Video training material.
+- Documentation for Release 2 capabilities that do not ship.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M1-I6` | D11 | Technical documentation | XL | 5.0 |
+| `M1-I7` | D11 | User guides | L | 3.0 |
+| `M1-I8` | D11 | UAT support | XL | 5.0 |
+| `M1-I9` | D11 | Go-live and legacy retirement | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** everything. These are cross-cutting and run to the end of the engagement.
+Specifically: `02-15` (the environments UAT runs in), `03-13` (**reconciliation gates cutover**),
+`02-13` (the adapter contract that must be documented well enough for a third party).
+
+**Consumed by:** Apollo IT, Apollo operations, and any third party implementing a new market adapter.
+
+**External:** `X22` — **named UAT participants with protected time**, agreed severity definitions and
+turnaround, the go-live window and the parallel-run period.
+
+## 5. Data model
+
+**N/A**. One artefact register is maintained so a deliverable is not "done" by assertion:
+
+| Artefact | Source | Versioned with |
+|---|---|---|
+| Architecture and data model | `docs/00-foundation/`, updated to what shipped | Each release |
+| API reference | Generated `openapi.json` (`01-04` §8) | Each release |
+| Runbooks | One per failure mode in `04-00` §2 | Each release |
+| Adapter contract | `02-13` §5 plus contract tests | Each release |
+| Role guides | One per internal role in `01-07` §3 | Each release |
+| Candidate help | In-app content for registration and check-in | Each app release |
+
+## 6. State machines
+
+### Go-live (`M1-I9`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| `pre-cutover` | migration reconciliation passes | `ready` | **`03-13` reconciliation is the gate; nothing else is** |
+| `ready` | cutover executed in the agreed window | `cut_over` | A rollback point exists up to the agreed cutover commit |
+| `cut_over` | parallel run completes | `system_of_record` | **The platform becomes system of record only after reconciliation passes** |
+| `system_of_record` | parallel-run period closes | `legacy_retired` | **CPAL is retired only after the parallel run closes** |
+| `legacy_retired` | hypercare period ends | `steady_state` | Hypercare coverage is defined and staffed before it starts |
+
+### Defect (`M1-I8`)
+
+`raised → triaged (severity agreed) → fixed → retested (evidenced) → closed`.
+Severity definitions and turnaround windows are agreed **before testing starts, not negotiated during
+it**.
+
+## 7. API surface
+
+**N/A**.
+
+## 8. Events and jobs
+
+**N/A** — process, not runtime. The one automated piece is the documentation build: `openapi.json` and
+the type reference are generated in CI on every release, so the API reference cannot drift from the
+shipped code.
+
+## 9. Frontend
+
+**N/A**. In-app help content is delivered inside `03-05` and the console's contextual help slots.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Documentation covers **every module delivered in Release 1** | `M1-I6` |
+| AC2 | **The adapter interface contract is documented well enough for a third party to implement a new market** | `M1-I6` |
+| AC3 | Runbooks cover the failure modes named in the integration register | `M1-I6`, `04-00` §2 |
+| AC4 | Documentation is **versioned alongside the release** | `M1-I6` |
+| AC5 | Each internal role has a guide covering the screens it can reach | `M1-I7` |
+| AC6 | **The verbal-capture path is documented for site-resident recruiters, since it is not an edge case** | `M1-I7` |
+| AC7 | Candidate-facing help exists in the app for registration and check-in | `M1-I7` |
+| AC8 | Material is ready **before UAT, not after** | `M1-I7` |
+| AC9 | Defects raised in UAT are triaged against **agreed severity definitions** | `M1-I8` |
+| AC10 | A blocker is turned around within the agreed window | `M1-I8` |
+| AC11 | Sign-off criteria are agreed per module **before UAT starts, not negotiated during it** | `M1-I8` |
+| AC12 | Retest of a fixed defect is **evidenced** | `M1-I8` |
+| AC13 | **The platform becomes system of record only after A10 reconciliation passes** | `M1-I9` |
+| AC14 | A rollback point exists up to the agreed cutover commit | `M1-I9` |
+| AC15 | **The legacy tool is retired only after the parallel-run period closes** | `M1-I9` |
+| AC16 | Hypercare coverage is **defined and staffed** | `M1-I9` |
+| AC17 | Named UAT participants have protected time before testing starts | `X22` |
+| AC18 | The API reference is generated from the shipped code, not hand-written | `01-04` §8 |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `X22` | UAT participants, severity definitions, go-live window and parallel-run period | Apollo operations to name participants and **protect their time** — recruiters carrying 15–16 vacancies each will not otherwise test | `M1-I8`, `M1-I9` |
+| `OI-A-02` | Migration reconciliation gates cutover, and the data is unprofiled | Cutover cannot be scheduled until profiling and a reconciling load exist | `M1-I9` |
+| `OI-HS-04` | Who holds credentials and who is on call after handover | Apollo-owned account; **no Hiresense-held credential required at runtime once handover completes** | `M1-I9` |
+| `OI-HS-30` | Who is on call outside Apollo business hours during and after hypercare | Hiresense rota through hypercare, transferring to Apollo IT at a date agreed here | `M1-I9` |
+| — | How long is the parallel-run period? | Not stated anywhere. Assumed **four weeks** — long enough for one full billing cycle to run in both systems, which is the only test that matters for the day-90 chain. | `M1-I9` |

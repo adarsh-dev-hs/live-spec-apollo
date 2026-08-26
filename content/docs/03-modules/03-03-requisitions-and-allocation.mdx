@@ -1,0 +1,322 @@
+---
+title: "03-03 Requisitions and allocation"
+description: "The requisition: the single structured record every channel normalises to, and the object every module downstream quotes."
+---
+
+**Package** `@apollo/requisitions` · **Schema** `demand` · **Plan** D2, D14 (thin slice) · **Effort** ~65.0pd · **Risk** Medium `XMOD` · **Build in** Phase 3
+
+## 1. Purpose
+
+The requisition: the single structured record every channel normalises to, and the object every module
+downstream quotes. It tracks the vacancy through its life — open, in fulfilment, paused, revised, partly
+filled, filled, closed — counts how long it has been open **excluding held days**, and records who owns
+it and which recruiters were put on it at the daily morning call.
+
+The allocation half is deliberately a **record, not an assignment engine**. The morning call already
+makes the decision; Release 1 writes it down. Prioritisation, suggestion and approval are `03-18`.
+
+## 2. Scope
+
+### In scope
+
+- The requisition form: manual creation and the verbal-capture entry point
+- The requisition record view, carrying its source evidence so a disputed requirement traces back
+- Version history — revision is a **versioning event, not an edit**
+- The fulfilment board: live demand, aging and fill in one view, the highest-traffic screen in the module
+- Shift templates and the shift demand lines they generate
+- Hold, revise and close, each with distinct rules about the aging clock and mandatory reasons
+- Owner and allocation, append-only
+- The requisition state machine and the append-only status-change log
+
+### Explicitly out of scope
+
+- Getting the demand in — `03-02` and `02-08`.
+- Ranking candidates against a requisition — `03-07`.
+- Prioritisation, recruiter suggestion, load balancing and pre-live approval — `03-18`, Phase 6.
+
+### Explicitly not built
+
+- **Any suggestion, computation or optimisation of allocation.** Enforced by a negative test (`M3-I16`
+  BR1).
+- Enforcing the 15–16 vacancy operating norm. Recorded, not enforced.
+- An approval step before a requisition goes live. `03-18` adds the state; Phase 3 has none.
+- Changing candidate category after creation — blocked pending `OI-M3-09`, because category drives the
+  attribute set and the ranking weight set.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I9` | D2 | Requisition form, incl. verbal capture | XL | 5.0 |
+| `M3-I10` | D2 | Requisition record with source evidence | XL | 5.0 |
+| `M3-I11` | D2 | Version history | L | 3.0 |
+| `M3-I12` | D2 | Fulfilment board | XL | 5.0 |
+| `M3-I13` | D2 | Shift templates | L | 3.0 |
+| `M3-I14` | D2 | Shift demand lines | M | 2.0 |
+| `M3-I15` | D2 | Hold, revise and close | M | 2.0 |
+| `M3-I16` | D14 | Owner and allocation | L | 3.0 |
+| `M3-I27` | D2 | Requisition record and states (service) | XL | 5.0 |
+| `M3-I28` | D2 | Status change log (append-only) | L | 3.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-01` (client, site, department, rate card — a requisition cannot be created
+without a client), `03-04` (the category attribute definitions, `AS-04`), `02-01` (owner from the
+active user list; allocated user must hold a recruiter role), `02-02`, `02-03` (close and hold reason
+lists), `02-07`, `02-11` (**status transitions must be evented from day one**).
+
+**Consumed by:** `03-07` ranks against it; `03-08` offers and links quote it; `03-09` counts placements
+against it; `03-11` prices against it; `03-12` cannot report by recruiter without the allocation
+history; `03-14` displays it.
+
+**External:** none directly.
+
+## 5. Data model
+
+The `demand.requisition` table is shown in full in `01-05` §2. The rest:
+
+```sql
+CREATE TABLE demand.requisition_version (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    version integer NOT NULL,
+    snapshot jsonb NOT NULL,                 -- the whole record as it stood
+    changed_fields text[] NOT NULL,
+    change_source text NOT NULL,             -- 'manual' | 'inbound_revision' | 'system'
+    inbound_record_id uuid,                  -- when a channel revision caused it
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (requisition_id, version)
+);
+
+CREATE TABLE demand.category_attributes (    -- the A9 requisition-side values (AS-04)
+    requisition_id uuid PRIMARY KEY REFERENCES demand.requisition(id),
+    attribute_set_version integer NOT NULL,  -- candidates.category_attribute_set version consumed
+    values jsonb NOT NULL                    -- { specialty: 'icu', acuity: 'level_3' }
+);
+
+CREATE TABLE demand.shift_template (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid, name text NOT NULL,
+    pattern jsonb NOT NULL,                  -- days of week, start/end times, positions per shift
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE demand.shift_demand_line (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    shift_date date NOT NULL,
+    starts_at time NOT NULL, ends_at time NOT NULL,
+    positions_requested integer NOT NULL CHECK (positions_requested > 0),
+    positions_filled integer NOT NULL DEFAULT 0,
+    visit_address jsonb,                     -- home healthcare: the workplace changes per shift
+    visit_geo_point point,                   -- what geo-fencing checks against (03-16, OI-HS-17)
+    generated_from_template_id uuid REFERENCES demand.shift_template(id),
+    state text NOT NULL DEFAULT 'open'
+      CHECK (state IN ('open','partially_filled','filled','held','cancelled')),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON demand.shift_demand_line (requisition_id, shift_date);
+CREATE INDEX ON demand.shift_demand_line (shift_date, state) WHERE state IN ('open','partially_filled');
+
+CREATE TABLE demand.allocation_record (      -- append-only; rows are added, never changed
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    recruiter_id uuid NOT NULL REFERENCES identity.user(id),
+    allocated_at timestamptz NOT NULL DEFAULT now(),
+    allocated_by uuid NOT NULL REFERENCES identity.user(id),
+    removed_at timestamptz,                  -- removal preserves the historical row
+    removed_by uuid
+);
+CREATE INDEX ON demand.allocation_record (requisition_id, allocated_at);
+CREATE INDEX ON demand.allocation_record (recruiter_id, allocated_at);   -- D28 by recruiter
+REVOKE DELETE ON demand.allocation_record FROM PUBLIC;
+
+CREATE TABLE demand.status_transition (      -- append-only; D28 cannot be computed retrospectively without it
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    from_status text, to_status text NOT NULL,
+    reason_code text,
+    actor_id uuid, actor_type text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON demand.status_transition (requisition_id, occurred_at);
+REVOKE UPDATE, DELETE ON demand.status_transition FROM PUBLIC;
+
+CREATE TABLE demand.hold_period (            -- what makes "aging excluding held days" computable
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    held_at timestamptz NOT NULL, released_at timestamptz,
+    hold_reason_code text
+);
+```
+
+## 6. State machines
+
+### `Requisition` (`M3-I27`) — the full table
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | created (any channel or manual) | `incomplete` or `complete` | Scored against the category's required-field set |
+| `incomplete` | follow-up issued | `awaiting_client` | Visible on the board, **excluded from matching** |
+| `awaiting_client` | client supplies fields | `complete` | Reply merges onto the same requisition |
+| `awaiting_client` | window expires | `awaiting_client` | Escalates to the owner; **no value is deemed** |
+| `incomplete`/`awaiting_client` | all required fields present | `complete` | **`first_complete_at` set — aging starts here** |
+| `complete` | published | `open` | |
+| `open` | owner set and work begins | `in_fulfilment` | **Cannot enter without an owner** (`M3-I16` V3) |
+| `in_fulfilment` | hold | `on_hold` | **Aging clock stops** |
+| `on_hold` | release | `in_fulfilment` | **Aging resumes from the held value, not from zero** |
+| any editable state | revise | same state, version + 1 | Re-scores completeness |
+| `in_fulfilment` | placement confirmed, positions remain | `partially_filled` | `positions_filled` incremented by `03-09` |
+| `partially_filled` | last position confirmed | `filled` | **Does not auto-close** — pending `OI-M3-12` |
+| `partially_filled`/`filled` | drop-out in `03-09` | `in_fulfilment` | Position returns to open |
+| any | close | `closed` | **Reason mandatory**, from the configured list; rejected without one |
+
+`03-18` inserts `awaiting_approval` between `created` and `open` in Phase 6. Nothing else changes.
+
+### Aging (`M3-I27`, `M3-I12`)
+
+```
+days_aged = (now − first_complete_at) − Σ(hold_period durations)
+```
+
+Measured from **first reaching complete**, not from inbound receipt. Held days are excluded, and a
+release resumes from the held value.
+
+### `ShiftDemandLine`
+
+`open → partially_filled → filled`, plus `held` and `cancelled`. **Holding a line does not hold the
+parent requisition**; a cancelled line does not appear in ranking.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/requisitions` | `requisition:create` | Manual or verbal capture; returns the reference |
+| `GET` | `/v1/requisitions/:id` | `requisition:read` | Record with source channel, original payload link, counts, aging |
+| `PATCH` | `/v1/requisitions/:id` | `requisition:edit` | **Creates a new version**, re-scores completeness |
+| `GET` | `/v1/requisitions/:id/versions` | `requisition:read` | Read-only history, changed fields marked |
+| `POST` | `/v1/requisitions/:id/hold` · `/release` | `requisition:hold` | Aging clock rules above |
+| `POST` | `/v1/requisitions/:id/close` | `requisition:close` | **Reason required**; available from any state |
+| `POST` | `/v1/requisitions/:id/owner` | `requisition:allocate` | Owner from **active** users only |
+| `POST`/`DELETE` | `/v1/requisitions/:id/allocations` | `requisition:allocate` | Append-only; removal preserves history |
+| `GET` | `/v1/requisitions/:id/allocations` | `requisition:read` | Every past allocation in sequence |
+| `GET` | `/v1/board?filter[...]&sort=&cursor=` | `requisition:read` | The fulfilment board |
+| `GET`/`POST`/`PATCH` | `/v1/shift-templates` | `requisition:manage` | Patterns |
+| `POST` | `/v1/requisitions/:id/apply-template` | `requisition:edit` | Generates one demand line per shift |
+| `GET`/`PATCH` | `/v1/requisitions/:id/shift-lines` | `requisition:read`/`edit` | Per-shift view; hold or cancel one line |
+| `GET` | `/v1/requisitions/:id/transitions` | `requisition:read` | Elapsed time in each state |
+
+There is **no** endpoint that suggests, computes or optimises an allocation. Its absence is tested.
+
+## 8. Events and jobs
+
+**Events emitted**
+
+| Event | Consumed by |
+|---|---|
+| `demand.requisition.created` | `03-12` funnel and channel performance |
+| `demand.requisition.status_changed` | `03-12` stage loss, time-to-fill; `02-09` triggers |
+| `demand.requisition.revised` | `03-07` marks ranked sets stale |
+| `demand.requisition.held` / `.released` / `.closed` | `03-12` |
+| `demand.allocation.recorded` / `.removed` | **`03-12` — loss by recruiter is impossible without this** |
+| `demand.shift_line.generated` | `03-07` shift ranking |
+
+**Events subscribed:** `placement.placement.joined` → decrement positions open;
+`placement.dropout.recorded` → return the position to open;
+`demand.requisition.completeness_scored` (from `03-02`) → state transition.
+
+**Jobs:** none scheduled of its own. Aging is computed on read, not by a nightly job, so the board is
+never stale.
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| New / edit requisition — client, site, department, service line, **category**, **care setting**, role, positions, rate reference, category-specific fields, start date and shift pattern or target join date; shows which required fields are missing | `/requisitions/new`, `/requisitions/:id/edit` | `M3-I9` |
+| Requisition record — status, age, positions filled and open, **source channel and the original message**, version history, allocation, activity trail; hold / revise / close / set owner / allocate | `/requisitions/:id` | `M3-I10` |
+| Version history | `/requisitions/:id/versions` | `M3-I11` |
+| **Fulfilment board** — client, site, role, category, positions requested / filled / open, days open, owner, allocated recruiters; filter by client, category, owner, status and **"no recruiter allocated"**; rate-mismatch flag | `/board` | `M3-I12` |
+| Shift templates | `/admin/shift-templates` | `M3-I13` |
+| Shift demand lines — per shift, with the **visit address for home healthcare** | `/requisitions/:id/shifts` | `M3-I14` |
+| Hold / revise / close dialogs | inline | `M3-I15` |
+| Owner and allocation, with full allocation history | `/requisitions/:id/allocation` | `M3-I16` |
+
+Selecting a category **swaps the attribute field set** (`AS-04`). Verbal capture records source as
+`verbal` with the capturing recruiter, and is completeness-scored identically to the parsed path.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A requisition created with client, location, department, service line, category, role, positions and rate reference is assigned a unique identifier | `M3-I9` AC1 |
+| AC2 | Selecting a category swaps the attribute field set | `M3-I9`, `AS-04` |
+| AC3 | Number of positions must be an integer greater than zero | `M3-I9` V1 |
+| AC4 | Candidate category is restricted to nurse, doctor or allied health | `M3-I9` V2 |
+| AC5 | Contractual requires start date and shift pattern; permanent target join date is optional | `M3-I9` V3 |
+| AC6 | Location and department must belong to the client on the requisition | `M3-I9` V5 |
+| AC7 | A rate reference with no matching rate card line is **flagged but does not block** | `M3-I9` BR3 |
+| AC8 | A requisition cannot be created without a client record | `M3-I9` BR1 |
+| AC9 | **Verbal capture records source as verbal with the capturing recruiter** | `M3-I9` BR4 |
+| AC10 | Changing category after creation is blocked pending `OI-M3-09` | `M3-I9` |
+| AC11 | Completeness scoring at verbal entry is identical to the parsed path | `M3-I9` |
+| AC12 | Source channel and original payload remain retrievable after creation **and after revision** | `M3-I10`, `M3-I11` |
+| AC13 | Source channel is **immutable** after creation | `M3-I10` BR2 |
+| AC14 | Elapsed time in each state is retrievable for a requisition that has passed through open, in fulfilment and partially filled | `M3-I10` AC7 |
+| AC15 | **Days aged excludes held days** | `M3-I10` AC6 |
+| AC16 | The audit timeline shows every status transition with acting user or system | `M3-I10` |
+| AC17 | A finance user can read but cannot edit | `M3-I10` |
+| AC18 | The originating inbound record opens from the source panel | `M3-I10` |
+| AC19 | Revising creates a new version and every prior version is retrievable with timestamp and user | `M3-I11` AC2 |
+| AC20 | Revision re-scores completeness against the revised field set | `M3-I11` |
+| AC21 | An inbound revision **updates the existing requisition as a new version** rather than creating a second | `M3-I11` |
+| AC22 | Version history is read-only | `M3-I11` |
+| AC23 | The board shows positions requested, filled, open and days aged excluding held days | `M3-I12` AC6 |
+| AC24 | Filtering for requisitions with **no recruiter allocated** returns exactly those | `M3-I12`, `M3` D14 AC4 |
+| AC25 | A requisition whose rate reference found no rate card line is flagged | `M3-I12` BR3 |
+| AC26 | Requisitions at `awaiting_client` are visible but **excluded from matching** | `M3-I12` E4 |
+| AC27 | **Aging is measured from first reaching complete**, not from inbound receipt | `M3-I12` BR4 |
+| AC28 | Placement confirmations from M8 decrement positions open | `M3-I12`, `M3-I27` |
+| AC29 | A recruiter sees the correct row set under the agreed data-scoping rule | `M3-I12`, `OI-HS-01` |
+| AC30 | Applying a template generates one demand line per shift and the count matches the pattern | `M3-I13` AC5 |
+| AC31 | Editing a template does not retroactively change already-generated lines | `M3-I13` |
+| AC32 | A permanent requisition cannot have a shift template applied | `M3-I13` |
+| AC33 | A deactivated template stays readable on requisitions that used it | `M3-I13` |
+| AC34 | Demand lines are readable by M6 for shift-level ranking | `M3-I14` |
+| AC35 | Fill decrements **per line**, not only at requisition level | `M3-I14` |
+| AC36 | A cancelled line does not appear in ranking | `M3-I14` |
+| AC37 | **Holding a line does not hold the parent requisition** | `M3-I14` |
+| AC38 | Placing a requisition on hold stops the aging clock | `M3-I15` AC3 |
+| AC39 | Releasing the hold resumes aging **from the held value, not from zero** | `M3-I15` AC3 |
+| AC40 | Closing without a reason is rejected and the requisition remains in its prior state | `M3-I15` AC4 |
+| AC41 | Close is available from any state | `M3-I15` |
+| AC42 | A requisition reaching filled **does not close automatically** — pending `OI-M3-12` | `M3-I15` BR5 |
+| AC43 | Hold reason is optional; **close reason is mandatory** | `M3-I15` V4 |
+| AC44 | Every action writes a timestamped `StatusTransition` | `M3-I15`, `M3-I28` |
+| AC45 | An owner can be assigned from the internal user list and is retrievable on the requisition and in reporting | `M3-I16` AC1 |
+| AC46 | One or more recruiters can be allocated, each timestamped and attributed to the user who recorded it | `M3-I16` AC2 |
+| AC47 | Reallocating preserves prior allocations — reallocated twice returns all three in sequence | `M3-I16` AC3 |
+| AC48 | Owner must be an **active** Apollo internal user | `M3-I16` V1 |
+| AC49 | An allocated user must hold a **recruiter role** | `M3-I16` V2 |
+| AC50 | A requisition cannot move to `in_fulfilment` without an owner set | `M3-I16` V3 |
+| AC51 | Removing an allocation preserves the historical record | `M3-I16` BR3 |
+| AC52 | **No suggestion, computation or optimisation of allocation occurs anywhere** — negative test | `M3-I16` BR1 |
+| AC53 | Allocation is exposed to D28 grouped by recruiter for any date range | `M3-I16` AC5 |
+| AC54 | Every transition is reachable **only from its defined predecessor state** | `M3-I27` |
+| AC55 | A drop-out in M8 returns the position to open | `M3-I27` |
+| AC56 | Every status transition writes a timestamped, **append-only** record that cannot be edited or deleted | `M3-I28` |
+| AC57 | D28 can compute stage-level loss by client and by stage from transitions alone | `M3-I28` |
+| AC58 | Loss **by recruiter** additionally requires the D14 allocation history | `M3-I28`, `M9-I8` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-09` | Can candidate category be changed after creation, or does it require a new requisition? | **Blocked.** Category drives the A9 attribute set and the D18 weight set, so an edit path has downstream consequences a new requisition does not. | `M3-I9`, D2 schema |
+| `OI-M3-12` | Does a requisition auto-close on reaching filled, or is close an explicit act? | Explicit act; auto-close is a configuration flag defaulted off. **Affects the state machine, not just the UI.** | `M3-I15`, `M3-I27` |
+| `OI-M3-11` | Close-reason taxonomy, and a hold-reason taxonomy if one is wanted | Both lists exist in `02-03`, close reason mandatory. The list must be populated before close can be tested. | `M3-I15` |
+| `OI-M3-10` | Does the board display recruiter load against the 15–16 norm? | Not displayed in Phase 3; **capacity is explicitly not enforced**. `03-18` adds the display. | `M3-I12` |
+| `OI-M3-14` | Latency and load targets for the fulfilment board | Working budget: first rows ≤1.5s warm. No agreed target, so no performance acceptance test. | `M3-I12` |
+| `OI-HS-01` | Row scoping on the board | `AS-18` | `M3-I12` |
+| `OI-M3-01` | A9 requisition-side field ownership | `AS-04` — M4 owns the definition, consumed here as configuration | `M3-I9`, D2 schema |
+| `OI-HS-17` | Home healthcare visit address — who supplies it and in what form? | Held on `shift_demand_line.visit_address` with a coordinate, which covers the model. The **source** of the coordinate is unresolved. | `M3-I14`, `M8-I7`, `M12-I5` |

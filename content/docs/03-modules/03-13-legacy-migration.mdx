@@ -1,0 +1,222 @@
+---
+title: "03-13 Legacy migration (CPAL)"
+description: "Move Apollo's existing candidate data out of CPAL and the current tooling into the platform, after which the platform becomes the system of record and the old tool is switched off."
+---
+
+**Package** `@apollo/migration` · **Schema** `migration` · **Plan** A10 · **Effort** ~31.0pd · **Risk** High `DATA` · **Build in** Phase 1–2
+
+## 1. Purpose
+
+Move Apollo's existing candidate data out of CPAL and the current tooling into the platform, after which
+**the platform becomes the system of record and the old tool is switched off**.
+
+This is the single largest unpriced item in the six months. Nobody has seen the data: how many records,
+how complete, how many duplicates, whether fields map cleanly onto the new model. The figures against
+these items are **placeholders that hold the shape of the plan, not estimates** — a joint profiling
+exercise settles them, and it has not happened.
+
+## 2. Scope
+
+### In scope
+
+- Data profiling: volume, completeness, duplicate rate, and a mapping feasibility assessment
+- The migration pipeline: extract, map, load, resumable, re-runnable without creating duplicates
+- Delta runs picking up source changes between the main load and cutover
+- Duplicate resolution within the migrated base and **between the migrated base and app registrations**
+- The operational screens: batch status, failed records, correction and rejection
+- Reconciliation against the source total, which is what permits cutover
+
+### Explicitly out of scope
+
+- Cutover itself, legacy retirement and hypercare — `05-05` (`M1-I9`). This module proves the data;
+  that step turns the old tool off.
+- The candidate merge implementation — `03-04` owns it (`OI-A-03`). This module **calls** it, so there
+  is one merge and uniform lineage.
+- Environments and the pipeline — `02-15`.
+
+### Explicitly not built
+
+- Migration of anything other than candidate data and its documents. Clients, contracts and rate cards
+  are entered fresh in `03-01`; nothing in the plan scopes migrating them.
+- A two-way sync with CPAL. One direction, then the old tool is retired.
+- Automatic resolution of ambiguous records. A failed record is corrected or rejected **by a person,
+  with a reason, and is never lost**.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M1-I2` | A10 | Migration screens — status, failed records | L | 3.0 |
+| `M1-I10` | A10 | CPAL data profiling | XL | 5.0 |
+| `M1-I11` | A10 | Migration pipeline | XXL | 8.0 |
+| `M1-I12` | A10 | Duplicate resolution on migrated data | XL | 5.0 |
+
+Every one of these carries **Low confidence** and names `OI-A-02` as the reason.
+
+## 4. Dependencies
+
+**Must exist first:** `03-04` (the target model and the merge implementation), `02-04` (migrated
+documents), `02-10` (resumable batches), `02-12` (**a consent basis for migrated candidates**).
+
+**Consumed by:** `03-04` — the migrated pool is most of the candidate base at go-live; `03-06` cadence
+coverage; `03-07` ranking depth.
+
+**External:** `X20` legacy ATS data access — **month 1, and until profiling runs none of this can be
+estimated**. `OI-A-02` is an estimate blocker.
+
+## 5. Data model
+
+```sql
+CREATE TABLE migration.batch (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    source text NOT NULL,                     -- 'cpal' | 'spreadsheet_export' | …
+    kind text NOT NULL CHECK (kind IN ('profile','main','delta')),
+    state text NOT NULL DEFAULT 'staged' CHECK (state IN
+      ('staged','profiled','transformed','loading','paused','loaded','reconciled','cut_over','failed')),
+    source_total integer,                     -- what the source said
+    extracted_count integer NOT NULL DEFAULT 0,
+    mapped_count integer NOT NULL DEFAULT 0,
+    loaded_count integer NOT NULL DEFAULT 0,
+    exception_count integer NOT NULL DEFAULT 0,
+    rejected_count integer NOT NULL DEFAULT 0,
+    checkpoint jsonb,                         -- resume point (M1-I11)
+    started_at timestamptz, finished_at timestamptz,
+    started_by uuid NOT NULL
+);
+-- a batch cannot be started twice concurrently (M1-I2) — enforced by advisory lock + this index
+CREATE UNIQUE INDEX ON migration.batch (source, kind)
+  WHERE state IN ('transformed','loading');
+
+CREATE TABLE migration.record (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    batch_id uuid NOT NULL REFERENCES migration.batch(id),
+    source_ref text NOT NULL,                 -- the CPAL identifier — lineage, retained forever
+    source_payload jsonb NOT NULL,            -- exactly as extracted
+    mapped_payload jsonb,
+    state text NOT NULL DEFAULT 'extracted' CHECK (state IN
+      ('extracted','mapped','loaded','exception','resolved','rejected')),
+    candidate_id uuid,                        -- what it became
+    exception_reason text, exception_field text,
+    rejection_reason text, rejected_by uuid,
+    resolved_by uuid, resolved_at timestamptz,
+    UNIQUE (batch_id, source_ref)             -- a re-run cannot duplicate a record
+);
+CREATE INDEX ON migration.record (batch_id, state);
+
+CREATE TABLE migration.profile_result (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    batch_id uuid NOT NULL REFERENCES migration.batch(id),
+    total_records integer NOT NULL,
+    field_completeness jsonb NOT NULL,        -- per field: % populated
+    duplicate_rate numeric(5,4),
+    unmappable_fields jsonb NOT NULL,         -- fields with no target (M1-I10)
+    sample jsonb,
+    produced_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE migration.reconciliation (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    batch_id uuid NOT NULL REFERENCES migration.batch(id),
+    source_total integer NOT NULL,
+    loaded integer NOT NULL, exceptions integer NOT NULL, rejected integer NOT NULL,
+    reconciles boolean GENERATED ALWAYS AS
+      (source_total = loaded + exceptions + rejected) STORED,
+    checked_at timestamptz NOT NULL DEFAULT now(), checked_by uuid NOT NULL
+);
+```
+
+Every loaded candidate carries `migrated_from_ref` back to `source_ref` (`03-04`), so lineage survives
+the migration.
+
+## 6. State machines
+
+### `MigrationBatch` (`M1-I2`, `M1-I11`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | source data staged | `staged` | |
+| `staged` | profiling run | `profiled` | **Nothing else in A10 can be sized until this completes** |
+| `profiled` | mapping applied | `transformed` | |
+| `transformed` | load starts | `loading` | **Cannot be started twice concurrently** |
+| `loading` | paused | `paused` | |
+| `paused` | resumed | `loading` | **Resumes without reprocessing already-loaded records** |
+| `loading` | complete | `loaded` | Counts must reconcile to the source total |
+| `loaded` | reconciliation passes | `reconciled` | |
+| `reconciled` | cutover (`05-05`) | `cut_over` | **Only now does the platform become system of record** |
+
+### `MigrationRecord`
+
+`extracted → mapped → loaded`, or `extracted → exception → resolved → loaded`, or `rejected` with a
+reason **so it is counted and not lost**.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/migration/batches` | `migration:manage` | Create a profile, main or delta batch |
+| `POST` | `/v1/migration/batches/:id/profile` | `migration:manage` | Runs profiling; produces the estimating figures |
+| `GET` | `/v1/migration/batches/:id/profile` | `migration:read` | Volume, completeness, duplicate rate, unmappable fields |
+| `POST` | `/v1/migration/batches/:id/start` · `/pause` · `/resume` | `migration:manage` | |
+| `GET` | `/v1/migration/batches?state=` | `migration:read` | Counts and **progress while a batch runs** |
+| `GET` | `/v1/migration/records?batchId=&state=exception` | `migration:read` | Failed records with reasons |
+| `POST` | `/v1/migration/records/:id/correct` | `migration:manage` | Fix the field and send it back to load |
+| `POST` | `/v1/migration/records/:id/reject` | `migration:manage` | **Reason required; counted, not lost** |
+| `POST` | `/v1/migration/batches/:id/reconcile` | `migration:manage` | Produces the reconciliation record |
+| `GET` | `/v1/migration/batches/:id/reconciliation` | `migration:read` | The gate for cutover |
+
+## 8. Events and jobs
+
+**Events emitted:** `migration.batch.started` · `.paused` · `.loaded` · `.reconciled` ·
+`migration.record.exception` · `migration.duplicates.detected`.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `migration.profile` | on demand | Measures volume, completeness and duplicate rate |
+| `migration.load` | on start, `batch` class | Extract → map → load, **checkpointed and resumable** |
+| `migration.delta` | on demand | Picks up source changes between the main load and cutover |
+| `migration.detect-duplicates` | after load | **Calls `03-04`'s merge**, so there is one implementation |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Migration status — each run with records read, loaded and failed; start, pause, resume; **progress observable while running** | `/admin/migration` | `M1-I2` |
+| Failed records — reason per record; correct the failing field and send back to load; reject with a reason | `/admin/migration/:batchId/exceptions` | `M1-I2` |
+| Profiling result — volume, field completeness, duplicate rate, fields with no target | `/admin/migration/:batchId/profile` | `M1-I10` |
+| Reconciliation — source total against loaded, exceptions and rejected, and whether it reconciles | `/admin/migration/:batchId/reconciliation` | `M1-I11` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A batch reports extracted, mapped, loaded, exception and rejected counts that **reconcile to the source total** | `M1-I2` |
+| AC2 | A paused batch resumes **without reprocessing already-loaded records** | `M1-I2` |
+| AC3 | A batch cannot be started twice concurrently | `M1-I2` |
+| AC4 | **Progress is observable while a batch runs**, not only on completion | `M1-I2` |
+| AC5 | Effort and volume cannot be estimated until profiling runs | `M1-I2`, `OI-A-02` |
+| AC6 | Volume, quality and duplicate rate are measured and documented | `M1-I10` |
+| AC7 | A mapping feasibility assessment identifies **fields with no target** | `M1-I10` |
+| AC8 | The output is sufficient to estimate the remainder of A10 | `M1-I10` |
+| AC9 | **This item is a blocker, not a task** — the plan's figures are placeholders | `M1-I10` |
+| AC10 | A re-run of a completed batch produces **no duplicate records** | `M1-I11` |
+| AC11 | A failure mid-batch resumes from the last checkpoint | `M1-I11` |
+| AC12 | A delta run picks up source changes between the main load and cutover | `M1-I11` |
+| AC13 | **Every loaded record retains a reference to its source record** | `M1-I11` |
+| AC14 | Once reconciliation passes, the platform becomes system of record and CPAL is retired | `M1-I11`, `M1-I9` |
+| AC15 | Duplicates within the migrated base are detected **before load completes** | `M1-I12` |
+| AC16 | A merge retains lineage to both source records | `M1-I12`, `M4-I21` |
+| AC17 | **Candidate data is never deleted; a losing duplicate is merged, not removed** | `M1-I12` |
+| AC18 | Duplicates **between migrated and app-registered candidates** are also detected | `M1-I12`, `M4-I21` |
+| AC19 | A rejected record carries a reason and is counted, not lost | `M1-I2` |
+| AC20 | Migrated candidates are flagged with a consent basis that **excludes them from cadence** until Apollo confirms | `02-12` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-02` | **How much data is in CPAL, and what condition is it in?** Never seen. Record count, completeness, duplicate rate and field mappability all unknown | A10 **cannot be sized at all**. The figures in the plan are placeholders holding the shape, not estimates. Apollo provides access; Hiresense runs the profiling. **The single largest unpriced item in the six months, and an estimate blocker.** | `M1-I10`, `M1-I11`, `M1-I12`, `M1-I2` |
+| `OI-A-03` | Is the migrated base resolved through the D3 dedupe mechanism or a one-time migration-side process? | **The D3 mechanism**, called from here. The migration-side option is cheaper but leaves no ongoing dedupe for the legacy base. | `M1-A10`, `M4-D3` |
+| `OI-HS-02` | Migrated candidates never consented through this platform | Flagged `consent_basis = 'migrated_unverified'`, excluded from cadence until Apollo legal confirms the basis. Visible on the consent gap report rather than assumed. | `02-12`, `03-06` |
+| `X20` | Legacy ATS data access | **Month 1.** Until profiling runs nothing here can be estimated, which is why access is a week-one dependency rather than a Phase-2 one. | All of A10 |

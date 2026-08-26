@@ -1,0 +1,215 @@
+---
+title: "03-18 Demand prioritisation and approval"
+description: "03-03 records which recruiter was put on which vacancy, as decided on the morning call. This module makes the system do the deciding: score which vacancies matter most on urgency,…"
+---
+
+**Package** `@apollo/requisitions` (extension) · **Schema** `demand` · **Plan** D14 (full) · **Effort** ~26.5pd · **Risk** Low `MODEL` · **Build in** Phase 6
+
+## 1. Purpose
+
+`03-03` records which recruiter was put on which vacancy, as decided on the morning call. This module
+makes the system do the deciding: score which vacancies matter most on urgency, value and age; suggest
+which recruiter should take each one based on current load and past success; and add an approval step
+before a vacancy goes live, which `03-03` deliberately does not have.
+
+**The system suggests; a person still decides.** Nothing here writes an allocation directly.
+
+It sits in Phase 6 rather than next to `03-03` for one reason: the priority scoring and the recruiter
+suggestion **read performance data that `03-12` produces**, and `03-12` does not exist until Phase 6.
+Building it earlier would mean building a suggestion engine against data that does not exist yet.
+
+## 2. Scope
+
+### In scope
+
+- Priority scoring per requisition, with the reasoning shown
+- The priority board, and manual override of a priority with a reason
+- Suggested recruiter with current load shown against the operating norm
+- The requisition approval workflow — a new state between created and open
+- The scoring and load-balancing engine
+
+### Explicitly out of scope
+
+- The requisition, allocation record and fulfilment board — `03-03`. This module **changes M3
+  behaviour rather than adding screens beside it**.
+- The performance data itself — `03-12`.
+
+### Explicitly not built
+
+- **Forcing an allocation.** The engine never writes one.
+- Forecasting demand.
+- Enforcing the 15–16 vacancy norm. Load is **displayed**, not enforced.
+- Automatic model retraining. Suggestion outcomes are captured so the model can be tuned against
+  evidence, by a person.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M14-I1` | D14 | Priority board | L | 3.0 |
+| `M14-I2` | D14 | Suggested recruiter | L | 3.0 |
+| `M14-I3` | D14 | Requisition approval | L | 3.0 |
+| `M14-I4` | D14 | Priority and load engine | XL | 5.0 |
+
+**Specification basis:** Part A states the prioritisation engine and the requisition approval workflow
+remain in the later release. No client module chapter. All items Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `03-03` (the requisition and allocation records), **`03-12`** (the performance
+data suggestions are based on), `02-03`, `02-01`.
+
+**Consumed by:** `03-12` gains better data on how allocation decisions turn out.
+
+**External:** none.
+
+## 5. Data model
+
+```sql
+CREATE TABLE demand.priority_score (
+    requisition_id uuid PRIMARY KEY REFERENCES demand.requisition(id),
+    score numeric(6,3) NOT NULL,
+    factors jsonb NOT NULL,          -- {urgency, value, age} with each contribution — WHY it scored
+    weight_version integer NOT NULL,
+    manual_override numeric(6,3),
+    override_reason text, overridden_by uuid, overridden_at timestamptz,
+    computed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE demand.priority_config (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    version integer NOT NULL,
+    factors jsonb NOT NULL,          -- weights per factor; configurable
+    is_active boolean NOT NULL DEFAULT true,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE demand.recruiter_capacity (
+    recruiter_id uuid NOT NULL,
+    as_at date NOT NULL,
+    open_requisitions integer NOT NULL,
+    operating_norm integer NOT NULL DEFAULT 16,   -- 15–16, DISPLAYED not enforced
+    fill_rate_90d numeric(5,4),                   -- from 03-12
+    avg_time_to_fill_days numeric(6,2),
+    PRIMARY KEY (recruiter_id, as_at)
+);
+
+CREATE TABLE demand.allocation_suggestion (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    suggested_recruiter_id uuid NOT NULL,
+    rationale jsonb NOT NULL,        -- load, past fill rate on this category and client
+    state text NOT NULL DEFAULT 'generated'
+      CHECK (state IN ('generated','accepted','overridden','expired')),
+    chosen_recruiter_id uuid,        -- when overridden
+    override_reason text,
+    decided_by uuid, decided_at timestamptz,
+    generated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE demand.approval_request (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL REFERENCES demand.requisition(id),
+    rule_matched text,               -- by client, value or role
+    state text NOT NULL DEFAULT 'pending'
+      CHECK (state IN ('pending','approved','rejected','bypassed')),
+    decided_by uuid, decided_at timestamptz, decision_reason text,
+    bypass_reason text,              -- an urgent bypass is possible but ALWAYS audited
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE demand.approval_rule (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid, min_value numeric(14,2), role_code text,
+    required_role text NOT NULL,
+    is_enabled boolean NOT NULL DEFAULT true
+);
+```
+
+## 6. State machines
+
+### `Requisition`, extended (`M14-I3`)
+
+```
+ created ──▶ awaiting_approval ──▶ approved ──▶ open      ← NEW in Phase 6
+        └──▶ rejected, returned to whoever raised it, with the reason
+        └──▶ bypassed (urgent) ──▶ open                    ← always audited
+```
+
+This is a **new state on an existing record**, added by extending `03-03`'s state machine rather than
+by building a parallel one. Requisitions created before this ships are unaffected.
+
+### `AllocationSuggestion`
+
+`generated → accepted | overridden`, or `expired`. Either way a person decides, and the outcome is
+recorded so the model can be tuned against evidence.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/board?sort=priority` | `requisition:read` | The priority board — **the old sort still works** |
+| `GET` | `/v1/requisitions/:id/priority` | `requisition:read` | Score with its factor breakdown |
+| `POST` | `/v1/requisitions/:id/priority/override` | `requisition:manage` | **Reason required** |
+| `GET`/`PUT` | `/v1/priority-config` | `settings:edit` | Factor weights |
+| `GET` | `/v1/requisitions/:id/allocation-suggestion` | `requisition:allocate` | Suggested recruiter with rationale and current load |
+| `POST` | `/v1/requisitions/:id/allocation-suggestion/accept` · `/override` | `requisition:allocate` | Override requires a reason |
+| `GET` | `/v1/recruiter-capacity?asAt=` | `requisition:read` | Load against the norm |
+| `GET` | `/v1/approval-requests?state=pending` | `requisition:approve` | The approval queue |
+| `POST` | `/v1/approval-requests/:id/approve` · `/reject` · `/bypass` | `requisition:approve` | Bypass is audited |
+| `GET`/`POST`/`PATCH` | `/v1/approval-rules` | `settings:edit` | By client, value or role |
+
+## 8. Events and jobs
+
+**Events emitted:** `demand.priority.computed` · `.overridden` · `demand.allocation_suggestion.generated`
+· `.accepted` · `.overridden` · `demand.requisition.approval_requested` · `.approved` · `.rejected` ·
+`.bypassed`.
+
+**Events subscribed:** `demand.requisition.created` → raise an approval request if a rule matches;
+`demand.requisition.status_changed` → recompute priority; `reporting.mart.refreshed` → refresh capacity.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `demand.compute-priority` | hourly | Scores open requisitions on urgency, value and age |
+| `demand.refresh-capacity` | daily | Load and performance from `03-12` |
+| `demand.suggest-allocation` | on requisition open | Generates a suggestion; **never writes an allocation** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Priority board — the fulfilment board ordered by score, **showing why each scored as it did**; manual override with a reason; **the old sort still available** | `/board?sort=priority` | `M14-I1` |
+| Suggested recruiter — the suggestion, **how many requisitions that recruiter already holds**, accept or pick someone else with a reason | inside `/requisitions/:id/allocation` | `M14-I2` |
+| Requisition approval — requisitions waiting to go live; approve or reject with a reason | `/approvals` | `M14-I3` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Each requisition shows **why it scored where it did, not just a number** | `M14-I1` |
+| AC2 | A manual override is recorded with a reason | `M14-I1` |
+| AC3 | **The board can still be sorted the old way, so the change is not forced on day one** | `M14-I1` |
+| AC4 | Priority factors are configurable | `M14-I1` |
+| AC5 | **The system suggests; it never assigns on its own** | `M14-I2`, `M14-I4` |
+| AC6 | Load is shown against the operating norm, which M3 records but does not enforce | `M14-I2`, `OI-M3-10` |
+| AC7 | Suggestions are based on M9 performance data | `M14-I2`, `03-12` |
+| AC8 | A requisition gains **a new state between created and open** | `M14-I3`, `M3-I27` |
+| AC9 | Approval rules are configurable by client, value or role | `M14-I3` |
+| AC10 | **An urgent bypass is possible but always audited** | `M14-I3` |
+| AC11 | Rejecting returns the requisition to whoever raised it with the reason | `M14-I3` |
+| AC12 | Scoring inputs and weights are configurable | `M14-I4` |
+| AC13 | Load balancing accounts for vacancies **already held**, not just new ones | `M14-I4` |
+| AC14 | Suggestion outcomes feed back so the model can be tuned against evidence | `M14-I4` |
+| AC15 | **The engine never writes an allocation directly** — negative test, matching `M3-I16` BR1 | `M14-I4` |
+| AC16 | Requisitions created before this ships are unaffected by the new approval state | `M14-I3` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-10` | Should the board display recruiter load against the 15–16 norm? | Yes, here. **Display only — capacity is explicitly not enforced in Release 1** and this module does not change that. | `M3-I12`, `M14-I2` |
+| — | **No client module chapter exists for D14's remainder** | Four items derived from the capability name. Low confidence throughout. | All of `M14` |
+| `OI-HS-44` **[raised here]** | What makes a requisition urgent — a client-supplied priority, a start date, or an SLA? | Urgency is derived from **days to start date and days aged**, both of which the platform already holds. A client-supplied priority field would be a `03-03` schema change, so it is worth deciding before this is built. | `M14-I1`, `M14-I4` |
+| `OI-HS-45` **[raised here]** | Does the approval step apply to requisitions arriving on a channel, or only to manually created ones? | All of them, filtered by the approval rules. An inbound requisition landing in `awaiting_approval` changes the intake experience, so it needs confirming. | `M14-I3` |

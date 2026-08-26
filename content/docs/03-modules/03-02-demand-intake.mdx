@@ -1,0 +1,305 @@
+---
+title: "03-02 Demand intake"
+description: "Clients tell Apollo about vacancies in whatever way suits them — an email, a spreadsheet in their own format, a WhatsApp message, a WhatsApp voice note, a feed from their own HR…"
+---
+
+**Package** `@apollo/demand-intake` · **Schema** `demand` · **Plan** A1 · **Effort** ~58.0pd · **Risk** High `SPEC` / `MODEL` · **Build in** Phase 3
+
+## 1. Purpose
+
+Clients tell Apollo about vacancies in whatever way suits them — an email, a spreadsheet in their own
+format, a WhatsApp message, a WhatsApp voice note, a feed from their own HR system, or by telling a
+recruiter who sits in their hospital. This module turns all of them into one standard requisition
+payload, scores it against what "complete" means for that candidate category, chases the client **on
+the channel they used** for anything missing, and gives a person a queue for everything the machine
+could not do.
+
+The shared receive-resolve-classify stack is `02-08`. This module owns the demand half: the parsers,
+the completeness rules, the chase, and the four screens where humans intervene.
+
+## 2. Scope
+
+### In scope
+
+- The four operational queues: inbound list, unmatched senders, manual entry, suspected duplicates
+- Channel configuration for six channels, one of which is enumerated but not enabled
+- Per-client spreadsheet column mapping, set up without a deployment
+- Required-field sets per candidate category, which define what "complete" means
+- Follow-up configuration: message per channel, window, escalation target
+- Parser dispatch and field extraction to the requisition schema (`M3-I20`)
+- Completeness scoring and the follow-up chase loop (`M3-I22`)
+
+### Explicitly out of scope
+
+- The receive, sender-resolution, intent-classification and retry stack — `02-08`.
+- The `Requisition` record itself, its versions, states and the fulfilment board — `03-03`. This module
+  produces the payload; that one owns the object.
+- The channel connectors — `04-01` WhatsApp, `04-03` email, `04-05` speech-to-text, `04-07` HRMS.
+- Candidate response handling on the same stack — `03-06`.
+
+### Explicitly not built
+
+- **Automatic merging of duplicate requisitions.** A suspected duplicate is shown and a person decides,
+  while `OI-M3-02` is open.
+- The client portal as a channel — enumerated, not enabled (`AS-05`).
+- Bulk reclassification of inbound messages. Nothing in the client documents asks for it.
+- Parse-accuracy dashboards inside the operating screens. Measurement lives in `03-12`.
+- Prioritisation or approval before a requisition goes live — `03-18`, Phase 6.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I1` | A1 | Inbound list | M | 2.0 |
+| `M3-I2` | A1 | Unmatched senders | L | 3.0 |
+| `M3-I3` | A1 | Manual entry queue | L | 3.0 |
+| `M3-I4` | A1 | Suspected duplicates | L | 3.0 |
+| `M3-I5` | A1 | Channel settings | M | 2.0 |
+| `M3-I6` | A1 | Spreadsheet mapping | XL | 5.0 |
+| `M3-I7` | A1 | Required fields per category | L | 3.0 |
+| `M3-I8` | A1 | Follow-up settings | M | 2.0 |
+| `M3-I20` | A1 | Parsers | XL | 5.0 |
+| `M3-I22` | A1 | Completeness scoring and chase | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-08` (the stack), `03-01` (sender identities and the follow-up window),
+`02-09` (the chase message), `02-03` (required-field lists), `03-04` (the category attribute
+definitions the required-field set references, `AS-04`), `02-04` (spreadsheets and voice notes),
+`02-07`.
+
+**Consumed by:** `03-03` — every requisition arrives from here or from the manual form.
+
+**External:** `04-08` client spreadsheet formats (`X28` — real files, not idealised ones),
+`04-06` parsing model, `04-05` transcription, `04-07` HRMS.
+
+## 5. Data model
+
+```sql
+CREATE TABLE demand.channel (
+    code text PRIMARY KEY,                   -- email | spreadsheet | whatsapp_text | whatsapp_voice
+                                             -- | hrms | portal | verbal
+    name text NOT NULL,
+    is_available boolean NOT NULL,           -- portal: false in Release 1 (AS-05)
+    is_enabled boolean NOT NULL DEFAULT false,
+    config jsonb NOT NULL DEFAULT '{}'::jsonb,  -- mailbox, WhatsApp number, HRMS settings
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+-- portal cannot be enabled while is_available is false
+ALTER TABLE demand.channel ADD CONSTRAINT portal_not_enabled
+  CHECK (is_available OR NOT is_enabled);
+
+CREATE TABLE demand.spreadsheet_mapping (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL,
+    name text NOT NULL,
+    column_map jsonb NOT NULL,               -- { "Ward": "department", "Nos.": "positions_requested" }
+    sample_document_id uuid,                 -- files.document — the file it was proven against
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE demand.required_field_set (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_category text NOT NULL REFERENCES settings.list_entry(code),
+    service_line text NOT NULL,
+    fields text[] NOT NULL,                  -- field names that must be present to be 'complete'
+    version integer NOT NULL DEFAULT 1,
+    is_active boolean NOT NULL DEFAULT true,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL,
+    UNIQUE (candidate_category, service_line, version)
+);
+
+CREATE TABLE demand.parse_result (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    inbound_record_id uuid NOT NULL,         -- inbound.inbound_record(id)
+    parser text NOT NULL,                    -- 'email_text' | 'spreadsheet' | 'whatsapp_text'
+                                             -- | 'voice_transcript' | 'hrms_structured'
+    row_index integer,                       -- one spreadsheet row → one requisition
+    extracted jsonb NOT NULL,                -- fields mapped to the requisition schema
+    unmapped jsonb NOT NULL DEFAULT '{}'::jsonb,  -- retained, never discarded (BR6)
+    confidence numeric(4,3),
+    outcome text NOT NULL CHECK (outcome IN ('parsed','row_failed','failed')),
+    error text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON demand.parse_result (inbound_record_id, row_index);
+
+CREATE TABLE demand.followup_config (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    channel text NOT NULL REFERENCES demand.channel(code),
+    template_code text NOT NULL,             -- messaging.template
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL,
+    UNIQUE (channel)
+);
+
+CREATE TABLE demand.followup_thread (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,
+    channel text NOT NULL,                   -- the channel the requisition ARRIVED on
+    missing_fields text[] NOT NULL,
+    opened_at timestamptz NOT NULL DEFAULT now(),
+    window_days integer NOT NULL,
+    window_source text NOT NULL CHECK (window_source IN ('client','platform_default')),
+    due_at timestamptz NOT NULL,
+    state text NOT NULL DEFAULT 'awaiting' CHECK (state IN ('awaiting','answered','escalated','closed')),
+    escalated_to uuid,                       -- identity.user — the requisition owner
+    closed_at timestamptz
+);
+
+CREATE TABLE demand.duplicate_suspicion (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    requisition_id uuid NOT NULL,            -- the first
+    candidate_requisition_id uuid,           -- the second, if already created
+    inbound_record_id uuid NOT NULL,
+    match_keys jsonb NOT NULL,               -- configurable, so the confirmed rule drops in
+    score numeric(4,3),
+    state text NOT NULL DEFAULT 'suspected'
+      CHECK (state IN ('suspected','merged','distinct')),
+    decided_by uuid, decided_at timestamptz
+);
+```
+
+## 6. State machines
+
+### `FollowUpThread` (`M3-I22`, `AS-01`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | completeness scoring finds missing fields | `awaiting` | Chase issued **on the channel the requisition arrived on** |
+| `awaiting` | client replies on that channel | `answered` → `closed` | The reply **merges onto the same requisition**, never creates a second |
+| `awaiting` | window expires | `escalated` | **Escalates to the requisition owner; no value is deemed** |
+| `escalated` | fields supplied by anyone | `closed` | |
+| `awaiting` | one-way channel | `awaiting` | Falls back to the client contact (`AS-02`) |
+
+A requisition at `awaiting_client` past its window **stays visible on the board and does not enter
+matching** (`M3-I12` E4).
+
+### `DuplicateSuspicion` (`M3-I4`)
+
+`suspected → merged | distinct`, decided by a person, attributed and timestamped. **No automatic merge
+occurs anywhere** while `OI-M3-02` is open — a negative test enforces it.
+
+### `ParseResult`
+
+`parsed` · `row_failed` (that row named, the rest of the file still produces requisitions) ·
+`failed` (whole payload to the manual entry queue, payload intact).
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/inbound?channel=&state=&cursor=` | `inbound:read` | Inbound list (data from `02-08`) |
+| `GET` | `/v1/inbound/unmatched` | `inbound:read` | Unmatched senders queue |
+| `POST` | `/v1/inbound/:id/link-sender` | `inbound:resolve` | Link to a client → re-enters parsing |
+| `POST` | `/v1/inbound/:id/escalate-bd` | `inbound:resolve` | Record stays unmatched; notification raised |
+| `GET` | `/v1/inbound/manual-entry` | `inbound:resolve` | Everything the parser could not read |
+| `POST` | `/v1/inbound/:id/convert` | `requisition:create` | Prefilled form → requisition, no re-keying |
+| `POST` | `/v1/inbound/:id/discard` | `inbound:discard` | Reason required |
+| `GET` | `/v1/duplicates` | `requisition:read` | Suspected duplicate pairs, fields differing marked |
+| `POST` | `/v1/duplicates/:id/merge` · `/distinct` | `requisition:manage` | Human decision, attributed |
+| `GET`/`PATCH` | `/v1/channels` | `settings:edit` | Six channels; portal visible, not enablable |
+| `GET`/`POST`/`PATCH` | `/v1/spreadsheet-mappings` | `settings:edit` | Per-client column mapping |
+| `POST` | `/v1/spreadsheet-mappings/:id/preview` | `settings:edit` | Upload a sample, show what it would produce |
+| `GET`/`PUT` | `/v1/required-fields/:category` | `settings:edit` | What complete means, per category |
+| `GET`/`PUT` | `/v1/followup-config` | `settings:edit` | Message per channel and escalation |
+| `GET` | `/v1/requisitions/:id/completeness` | `requisition:read` | Score and **each missing field named individually** |
+
+## 8. Events and jobs
+
+**Events emitted:** `demand.inbound.parsed` · `demand.requisition.completeness_scored` ·
+`demand.followup.issued` · `.answered` · `.escalated` · `demand.duplicate.suspected` · `.decided`.
+
+**Events subscribed:** `inbound.record.classified` (intent `demand`) → parse;
+`inbound.record.received` on a follow-up thread → merge onto the existing requisition.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `demand.parse` | on classification | Selects the parser by channel and content type; **an HRMS payload skips parsing and enters at completeness scoring** |
+| `demand.score-completeness` | after parse, and on every revision | Scores against the category's required-field set |
+| `demand.issue-followup` | when fields are missing | Sends on the originating channel through `02-09` |
+| `demand.followup-escalation` | hourly | Window expiry → escalate to the owner, **never deem a value** |
+| `demand.detect-duplicates` | on requisition creation | Configurable match keys; **surfaces, never merges** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Inbound list — channel, sender, receipt time, state; filter by channel and state; sort by age | `/inbound` | `M3-I1` |
+| Unmatched senders — original message alongside; link to a client; escalate to BD | `/inbound/unmatched` | `M3-I2` |
+| Manual entry queue — raw text, file or **playable audio**; prefilled requisition form | `/inbound/manual-entry` | `M3-I3` |
+| Suspected duplicates — two requisitions side by side, differing fields marked | `/duplicates` | `M3-I4` |
+| Channels — six listed; portal shown as **listed but not available** | `/admin/channels` | `M3-I5` |
+| Spreadsheet mapping — column mapping, sample upload, preview | `/admin/spreadsheet-mappings` | `M3-I6` |
+| Required fields per category | `/admin/required-fields` | `M3-I7` |
+| Follow-up settings | `/admin/followup` | `M3-I8` |
+
+The manual entry form opens **already filled with sender, channel and receipt timestamp** — converting
+never re-keys those.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | New inbound appears with correct channel, sender and receipt timestamp | `M3-I1` |
+| AC2 | Filtering on state=unmatched returns only unmatched records | `M3-I1` |
+| AC3 | An `InboundRecord` is still retrievable **after** the requisition is created | `M3-I1` |
+| AC4 | A record whose requisition has been created shows state `consumed` | `M3-I1` |
+| AC5 | A user without the ingestion permission cannot open the queue | `M3-I1` → `M0-I3` |
+| AC6 | A send from an unknown address queues with **payload intact and is not discarded** | `M3-I2` AC3 |
+| AC7 | A sender matching more than one client routes here for manual selection, **not auto-picked** | `M3-I2` V1 |
+| AC8 | Linking to a client moves the record unmatched → identified and re-enters parsing | `M3-I2` |
+| AC9 | Escalating to BD raises a notification and the record stays unmatched | `M3-I2` |
+| AC10 | **No requisition can be created from an unmatched record** until a client is linked | `M3-I2` E1, BR1 |
+| AC11 | Payload is preserved on every path including escalation | `M3-I2` |
+| AC12 | Parse failure routes to manual entry with the raw payload attached | `M3-I3` AC6 |
+| AC13 | Voice note transcription failure **retains playable audio** | `M3-I3` E3 |
+| AC14 | Intent confidence below threshold routes here | `M3-I3` |
+| AC15 | Converting produces a requisition **without re-keying sender, channel or receipt timestamp** | `M3-I3` AC6 |
+| AC16 | A voice note beyond the accepted duration routes here rather than being rejected | `M3-I3` V3 |
+| AC17 | Discard requires a reason and is permissioned | `M3-I3` |
+| AC18 | The same requirement sent by email and WhatsApp surfaces as a **suspected duplicate rather than auto-merging** | `M3-I4` E5 |
+| AC19 | Marking as the same merges onto the first requisition and records the second inbound as merged | `M3-I4` |
+| AC20 | Marking as different produces a second requisition | `M3-I4` |
+| AC21 | **No automatic merge occurs anywhere** while `OI-M3-02` is open — negative test | `M3-I4` |
+| AC22 | Match-key logic is configurable so the confirmed rule drops in without a rebuild | `M3-I4` |
+| AC23 | The portal channel is visible in the enumeration but **cannot be enabled** | `M3-I5`, `AS-05` |
+| AC24 | Disabling a channel stops new ingestion without deleting historical records | `M3-I5` |
+| AC25 | Email configuration supports both the single-address and per-client-address models | `M3-I5`, `OI-M3-13` |
+| AC26 | WhatsApp configuration shows **one registered number, not two**, and warns if a second is attempted | `M3-I5` |
+| AC27 | A new client spreadsheet format is mapped **without a deployment** | `M3-I6` |
+| AC28 | Unmapped columns are retained on the raw payload rather than discarded | `M3-I6` BR6 |
+| AC29 | A file with several requirements produces **one requisition per requirement**, each scored independently | `M3-I6` AC9 |
+| AC30 | A row failing schema mapping returns a named row-level error and valid rows in the same file still produce requisitions | `M3-I6` V4 |
+| AC31 | A different required set per category yields a different completeness score for the same payload | `M3-I7` AC4 |
+| AC32 | **Each missing field is named individually**, not returned as an aggregate score alone | `M3-I7`, `M3-I22` AC4 |
+| AC33 | Changing the set re-scores new and revised requisitions but does not retrospectively re-score historic ones | `M3-I7` |
+| AC34 | A category with no configured set **blocks publish rather than passing silently** | `M3-I7` |
+| AC35 | "Candidate category cannot be inferred" is a named missing field, not a default | `M3-I7` V2 |
+| AC36 | The follow-up is issued **on the channel the requisition arrived on** | `M3-I8`, `M3-I22` AC5 |
+| AC37 | A client reply on that channel **merges onto the same requisition** rather than creating a second | `M3-I8`, `M3-I22` AC5 |
+| AC38 | A one-way channel falls back to the client contact | `M3-I8` BR3, `AS-02` |
+| AC39 | Window expiry **escalates to the requisition owner and does not deem a value** | `M3-I8` E4, `AS-01` |
+| AC40 | The platform default applies where the client has no configured window | `M3-I8`, `M2-I10` |
+| AC41 | A requisition at `awaiting_client` past the window stays visible on the board and **does not enter matching** | `M3-I8` E4 |
+| AC42 | The same requirement submitted on all five live channels produces requisition objects **differing only in source channel and raw payload** | `M3-I20` AC1 |
+| AC43 | An HRMS payload skips parsing and enters at completeness scoring | `M3-I20` |
+| AC44 | Parser failure routes to `unparseable` with payload intact | `M3-I20` E2 |
+| AC45 | Verbal capture is scored identically to the parsed path, at the point of entry | `M3-I22` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-04` | How many client spreadsheet layouts must we read? | The mapping screen is priceable; **the per-client mapping work is not until the count is known**. Each format needs its own mapping and its own sample file. **Estimate blocker.** | `M3-I6`, `M3-I20` |
+| `OI-M3-03` | How many client HR systems? | The connector framework is built here and in `04-07`; the number of connectors cannot be priced. **Estimate blocker.** | `M3-I26`, `M3-I20`, `M3-I5` |
+| `OI-M3-02` | Dedupe match keys, and whether merge is automatic or human-confirmed | Human decides; match keys configurable. Also governs whether a channel revision updates an existing requisition. | `M3-I4`, `M3-I11` |
+| `OI-M3-07` | Required-field set per category — **no doctors owner is named** | Nurses and allied health sit with Mr. Abednego Peter. The doctors set is seeded empty and blocks publish for that category rather than passing silently. Nominate an owner before kick-off. | `M3-I7`, `M3-I22` |
+| `OI-M3-08` | Follow-up window before escalation, and whether it is per client or platform-wide | `AS-01` — per-client with a platform default; expiry escalates to the owner and **never deems a value** | `M3-I8`, `M3-I22` |
+| `OI-M3-06` | Intent confidence threshold and free-text fallback | `AS-03` — one threshold shared with A14, held in `02-03`, starting at 0.80 | `M3-I3`, `M3-I21` |
+| `OI-M3-13` | One monitored email address or one per client | Both supported; per-client addresses shift operational setup onto Apollo for every new client | `M3-I5`, `M3-I25` |
+| `OI-M3-14` | Latency target for ingestion and unmatched-queue surfacing | Working budget: written within 5s, visible within 10s | `M3-I1`, `M3-I2` |
+| `OI-A-06` | Confirm the portal channel is specified but not built | `AS-05` — enumerated, not enablable, enforced by a check constraint | `M3-I5` |
+| `OI-M3-01` | Does M3 or M4 define the requisition-side category attribute set? | `AS-04` — **M4 owns one definition**; this module consumes it as configuration, so the two sides cannot drift | `M3-I7` |

@@ -1,261 +1,220 @@
 ---
-title: "00-04 · Component Map"
-description: "The complete component register, what depends on what, and how the delivery plan's 204 items map onto them."
+title: "00-04 Component map"
+description: "The component register for the Apollo platform. The delivery plan is organised by when work is sold and scheduled (milestones M0–M15)."
 ---
 
-The complete component register, what depends on what, and how the delivery plan's 204 items map
-onto them.
+**Package** `n/a` · **Schema** `n/a` · **Plan** all · **Effort** — · **Risk** — · **Build in** Phase 0
+
+The component register for the Apollo platform. The delivery plan is organised by **when work is sold
+and scheduled** (milestones M0–M15). This register is the **engineering translation**: organised by
+**what gets built and deployed**. Every component below maps back to one or more plan items
+(`M<n>-I<k>`), and every one of the plan's 208 items appears against exactly one component.
 
 ---
 
-## 1. Component register
+## 1. How the two organisations differ
 
-**34 components.** 13 platform, 21 business. Each has exactly one spec file and is independently
-implementable once its dependencies exist.
+| Plan (`requirement_doc`) | Docs (`docs/`) | Why |
+|---|---|---|
+| M0 Platform Foundations | split across `02-01`…`02-04` | Six unrelated capabilities sold as one milestone; each is its own deployable. |
+| M1 Foundations & Migration | `02-05`, `02-06`, `02-13`, `02-15`, `03-13`, `05-05` | Design system, console shell, adapter layer, environments, migration and the D11 documentation obligations have nothing in common but a delivery slot. |
+| M3 Demand Intake & Allocation | `02-08`, `02-09`, `02-11`, `03-02`, `03-03` | The shared inbound stack, the message sender and the event spine are consumed by M5/M7/M8/M9 — they are platform, not demand. |
+| M4 Candidate Record | `02-12`, `03-04`, `03-05` | The Ops-side record and the React Native app are two deployables on two release cadences. |
+| M5 Engagement | `02-09`, `03-06` | Templates/sender/retry/log are platform messaging; cadence/decay/response capture are the module. |
+| M7 Selection, Offer & Client Response | `02-14`, `03-08` | A13 is a shared mechanism used by M7, M8 and M9. |
+| M9 Billing, Revenue & Reporting | `03-11`, `03-12` | The plan itself says these two workstreams share nothing but the event data. |
+| M15 Timesheet Ops & Collections | `03-19`, `03-20` | Two unrelated extensions of two different modules. |
 
-### Platform components (`02-platform/`)
+**Nothing is added and nothing is dropped.** Where a component exists that the plan does not name, it
+is marked **[engineering addition]** with a justification.
 
-| ID | Component | Package | Owns tables in | Plan items | Est. pd |
+---
+
+## 2. Platform components — `02-platform/`
+
+Depended on by two or more modules. Built once.
+
+| ID | Component | Plan refs | Implements items | Effort (pd) | Risk | Phase |
+|---|---|---|---|---|---|---|
+| 02-01 | Identity & access | F01, F02, F03, D3 (auth), D12 (auth) | M0-I1, M0-I2, M0-I3, M4-I22, M10-I1, M10-I2, M10-I8 | 36.5 | High `SPEC` | 1 · portal realm 6 |
+| 02-02 | Audit trail | F04 | M0-I4 | 5.0 | Medium `COMP` | 1 |
+| 02-03 | Settings & reference data | F05 | M0-I5 | 11.0 | Medium `SHARED` | 1 |
+| 02-04 | File storage | F06 | M0-I6 | 8.0 | Medium `COMP` | 1 |
+| 02-05 | Design system | F12 | M1-I4 | 13.5 | Low `SHARED` | 1 |
+| 02-06 | Console shell | D11 | M1-I1 | 5.5 | Low `SHARED` | 1 |
+| 02-07 | List engine | F08 | M2-I14 | 9.5 | Low `SHARED` | 2 |
+| 02-08 | Inbound pipeline | A1 (shared stack) | M3-I17, M3-I18, M3-I19, M3-I21, M3-I29, M3-I32 | 31.5 | High `SHARED` | 3 |
+| 02-09 | Outbound messaging | F07, D10 | M3-I30, M5-I1, M5-I2, M5-I3, M5-I4, M5-I8, M5-I9 | 42.0 | High `EXT` | 3 |
+| 02-10 | Job runtime & scheduler | **[engineering addition]** | — | 5.0 | Medium | 1 |
+| 02-11 | Event spine | F14 | M3-I31 | 10.0 | High `DATA` | 3 |
+| 02-12 | Data protection | F13 | M4-I27 | 9.0 | High `COMP` | 2 |
+| 02-13 | Market adapter layer | A12 | M1-I3, M1-I13, M1-I14, M1-I15 | 32.0 | High `SPEC`/`EXT` | 1–2 |
+| 02-14 | Client link surfaces | A13 | M7-I8, M7-I9, M7-I10, M7-I11, M7-I12, M7-I13, M7-I17, M7-I18 | 63.0 | High `SHARED` | 4 |
+| 02-15 | Environments & observability | F10, D11 | M1-I5, M1-I16 | 20.0 | Medium `EXT` | 1 |
+
+**02-10 justification.** The plan assumes a queue, retries, dead-letters and a scheduler in six places
+(M3-I18 queue and retry, M3-I22 escalation timer, M2-I13 renewal alert, M4-I25 expiry warning,
+M5-I11 cadence run, M8-I11 check-in generation, M8-I16 deemed-approval countdown, M15-I7 dunning)
+without ever naming the runtime that executes them. Building it eight times is eight different answers,
+which is the same argument the plan itself makes for F04 and F05.
+
+---
+
+## 3. Business modules — `03-modules/`
+
+One spec per implementable unit.
+
+| ID | Module | Plan refs | Implements items | Effort (pd) | Risk | Phase |
+|---|---|---|---|---|---|---|
+| 03-01 | Clients, contracts & rate cards | D1, D13 | M2-I1 … M2-I13 | 71.5 | High `XMOD` | 2 |
+| 03-02 | Demand intake | A1 (module half) | M3-I1 … M3-I8, M3-I20, M3-I22 | 58.0 | High `SPEC`/`MODEL` | 3 |
+| 03-03 | Requisitions & allocation | D2, D14 (thin) | M3-I9 … M3-I16, M3-I27, M3-I28 | 65.0 | Medium `XMOD` | 3 |
+| 03-04 | Candidate record & credentials | D4, D16, A2, A9 | M4-I11 … M4-I19, M4-I21, M4-I24, M4-I25, M4-I26 | 82.5 | High `EXT` | 2–3 |
+| 03-05 | Candidate app | D3 | M4-I1 … M4-I10, M4-I20 | 68.5 | High `SHARED` | 2–4 |
+| 03-06 | Engagement & availability | D29, A3, A4, A5, A14 | M5-I5, M5-I6, M5-I7, M5-I10 … M5-I16 | 74.0 | High `SPEC`/`EXT` | 4 |
+| 03-07 | Matching & ranking | D5, D18, A8 | M6-I1 … M6-I10 | 72.0 | High `MODEL` | 4 |
+| 03-08 | Selection & offers | D6, D20 | M7-I1 … M7-I7, M7-I14, M7-I15, M7-I16 | 63.5 | High `EXT` | 4–5 |
+| 03-09 | Placement & trial | D7, A6 | M8-I1 … M8-I6, M8-I10 … M8-I13 | 62.0 | High `XMOD` | 5 |
+| 03-10 | Attendance & timesheets | D22 (thin) | M8-I7, M8-I8, M8-I9, M8-I14 … M8-I17 | 41.5 | High `SHARED` | 5 |
+| 03-11 | Billing & receivables | D8, A7, D25 (thin) | M9-I1 … M9-I4, M9-I12 … M9-I16 | 45.0 | High `XMOD` | 5–6 |
+| 03-12 | Analytics & reporting | D9, D28, A11 | M9-I5 … M9-I11, M9-I17 | 43.5 | Medium `DATA` | 6 |
+| 03-13 | Legacy migration (CPAL) | A10 | M1-I2, M1-I10, M1-I11, M1-I12 | 31.0 | High `DATA` | 1–2 |
+| 03-14 | Client portal | D12 (screens) | M10-I3 … M10-I7 | 26.0 | Low `XMOD` | 6 |
+| 03-15 | Associate onboarding | D21 | M11-I1 … M11-I5 | 26.5 | Low `COMP` | 6 |
+| 03-16 | Workforce operations | D23 | M12-I1 … M12-I6 | 38.0 | Low `SHARED` | 6 |
+| 03-17 | Payroll | D24 | M13-I1 … M13-I5 | 35.0 | High `EXT` | 7 |
+| 03-18 | Demand prioritisation & approval | D14 (full) | M14-I1 … M14-I4 | 26.5 | Low `MODEL` | 6 |
+| 03-19 | Timesheet extensions | D22 (full) | M15-I1, M15-I2, M15-I6 | 19.5 | Low `XMOD` | 7 |
+| 03-20 | Collections | D25 (full) | M15-I3, M15-I4, M15-I5, M15-I7 | 24.5 | Low `XMOD` | 7 |
+
+---
+
+## 4. Integrations — `04-integrations/`
+
+| ID | External system | Plan refs | Items | Supplier named? | Open item |
 |---|---|---|---|---|---|
-| P01 | Identity & access | `@apollo/iam` | `platform` | M0-I1, M0-I2, M0-I3, M1-I1, M4-I21 | 27 |
-| P02 | Audit trail | `@apollo/audit` | `platform` | M0-I4 | 5 |
-| P03 | Settings & lists | `@apollo/config` | `platform` | M0-I5 | 11 |
-| P04 | File storage | `@apollo/files` | `platform` | M0-I6 | 8 |
-| P05 | Design system | `@apollo/ui` | — | M1-I4 | 13.5 |
-| P06 | List engine | `@apollo/list` | — | M2-I14 | 7.5 |
-| P07 | Outbound messaging | `@apollo/messaging` | `engage` | M3-I30, M5-I8, M5-I9 | 18 |
-| P08 | Inbound pipeline | `@apollo/inbound` | `demand` | M3-I18, M3-I21, M3-I29 | 20 |
-| P09 | Event store & projections | `@apollo/events` | `platform`, `report` | M3-I31, M3-I28 | 14 |
-| P10 | Client link tokens | `@apollo/links` | `platform` | M7-I8, M7-I17, M7-I18, M7-I13 | 18 |
-| P11 | Approval engine | `@apollo/approvals` | `platform` | M12-I1, M12-I6 | 14 |
-| P12 | Adapter framework | `@apollo/adapters` | `platform` | M1-I3, M1-I13 | 12 |
-| P13 | Job runtime | `@apollo/jobs` | — | *[engineering addition]* | 4 |
-
-> **[engineering addition]** P13 is not a plan item. It is the BullMQ wiring, scheduler registration
-> and DLQ handling that eleven other components assume exists. Building it once is 4pd; building it
-> eleven times is not.
-
-### Business modules (`03-modules/`)
-
-| ID | Module | Package | Owns tables in | Plan milestone | Est. pd |
-|---|---|---|---|---|---|
-| B01 | Clients, sites & contacts | `@apollo/clients` | `clients` | M2 (D1) | 32 |
-| B02 | Contracts & rate cards | `@apollo/contracts` | `clients` | M2 (D13) | 41.5 |
-| B03 | Demand intake channels | `@apollo/intake` | `demand` | M3 (A1) | 84 |
-| B04 | Requisitions & fulfilment | `@apollo/requisitions` | `demand` | M3 (D2, D14 thin) | 70 |
-| B05 | Candidates & supply bases | `@apollo/candidates` | `supply` | M4 (A2, A9, D3) | 55 |
-| B06 | Credentials & verification | `@apollo/credentials` | `supply` | M4 (D4, D16) | 54 |
-| B07 | Candidate app backend | `@apollo/candidate-app` | `supply` | M4 (D3) | 48 |
-| B08 | Engagement & availability | `@apollo/engagement` | `engage` | M5 (D10, D29, A3, A4, A5, A14) | 107.5 |
-| B09 | Matching & ranking | `@apollo/matching` | `match` | M6 (D5, D18, A8) | 72 |
-| B10 | Selection & offers | `@apollo/selection` | `select` | M7 (D6, D20) | 63 |
-| B11 | Placements & trial | `@apollo/placements` | `place` | M8 (D7, A6) | 54 |
-| B12 | Attendance & timesheets | `@apollo/attendance` | `place` | M8 (D22 thin) | 42.5 |
-| B13 | Billing & receivables | `@apollo/billing` | `bill` | M9 (D8, A7, D25 thin) | 41 |
-| B14 | Analytics & reporting | `@apollo/analytics` | `report` | M9 (D9, D28, A11) | 47.5 |
-| B15 | Legacy CPAL migration | `@apollo/migration` | `supply` | M1 (A10) | 31 * |
-| B16 | Client portal | `@apollo/portal` | `platform` | M10 (D12) | 44 |
-| B17 | Associate onboarding | `@apollo/onboarding` | `place` | M11 (D21) | 26.5 |
-| B18 | Workforce operations | `@apollo/workforce` | `place` | M12 (D23) | 38 |
-| B19 | Payroll | `@apollo/payroll` | `bill` | M13 (D24) | 35 |
-| B20 | Demand prioritisation | `@apollo/demand-ops` | `demand` | M14 (D14 full) | 26.5 |
-| B21 | Collections & credit notes | `@apollo/collections` | `bill` | M15 (D25 full, D22 full) | 44 |
-
-\* **B15 figures are placeholders, not estimates** (`OI-A-02`). Nobody has seen the CPAL data. This
-is the single largest unpriced item in the six months.
-
-### Not a component: infrastructure & delivery work
-
-| Plan item | Where it lives |
-|---|---|
-| M1-I5 Deploy to Apollo's AWS · M1-I16 Environments and monitoring | `01-09-infrastructure-and-deployment.md` |
-| M1-I6 Technical documentation · M1-I7 User guides | Ongoing, per-module `docs/` output |
-| M1-I8 UAT support · M1-I9 Go-live and legacy retirement | `05-01-build-order.md` phase gates |
-| M4-I26 Data protection | `01-10-security-and-data-protection.md` |
+| 04-00 | Integration register | — | — | — | — |
+| 04-01 | WhatsApp Business Platform | A1, D10, D20, A13, A6 | M3-I24, M5-I15, M7-I14 | No | OI-HS-05, OI-HS-07 |
+| 04-02 | SMS (DLT-registered) | D10 | (within M5-I8) | No | X02 |
+| 04-03 | Email ingestion & sending | A1, D10 | M3-I25 | Amazon SES (X03) | OI-M3-13 |
+| 04-04 | Outbound voice | A5 | M5-I12 | No | OI-A-09 |
+| 04-05 | Speech-to-text | A1 | M3-I23 | No | OI-M3-05 |
+| 04-06 | AI parsing & intent classification | A1, A14, D3 | M3-I20, M3-I21, M4-I20, M5-I13 | No | OI-M3-06 |
+| 04-07 | Client HRMS / ATS connectors | A1 | M3-I26 | No — count unknown | OI-M3-03 |
+| 04-08 | Client spreadsheet formats | A1 | M3-I6 | No — count unknown | OI-M3-04 |
+| 04-09 | Credential registries & aggregator | A12, D4, D16 | M1-I14, M1-I15, M4-I24 | No (IDfy / AuthBridge) | OI-HS-06, OI-A-01 |
+| 04-10 | Document OCR | D4 | M4-I23 | No | OI-HS-07 |
+| 04-11 | Electronic signature | D20 | M7-I15 | No | OI-HS-07 |
+| 04-12 | App stores (Apple, Google) | D3 | M4-I1 (publishing) | Apollo accounts pending | OI-HS-08 |
+| 04-13 | Finance system | D8, D25 | M9-I16 | No | OI-A-14 |
+| 04-14 | Payroll engine | D24 | M13-I5 | No (Hirecraft / PayBooks) | X23 |
+| 04-15 | Legacy CPAL | A10 | M1-I10, M1-I11 | Access pending | OI-A-02 |
 
 ---
 
-## 2. Dependency graph
+## 5. Dependency graph
 
 ```
-                            ┌─────────────────────────────┐
-   LAYER 0                  │ P13 jobs   P05 ui   P12 adapters │
-   no dependencies          └─────────────────────────────┘
-                                          │
-   LAYER 1        ┌──────────┬────────────┼────────────┬──────────┐
-   foundations    │ P01 iam  │ P02 audit  │ P03 config │ P04 files│
-                  └──────────┴────────────┴────────────┴──────────┘
-                                          │
-   LAYER 2                    ┌───────────┴───────────┐
-   shared services            │ P06 list   P09 events │
-                              └───────────┬───────────┘
-                                          │
-   LAYER 3          B01 clients ──▶ B02 contracts
-   commercial base           │              │
-                             │              │
-   LAYER 4        ┌──────────┴──┐           │
-   comms          │ P07 messaging│          │
-                  │ P08 inbound  │◀─────────┘  (sender identity)
-                  └──────┬───────┘
-                         │
-   LAYER 5      ┌────────┴────────┐        ┌──────────────┐
-   demand+supply│ B03 intake      │        │ B05 candidates│
-                │ B04 requisitions│        │ B06 credentials│
-                └────────┬────────┘        │ B07 app       │
-                         │                 │ B15 migration │
-                         │                 └───────┬───────┘
-                         │                         │
-   LAYER 6               └──────────┬──────────────┘
-   engagement                       │
-                             ┌──────┴───────┐
-                             │ B08 engage   │  (needs candidates + inbound)
-                             └──────┬───────┘
-                                    │
-   LAYER 7                   ┌──────┴───────┐
-   matching                  │ B09 matching │  (needs req + cred + availability)
-                             └──────┬───────┘
-                                    │
-   LAYER 8            ┌─────────────┴─────────────┐
-   selection          │ P10 links   B10 selection │
-                      └─────────────┬─────────────┘
-                                    │
-   LAYER 9            ┌─────────────┴─────────────┐
-   placement          │ B11 placements  B12 attend│
-                      └─────────────┬─────────────┘
-                                    │
-   LAYER 10           ┌─────────────┴─────────────┐
-   money + insight    │ B13 billing   B14 analytics│
-                      └─────────────┬─────────────┘
-                                    │
-   LAYER 11 (R2)   ┌────────┬───────┴────┬─────────┬──────────┐
-                   │B16     │P11         │B20      │B21       │
-                   │portal  │approvals   │demand-  │collect-  │
-                   │        │  │         │ops      │ions      │
-                   │        │  ├─▶B17 onboarding   │          │
-                   │        │  └─▶B18 workforce ───┴─▶B19 payroll
-                   └────────┴────────────┴─────────┴──────────┘
+                            ┌──────────────────────────────────────────┐
+  PHASE 1  (month 1–2)      │ 02-05 design system   02-15 environments │
+                            │ 02-01 identity        02-02 audit        │
+                            │ 02-03 settings        02-04 file storage │
+                            │ 02-06 console shell   02-10 job runtime  │
+                            └────────────────┬─────────────────────────┘
+                                             │
+        ┌────────────────────────────────────┼──────────────────────────┐
+        ▼                                    ▼                          ▼
+  02-13 adapters                      02-07 list engine           03-13 migration
+        │                                    │                          │
+        ▼                                    ▼                          │
+  PHASE 2  02-12 data protection ──▶ 03-01 clients & contracts ◀────────┘
+                                             │
+                    ┌────────────────────────┼───────────────────┐
+                    ▼                        ▼                   ▼
+             03-04 candidate record   03-05 candidate app   02-11 event spine
+                    │                        │                   │
+  PHASE 3           ▼                        │                   ▼
+             02-08 inbound pipeline ─────────┼──────────▶ 03-02 demand intake
+                    │                        │                   │
+                    ▼                        │                   ▼
+             02-09 outbound messaging        │            03-03 requisitions
+                    │                        │                   │
+  PHASE 4           ▼                        ▼                   ▼
+             03-06 engagement ────────▶ 03-07 matching & ranking ─┘
+                    │                        │
+                    ▼                        ▼
+             02-14 client links ──────▶ 03-08 selection & offers
+                    │                        │
+  PHASE 5           ▼                        ▼
+             03-09 placement & trial ◀───────┘
+                    │
+                    ├──────────────▶ 03-10 attendance & timesheets
+                    ▼                        │
+  PHASE 6    03-11 billing ◀─────────────────┘
+                    │
+                    ├──▶ 03-12 analytics   03-14 portal   03-15 onboarding
+                    │    03-16 workforce ops   03-18 prioritisation
+                    ▼
+  PHASE 7    03-19 timesheet ext.  03-20 collections  03-17 payroll
 ```
 
-### Dependency table (authoritative)
-
-| Component | Hard dependencies | Consumed by |
-|---|---|---|
-| P13 jobs | — | P07, P08, P09, B03, B08, B09, B13, B15, B19, B21 |
-| P05 ui | — | every frontend |
-| P12 adapters | — | P07, B06, B03, B10, B19, B13 |
-| P01 iam | P02, P03 | everything |
-| P02 audit | — | B03, B04, B09, B10, B11, B12, B13, P11 |
-| P03 config | — | almost everything |
-| P04 files | P12 (virus scan) | B03, B05, B06, B07, B10, B13, B17, B19 |
-| P06 list | P05 | every list screen (~20) |
-| P09 events | P13 | every module writes; B14 reads |
-| P07 messaging | P03, P12, P13 | B03, B08, B10, B11, B17, B19, B21 |
-| P08 inbound | P04, P12, P13, B01 (sender identity) | B03, B08 |
-| P10 links | P07, P03 | B10, B11, B12, B13 |
-| P11 approvals | P01, P02 | B18, B21 |
-| B01 clients | P01, P03, P06 | B02, B03, B04, B13, B16 |
-| B02 contracts | B01 | B10, B12, B13, B21 |
-| B03 intake | P08, B01, B04 | B08 (reuses pipeline) |
-| B04 requisitions | B01, B02, P02, P09, B05 (category defs) | B03, B09, B11, B14, B20 |
-| B05 candidates | P01, P04, P03 | B06, B07, B08, B09, B15 |
-| B06 credentials | B05, P12, P04 | B09 |
-| B07 candidate-app | B05, P01 (OTP), P04 | B08, B12 |
-| B15 migration | B05, B06, P13 | — (blocks go-live) |
-| B08 engagement | B05, B07, P07, P08 | B09, B10, B11, B21 |
-| B09 matching | B04, B05, B06, B08 | B10 |
-| B10 selection | B09, B02, P10, P07 | B11, B13 |
-| B11 placements | B10, P10, B04 | B13, B17 |
-| B12 attendance | B07 (app check-in), B02, P10 | B13, B19, B21 |
-| B13 billing | B11, B12, B02, P10 | B14, B21 |
-| B14 analytics | P09, B04, B11, B13 | B20 |
-| B16 portal | P01, B01, B04, B09, B10, B12, B13 | — |
-| B17 onboarding | B05, B11, P04 | B19 |
-| B18 workforce | P11, B11, B12, B17 | B19 |
-| B19 payroll | B17, B18, B12, B21, P12 | — |
-| B20 demand-ops | B04, B14 | — |
-| B21 collections | B12, B13, B02, P11, P07 | B19 |
-
-**Critical path to first revenue:**
-`P01 → P03 → B01 → B02 → B04 → B05 → B06 → B09 → P10 → B10 → B11 → B13`
-
-Everything on that chain is non-negotiable. A slip there slips the invoice.
-
 ---
 
-## 3. Milestone → component mapping
+## 6. Requirement item → component index
 
-The plan's milestones map onto components as follows. A milestone is **complete** when every
-component in its row is done.
+Every one of the 208 plan items, in plan order.
 
-| Plan milestone | Components |
+| Items | Component |
 |---|---|
-| M0 Platform Foundations | P01, P02, P03, P04 |
-| M1 Foundations & Migration | P05, P12, B15 + infra (`01-09`) |
-| M2 Client, Contract & Rate Card | P06, B01, B02 |
-| M3 Demand Intake & Allocation | P07, P08, P09, B03, B04 |
-| M4 Candidate Record & Credentials | B05, B06, B07 + data protection (`01-10`) |
-| M5 Engagement & Availability | B08 |
-| M6 Matching & Ranking | B09 |
-| M7 Selection, Offer & Client Response | P10, B10 |
-| M8 Placement, Trial & Shift Attendance | B11, B12 |
-| M9 Billing, Revenue & Reporting | B13, B14 |
-| M10 Client Portal | B16 |
-| M11 Associate Onboarding | B17 |
-| M12 Workforce Operations | P11, B18 |
-| M13 Payroll | B19 |
-| M14 Demand Prioritisation | B20 |
-| M15 Timesheet Ops & Collections | B21 |
+| M0-I1, M0-I2, M0-I3 | 02-01 |
+| M0-I4 | 02-02 |
+| M0-I5 | 02-03 |
+| M0-I6 | 02-04 |
+| M1-I1 | 02-06 |
+| M1-I2, M1-I10, M1-I11, M1-I12 | 03-13 |
+| M1-I3, M1-I13, M1-I14, M1-I15 | 02-13 |
+| M1-I4 | 02-05 |
+| M1-I5, M1-I16 | 02-15 |
+| M1-I6, M1-I7, M1-I8, M1-I9 | 05-05 |
+| M2-I1 … M2-I13 | 03-01 |
+| M2-I14 | 02-07 |
+| M3-I1 … M3-I8, M3-I20, M3-I22 | 03-02 |
+| M3-I9 … M3-I16, M3-I27, M3-I28 | 03-03 |
+| M3-I17, M3-I18, M3-I19, M3-I21, M3-I29, M3-I32 | 02-08 |
+| M3-I23 | 04-05 |
+| M3-I24 | 04-01 |
+| M3-I25 | 04-03 |
+| M3-I26 | 04-07 |
+| M3-I30 | 02-09 |
+| M3-I31 | 02-11 |
+| M4-I1 … M4-I10, M4-I20 | 03-05 |
+| M4-I11 … M4-I19, M4-I21, M4-I24, M4-I25, M4-I26 | 03-04 |
+| M4-I22 | 02-01 |
+| M4-I23 | 04-10 |
+| M4-I27 | 02-12 |
+| M5-I1 … M5-I4, M5-I8, M5-I9 | 02-09 |
+| M5-I5, M5-I6, M5-I7, M5-I10, M5-I11, M5-I13, M5-I14, M5-I16 | 03-06 |
+| M5-I12 | 04-04 |
+| M5-I15 | 04-01 |
+| M6-I1 … M6-I10 | 03-07 |
+| M7-I1 … M7-I7, M7-I16 | 03-08 |
+| M7-I8 … M7-I13, M7-I17, M7-I18 | 02-14 |
+| M7-I14 | 04-01 |
+| M7-I15 | 04-11 |
+| M8-I1 … M8-I6, M8-I10 … M8-I13 | 03-09 |
+| M8-I7, M8-I8, M8-I9, M8-I14 … M8-I17 | 03-10 |
+| M9-I1 … M9-I4, M9-I12 … M9-I15 | 03-11 |
+| M9-I16 | 04-13 |
+| M9-I5 … M9-I11, M9-I17 | 03-12 |
+| M10-I1, M10-I2, M10-I8 | 02-01 |
+| M10-I3 … M10-I7 | 03-14 |
+| M11-I1 … M11-I5 | 03-15 |
+| M12-I1 … M12-I6 | 03-16 |
+| M13-I1 … M13-I4 | 03-17 |
+| M13-I5 | 04-14 |
+| M14-I1 … M14-I4 | 03-18 |
+| M15-I1, M15-I2, M15-I6 | 03-19 |
+| M15-I3, M15-I4, M15-I5, M15-I7 | 03-20 |
 
-### Where the mapping deliberately differs from the plan
-
-| Plan says | We do | Why |
-|---|---|---|
-| M3 owns messaging (F07) and events (F14) | P07 and P09 are platform components | Six modules send messages; every module writes events. Owning them inside M3 makes M3 a bottleneck for everything downstream. |
-| M2 owns the shared list component (F08) | P06 is a platform component | ~20 list screens across nine modules |
-| M7 owns the link mechanism (A13) | P10 is a platform component, link *pages* stay in B10/B11/B12 | Three modules instantiate link types. The plan itself says "price the mechanism once and each type as an instance" — this is that, structurally. |
-| M12 owns the approval engine | P11 is a platform component | M15 reuses it; the plan says build it first of the two |
-| M1 owns adapters (A12) | P12 is the framework; the India adapters stay in B06 | The framework is generic; the registries are credential-specific |
-
-Nothing is added or removed — only relocated so that shared things are built once.
-
----
-
-## 4. Frontend surface mapping
-
-| Surface | Features (mirrors backend modules) |
-|---|---|
-| `apps/ops` | iam-admin, settings, clients, contracts, intake, requisitions, candidates, credentials, engagement, matching, selection, placements, attendance, billing, analytics, migration, workforce, onboarding, payroll, demand-ops, collections |
-| `apps/links` | shortlist-response, trial-checkin, timesheet-approval |
-| `apps/portal` | auth, requisitions, shortlists, timesheets, invoices, users |
-| `apps/mobile` (RN) | signup, profile, jobs, shifts, applications, check-in, documents, availability, onboarding, payslips |
-
-**Rule:** a frontend feature folder never talks to a backend module other than its own, except
-through that module's API. If the requisitions screen needs client names, it calls
-`GET /api/v1/requisitions/:id` and the *backend* composes them — the browser does not fan out
-across modules.
-
----
-
-## 5. What each component may assume already exists
-
-When you implement any component spec, assume these are done and working. Do not rebuild them:
-
-| Assume | Provided by |
-|---|---|
-| `req.user` with resolved permissions and site scope | P01 middleware |
-| `requirePermission('module.resource.action')` | P01 |
-| `audit.record({...})` | P02 |
-| `config.get(key, { clientId })` with per-client override and platform default | P03 |
-| `files.upload()`, `files.presignedUrl()`, `files.attach()` | P04 |
-| Every UI primitive, empty/loading/error/no-permission state | P05 |
-| `<DataTable/>` with filter, sort, page, column chooser, saved views, export | P06 |
-| `messaging.send({ templateKey, channel, recipient, vars })` respecting opt-out | P07 |
-| Inbound webhook receipt, sender matching, raw payload retention | P08 |
-| `events.emit(name, payload)` writing to outbox in your transaction | P09 |
-| `links.issue({ type, recipient, payload })` and answer routing | P10 |
-| `approvals.request({ type, before, after })` with maker≠checker enforced | P11 |
-| `adapters.call(port, method, args)` with logging, retry and manual fallback | P12 |
-| `jobs.enqueue()`, `jobs.schedule()`, DLQ, idempotency | P13 |
-
-If a spec asks you to build something in this list, that is a bug in the spec — flag it.
-
+Coverage: 208 of 208 items mapped; 0 items with no component; 0 components with no item except
+**02-10** which is declared as an engineering addition above.

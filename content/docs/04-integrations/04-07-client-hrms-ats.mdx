@@ -1,0 +1,112 @@
+---
+title: "04-07 Client HRMS / ATS connectors"
+description: "Some clients push vacancies straight from their own HR or recruitment system rather than emailing them."
+---
+
+**Package** `@apollo/integration-hrms` · **Schema** `inbound` · **Plan** A1 · **Effort** ~11.0pd (framework) · **Risk** High `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+Some clients push vacancies straight from their own HR or recruitment system rather than emailing them.
+A structured payload arrives, **skips parsing entirely**, and enters at completeness scoring.
+
+**Every client system is a separate connector** with its own payload shape, credentials and test data.
+"Two clients" and "nine clients" are completely different pieces of work, and **nobody has said which
+systems are in scope or how many.**
+
+## 2. Scope
+
+**In scope:** the connector framework — tenant registration, authentication, payload validation against
+a declared shape, mapping to the requisition schema, per-tenant request and error logs; and the first
+connector once a client system is named.
+
+**Explicitly out of scope:** sender resolution and the inbound record (`02-08`); completeness scoring
+and the chase (`03-02`); pushing anything **back** to a client system.
+
+**Explicitly not built:** a generic integration platform; polling a client system; two-way sync;
+candidate data exchange with a client ATS.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I26` | A1 | Client HR system feed | XXL | 8.0 |
+
+The 8.0pd is the **framework plus one connector**. Additional connectors are per-client work that cannot
+be priced until the systems are named.
+
+## 4. Dependencies
+
+**Must exist first:** `02-08`, `03-01` (`SenderIdentity` with `identity_type = 'hrms_tenant'`),
+`03-02` (completeness scoring is where these payloads enter).
+
+**Consumed by:** `03-02`, `03-03`.
+
+**External:** `X27` — **two hops, not one.** Apollo asks their client, the client's IT team agrees, and
+only then can the work be sized. This blocks the estimate as well as the build.
+
+## 5. Data model
+
+No tables of its own.
+
+```sql
+-- 03-01: a tenant is a sender identity like any other
+INSERT INTO clients.sender_identity (client_id, identity_type, identity_value)
+VALUES (:clientId, 'hrms_tenant', :tenantKey);
+```
+
+```ts
+interface HrmsConnector {
+  tenantKey: string
+  payloadSchema: JsonSchema                     // declared per system
+  toRequisition(payload: unknown): RequisitionDraft
+  verify(headers: Headers, body: Buffer): boolean
+}
+```
+
+A **new client system whose payload shape is already supported is added as configuration**; a new shape
+is a new connector.
+
+## 6. State machines
+
+Within `02-08`'s `InboundRecord`: `received → identified` (tenant resolves to exactly one client) →
+**straight to `parsed`, skipping classification and parsing** → `consumed`. A tenant resolving to zero
+or more than one client routes to the unmatched queue for manual selection.
+
+## 7. API surface
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/hooks/hrms/:tenant` (via `edge-webhook`) | Per-tenant shared secret or signature | Accepts a structured requisition payload |
+| `GET` | `/v1/hrms/tenants` | `settings:read` | Registered tenants and their connectors |
+| `GET` | `/v1/hrms/tenants/:key/logs` | `settings:read` | **Request and error logs retrievable per tenant** |
+
+## 8. Events and jobs
+
+`hrms.ingest` on the `interactive` class — the payload is already structured, so there is nothing slow
+to do. Events flow through `02-08`.
+
+## 9. Frontend
+
+Tenant registration appears in `03-02`'s channel settings; per-tenant logs are reachable from there.
+No screen of its own.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | An HRMS payload arrives structured, **skips parsing and enters at completeness scoring** | `M3-I26` |
+| AC2 | Tenant identity resolves to **exactly one client** | `M3-I26`, `M3` V1 |
+| AC3 | A new client system is **added as configuration where the payload shape is already supported** | `M3-I26` |
+| AC4 | Request and error logs are retrievable **per tenant** | `M3-I26` |
+| AC5 | An unverifiable or unknown tenant routes to the unmatched queue rather than being rejected silently | `M3-I2` |
+| AC6 | A redelivered payload does not create a second requisition | `M3-I18` |
+| AC7 | A payload failing schema validation is recorded with the raw body and routed to manual entry | `M3-I20` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-03` | **How many client HR or recruitment systems must we connect to?** | The framework is built and priceable; **the number of connectors is not.** Quoting a fixed price now means guessing how many systems Apollo will name later. **Estimate blocker.** | `M3-I26`, `M3-I20`, `M3-I5` |
+| `X27` | Which systems, and how many — through Apollo's clients | **Two hops.** The slowest dependency track. Started week one. | `M3-I26` |
+| `OI-HS-55` **[raised here]** | Does a client system expect an acknowledgement or status callback? | **Not built.** One direction only. A client IT team expecting a callback would be an addition, and it is the kind of thing discovered during integration rather than before it. | `M3-I26` |

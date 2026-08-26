@@ -1,0 +1,333 @@
+---
+title: "03-09 Placement and trial"
+description: "Once someone accepts an offer, this module tracks them joining and then checks in on them at day 0, 7, 30, 60 and 90."
+---
+
+**Package** `@apollo/placement` · **Schema** `placement` · **Plan** D7, A6 · **Effort** ~62.0pd · **Risk** High `XMOD` · **Build in** Phase 5
+
+## 1. Purpose
+
+Once someone accepts an offer, this module tracks them joining and then checks in on them at **day 0,
+7, 30, 60 and 90**. The candidate is asked whether they are being paid on time, whether they have a
+preceptor and whether their accommodation is sorted. The client is asked at day 30 and 60 how it is
+going, and at day 90 **whether the person is still there** — that last answer is what lets Apollo
+invoice.
+
+The day-90 record is the single most consequential object in the platform. It must still make sense to
+someone querying a charge a year later, so it is immutable, it snapshots the terms in force, and it
+records whether the client acknowledged or the window simply expired.
+
+## 2. Scope
+
+### In scope
+
+- Joining confirmation, opening the placement and starting the 90-day clock
+- Placement list with trial stage and billing-trigger visibility for finance
+- Drop-out capture with a reason, returning the position to the requisition
+- **Privileging** for doctors — a hospital-granted permission separate from council registration
+- Trial dashboard: which check-ins are done, due or missed
+- Check-in configuration: which events, which questions, per candidate category **and per care setting**
+- Candidate answers with escalation on a negative response
+- Trial outcome, and the visible deemed-confirmation countdown
+- Check-in scheduling on both sides, and question rendering across app, WhatsApp and voice
+- The immutable day-90 record
+
+### Explicitly out of scope
+
+- Shift attendance and timesheets — `03-10`, even though both sit in M8.
+- The client-facing check-in pages and the link mechanism — `02-14`.
+- Invoicing against the day-90 record — `03-11`.
+- Candidate messaging transport — `02-09` and `03-06`.
+
+### Explicitly not built
+
+- Paying anyone. Payroll runs outside the platform for this whole period — `03-17`.
+- Salary changes, advances and holds — `03-16`.
+- Joining paperwork and statutory forms — `03-15`.
+- Leave, overtime and internal timesheet routing — `03-19`.
+- Blocking a check-in based on location — `03-16`.
+- **Running the privileging request process with the hospital.** Release 1 records the outcome
+  (`OI-HS-16`).
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M8-I1` | D7 | Confirm joining | L | 3.0 |
+| `M8-I2` | D7 | Placements list and drop-out | L | 4.0 |
+| `M8-I3` | A6 | Trial dashboard | XL | 5.0 |
+| `M8-I4` | A6 | Check-in settings | L | 3.0 |
+| `M8-I5` | A6 | Candidate answers | L | 3.0 |
+| `M8-I6` | A6 | Trial outcome | L | 3.0 |
+| `M8-I10` | D7 | Privileging | L | 3.0 |
+| `M8-I11` | A6 | Check-in scheduling | L | 3.0 |
+| `M8-I12` | A6 | Check-in questions | L | 3.0 |
+| `M8-I13` | A6 | Day 90 record | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-08` (**the accepted offer — without D20 there is no joining event at all**),
+`02-14` (the link mechanism, built before this), `03-01` (the deemed-confirmation window), `03-06` and
+`02-09` (candidate-side dispatch), `03-04` (category question sets), `02-03`.
+
+**Consumed by:** `03-11` needs the day-90 record to raise a permanent invoice; `03-03` needs fill and
+drop-out counts; `03-12` reports trial survival; `03-15` onboarding triggers from the placement.
+
+**External:** `X29` — a named client recipient per placement, or the day-90 record is not defensible.
+
+## 5. Data model
+
+```sql
+CREATE TABLE placement.placement (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    reference text NOT NULL UNIQUE,
+    candidate_id uuid NOT NULL,
+    requisition_id uuid NOT NULL,
+    offer_id uuid NOT NULL,
+    client_id uuid NOT NULL, location_id uuid NOT NULL, department_id uuid,
+    contract_version_id uuid NOT NULL,        -- what M9 will read
+    service_line text NOT NULL CHECK (service_line IN ('permanent','contractual')),
+    joining_date date,
+    state text NOT NULL DEFAULT 'offered' CHECK (state IN
+      ('offered','joined','in_trial','trial_survived','trial_ended','dropped_out')),
+    trial_day integer GENERATED ALWAYS AS (
+      CASE WHEN joining_date IS NULL THEN NULL
+           ELSE (CURRENT_DATE - joining_date) END) STORED,
+    replacement_for_placement_id uuid REFERENCES placement.placement(id),  -- guarantee tracking
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+CREATE INDEX ON placement.placement (state, joining_date);
+CREATE INDEX ON placement.placement (client_id, state);
+
+CREATE TABLE placement.privileging (          -- doctors only (M8-I10)
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    placement_id uuid NOT NULL REFERENCES placement.placement(id),
+    location_id uuid NOT NULL,                -- held per placement AND per hospital
+    state text NOT NULL DEFAULT 'requested'
+      CHECK (state IN ('requested','granted','rejected','not_required')),
+    granted_from date, rejected_reason text,
+    recorded_by uuid, recorded_at timestamptz
+);
+
+CREATE TABLE placement.drop_out (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    placement_id uuid NOT NULL REFERENCES placement.placement(id),
+    kind text NOT NULL CHECK (kind IN ('did_not_join','left_early')),
+    reason_code text NOT NULL REFERENCES settings.list_entry(code),
+    reason_text text,
+    occurred_on date NOT NULL,
+    recorded_by uuid NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE placement.check_in_config (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    day_offset integer NOT NULL,              -- 0, 7, 30, 60, 90 — configurable, not hardcoded
+    audience text NOT NULL CHECK (audience IN ('candidate','client')),
+    candidate_category text REFERENCES settings.list_entry(code),
+    care_setting text REFERENCES settings.list_entry(code),   -- home care has no preceptor
+    question_set jsonb NOT NULL,
+    link_type_code text,                      -- client side binds to an A13 type
+    escalate_after_hours integer,
+    is_enabled boolean NOT NULL DEFAULT true,
+    UNIQUE (day_offset, audience, candidate_category, care_setting)
+);
+
+CREATE TABLE placement.trial_event (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    placement_id uuid NOT NULL REFERENCES placement.placement(id),
+    check_in_config_id uuid NOT NULL REFERENCES placement.check_in_config(id),
+    day_offset integer NOT NULL,
+    audience text NOT NULL,
+    due_on date NOT NULL,
+    state text NOT NULL DEFAULT 'scheduled' CHECK (state IN
+      ('scheduled','due','answered','escalated','missed','cancelled')),
+    client_link_id uuid,                      -- client side
+    message_id uuid,                          -- candidate side
+    fired_at timestamptz, answered_at timestamptz,
+    UNIQUE (placement_id, day_offset, audience)
+);
+CREATE INDEX ON placement.trial_event (state, due_on);
+
+CREATE TABLE placement.trial_response (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    trial_event_id uuid NOT NULL REFERENCES placement.trial_event(id),
+    channel text NOT NULL CHECK (channel IN ('app','whatsapp','voice','client_link')),
+    answers jsonb NOT NULL,   -- attendance, salary_on_time, preceptor_assigned, accommodation_ok
+    needs_review boolean NOT NULL DEFAULT false,   -- voice/free text below threshold (OI-A-08)
+    escalation_state text CHECK (escalation_state IN ('raised','in_progress','resolved')),
+    escalation_note text,
+    received_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE placement.retention_record (     -- IMMUTABLE. The permanent billing trigger.
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    placement_id uuid NOT NULL UNIQUE REFERENCES placement.placement(id),
+    outcome text NOT NULL CHECK (outcome IN ('retained','not_retained')),
+    basis text NOT NULL CHECK (basis IN ('acknowledged','deemed')),
+    client_link_id uuid,                      -- null when deemed
+    link_response_id uuid,
+    recipient_id uuid,                        -- WHO acknowledged — what makes it defensible
+    acknowledged_at timestamptz,
+    deemed_at timestamptz,
+    deemed_window_days integer,
+    deemed_window_source text CHECK (deemed_window_source IN ('client','platform_default')),
+    contract_version_id uuid NOT NULL,
+    contract_terms_snapshot jsonb NOT NULL,   -- snapshotted, NOT resolved again later
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+REVOKE UPDATE, DELETE ON placement.retention_record FROM PUBLIC;
+```
+
+## 6. State machines
+
+### `Placement` (`M8-I1`, `M8-I2`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | offer signed (`03-08`) | `offered` | |
+| `offered` | joining confirmed | `joined` → `in_trial` | **A doctor cannot be confirmed as joined until privileging is granted.** Trial clock starts from the confirmed joining date |
+| `offered` | did not join | `dropped_out` | Position returns to open in `03-03` |
+| `in_trial` | left early | `trial_ended` | Reason required; **no retention record, therefore no permanent invoice** |
+| `in_trial` | day-90 answer or deemed | `trial_survived` | Writes the immutable `RetentionRecord` |
+
+A joining-date change **before day 0 reschedules the trial events**; fired events are left intact.
+
+### `TrialEvent` (`M8-I11`)
+
+`scheduled → due → answered`, or `escalated` (non-response escalates to outbound voice per the
+configured timer), or `missed` — **and a missed check-in is distinguishable from a not-yet-due one**.
+
+### `RetentionRecord` (`M8-I13`) — the one that matters
+
+```
+ day-90 client link issued ──▶ answered ──▶ RetentionRecord(basis='acknowledged', recipient_id, at)
+                          └──▶ expired ──▶ window from ClientWindowConfig ?? platform default
+                                       ──▶ RetentionRecord(basis='deemed', window + source recorded)
+```
+
+Immutable once created. Links to either the link response or the deemed event. Snapshots the contract
+terms rather than referencing them, so a later amendment cannot change what the invoice was justified
+by. Termination before day 90 produces **no record and no invoice**.
+
+### `Privileging` (`M8-I10`)
+
+`requested → granted | rejected`, or `not_required` for nurses and allied health. **Held per placement
+and per hospital, not once per doctor.** Council registration in `03-04` does not satisfy it and does
+not skip the step.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/placements` | `placement:manage` | Confirm joining — date, site, department |
+| `GET` | `/v1/placements?client=&recruiter=&trialStage=&approachingDay90=` | `placement:read` | List; finance reads without recruiter permissions |
+| `GET` | `/v1/placements/:id` | `placement:read` | Links to offer, contract version and requisition |
+| `POST` | `/v1/placements/:id/drop-out` | `placement:manage` | Reason required; returns the position |
+| `GET`/`POST` | `/v1/placements/:id/privileging` | `placement:manage` | Record request, grant or rejection |
+| `GET` | `/v1/trial/dashboard?state=&dueWithin=` | `placement:read` | Done, due, missed; day-90 pipeline |
+| `GET`/`PUT` | `/v1/check-in-configs` | `settings:edit` | Events, questions, per category and care setting |
+| `GET` | `/v1/placements/:id/trial-events` | `placement:read` | With responses |
+| `GET` | `/v1/trial-responses?flagged=true` | `placement:read` | Negative answers needing action |
+| `POST` | `/v1/trial-responses/:id/escalation` | `placement:manage` | Track to resolution |
+| `POST` | `/v1/placements/:id/trial-outcome` | `placement:manage` | Survived or ended with a reason |
+| `GET` | `/v1/placements/:id/retention-record` | `placement:read`, `invoice:read` | The trigger record |
+
+## 8. Events and jobs
+
+**Events emitted:** `placement.placement.joined` · `placement.dropout.recorded` ·
+`placement.trial_event.due` · `.answered` · `.missed` · `placement.trial_response.escalated` ·
+`placement.retention.confirmed` · `.deemed` · `placement.privileging.granted`.
+
+**Events subscribed:** `selection.offer.signed` → create the placement in `offered`;
+`links.link.answered` (day 30/60/90) → write the trial response, and for day 90 **only**, the retention
+record.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `placement.trial-events` | daily | Generates day 0/7/30/60/90 from the joining date; candidate side via `02-09`, **client side issues an A13 link of the correct type** |
+| `placement.escalate-nonresponse` | hourly | Escalates to outbound voice on the configured timer |
+| `placement.deem-retention` | hourly | Writes the deemed record once the window expires; **countdown visible before expiry, not only after** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Confirm joining — date, site, department; starts the 90-day clock | `/placements/new` | `M8-I1` |
+| Placements — candidate, client, joining date, trial day, next check-in, **billing-trigger state**; flags placements approaching day 90 **without a designated client recipient** | `/placements` | `M8-I2` |
+| Record drop-out — reason, returns the position | dialog | `M8-I2` |
+| Trial dashboard — done / due / missed per placement, day-90 answers coming up | `/trial` | `M8-I3` |
+| Check-in settings — events, questions per category, **a different set for home healthcare with no preceptor and no accommodation** | `/admin/check-ins` | `M8-I4` |
+| Candidate answers — attendance, salary timeliness, preceptor, accommodation; **negative answers flagged for action** | `/trial/responses` | `M8-I5` |
+| Trial outcome — survived or ended; whether the client answered or the window ran out; opens the record the invoice fires against; **guarantee period visible** | `/placements/:id/outcome` | `M8-I6` |
+| Privileging — requests per placement and hospital, grant with a date, reject with a reason | `/placements/:id/privileging` | `M8-I10` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Joining is confirmed with date tracking and opens a placement record | `M8-I1` |
+| AC2 | The joining event derives from offer acceptance; **without D20 there is no joining event at all** | `M8-I1` |
+| AC3 | The trial clock starts from the confirmed joining date, driving day 0, 7, 30, 60 and 90 | `M8-I1` |
+| AC4 | A joining-date change before day 0 reschedules the trial events | `M8-I1`, `M8-I11` |
+| AC5 | The placement cites the requisition so fill is tracked back in M3 | `M8-I1` |
+| AC6 | **A doctor placement cannot be confirmed as joined until hospital privileging is recorded as granted** | `M8-I1`, `M8-I10` |
+| AC7 | A placement shows its current trial day and next scheduled check-in | `M8-I2` |
+| AC8 | Billing trigger state is visible so finance can see what is approaching invoice | `M8-I2` |
+| AC9 | Finance can read placements **without recruiter permissions** | `M8-I2` |
+| AC10 | The placement links to the offer, contract version and requisition it derives from | `M8-I2` |
+| AC11 | Placements approaching day 90 **without a designated client recipient are flagged** | `M8-I2`, `OI-A-12` |
+| AC12 | Drop-out is captured with a reason and the requisition returns to fulfilment | `M8-I2` |
+| AC13 | The position returns to open in M3 and the fill count decrements | `M8-I2`, `M3-I27` |
+| AC14 | **A drop-out before day 90 means no retention record and therefore no permanent invoice** | `M8-I2` |
+| AC15 | Drop-out reasons feed the M9 trial survival report | `M8-I2`, `M9-I7` |
+| AC16 | A replacement placement can be linked to the original for guarantee tracking | `M8-I2`, `OI-A-13` |
+| AC17 | Check-in records are present at each configured event, candidate side and client side | `M8-I3` |
+| AC18 | **Day 30 and day 60 capture signal only; no billing trigger** | `M8-I3`, `M7-I8` |
+| AC19 | A missed check-in is distinguishable from a not-yet-due one | `M8-I3` |
+| AC20 | The day-90 pipeline is visible to finance ahead of the trigger firing | `M8-I3` |
+| AC21 | **Without A6 there is no day-90 record, A7 has no trigger and D8 has nothing to invoice against** | `M8-I3` |
+| AC22 | The check-in event set is **configurable, not hardcoded to five events** | `M8-I4` |
+| AC23 | Question sets differ by candidate category | `M8-I4` |
+| AC24 | Standard questions cover attendance, salary payment timeliness, preceptor assignment and accommodation status | `M8-I4` |
+| AC25 | **A different question set applies to home healthcare, which has no preceptor and no accommodation** | `M8-I4`, letter item 11 |
+| AC26 | Client-side events at day 30, 60 and 90 bind to the A13 link types, **not a separate mechanism** | `M8-I4`, `M7-I8` |
+| AC27 | Non-response escalates to outbound voice per the configured rule | `M8-I4`, `M8-I11` |
+| AC28 | Responses capture attendance, salary timeliness, preceptor and accommodation | `M8-I5` |
+| AC29 | A negative response on salary timeliness or accommodation **escalates rather than being logged silently** | `M8-I5` |
+| AC30 | Responses arriving by voice go through the same review path as A14 free text | `M8-I5`, `OI-A-08` |
+| AC31 | Escalations are tracked to resolution, not just raised | `M8-I5` |
+| AC32 | The trial ends either surviving or terminated with a reason | `M8-I6` |
+| AC33 | A day-90 acknowledgement **or** a deemed confirmation produces the auditable trigger record | `M8-I6`, `M8-I13` |
+| AC34 | **The deemed-confirmation countdown is visible before it expires, not only after** | `M8-I6` |
+| AC35 | Termination before day 90 means no trigger and no permanent invoice | `M8-I6` |
+| AC36 | The guarantee period is visible, since a failure after day 90 inside a longer window changes the billing position | `M8-I6`, `OI-A-13` |
+| AC37 | Privileging is held **per placement and per hospital, not once per doctor** | `M8-I10` |
+| AC38 | Council registration in M4 does not satisfy privileging and does not skip the step | `M8-I10` |
+| AC39 | Nurse and allied health placements do not require privileging and are not blocked by it | `M8-I10` |
+| AC40 | Events generate at day 0, 7, 30, 60 and 90 from the confirmed joining date | `M8-I11` |
+| AC41 | Candidate-side dispatch runs through the M5 notification layer, **not a separate sender** | `M8-I11` |
+| AC42 | Client-side dispatch issues an A13 link of the correct type | `M8-I11`, `M7-I17` |
+| AC43 | A joining-date change reschedules unfired events and **leaves fired ones intact** | `M8-I11` |
+| AC44 | The same logical question set renders correctly as an app form, a WhatsApp template and a voice script | `M8-I12` |
+| AC45 | Responses return on **one schema regardless of channel**, matching the A14 pattern | `M8-I12` |
+| AC46 | A question-set version change does not invalidate responses captured under a prior version | `M8-I12` |
+| AC47 | An acknowledgement is **timestamped against an identified recipient** | `M8-I13` |
+| AC48 | Where no response arrives, contract terms deem retention confirmed after the configured window | `M8-I13` |
+| AC49 | Either path produces an auditable trigger record capable of supporting a billing query | `M8-I13` |
+| AC50 | **The record is immutable once created** and links to the link response or the deemed event | `M8-I13` |
+| AC51 | The window resolves through the M2 service with a platform default fallback | `M8-I13`, `M2-I12`, `OI-A-05` |
+| AC52 | The contract terms in force are **snapshotted, not resolved again later** | `M8-I13`, `M9-I13` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-12` | The recipient identity model — the day-90 acknowledgement must be attributable to a named recipient | Resolved through `02-14`'s four-column recipient model. **Without it the billing trigger is not defensible**, so placements approaching day 90 without a designated recipient are flagged. | `M8-I13`, `M9-D8` |
+| `OI-A-13` | **How long is the guarantee period, and does it run past day 90?** | Captured on the contract version and shown on the trial outcome. If longer than 90 days, a departure in month five means an already-raised invoice must be corrected, which **moves credit and debit notes out of Phase 7**. This changes scope, not just a number. **Estimate blocker.** | `M9-I12`, `M9-I1`, `M2-I8`, `M15-I5` |
+| `OI-A-05` | Platform default deemed-confirmation window | 14 days, from `02-03`, labelled as a placeholder | `M8-I6`, `M8-I13` |
+| `OI-HS-16` | **How is hospital privileging requested and returned?** Recording the grant is straightforward; whether the platform raises the request, tracks it and chases it is not stated | **Recording the outcome only.** Running the request process is a workflow with a client-facing surface and is several times the size. | `M8-I10` |
+| `OI-A-08` | Voice and free-text trial responses below the confidence threshold | Routed to the same review queue as A14, never written back silently | `M8-I5` |
+| `OI-HS-34` **[raised here]** | Does a home-healthcare trial question set exist, and who authors it? | A care-setting-specific set is built into the configuration; the **content** needs a clinical owner. A6 captures preceptor and accommodation, neither of which exists in a home. | `M8-I4`, letter item 11 |

@@ -1,25 +1,25 @@
 ---
-title: "Foundation"
-description: "What the business does and how the system is shaped. Read once, first."
+title: "00 Foundation"
+description: "6 documents in 00 Foundation."
 ---
 
-This section contains 6 documents.
-
 <Cards>
-  <Card title="00-01 · Product Context" href="/docs/00-foundation/00-01-product-context">
-  Read first. Everything else assumes you understand this page.
+  <Card title="00-01 Product context" href="/docs/00-foundation/00-01-product-context">
+    Read this once. It is the business the platform serves, the people who use it, and the two ways money reaches Apollo. Everything else in docs/ assumes it.
   </Card>
-  <Card title="00-02 · System Architecture" href="/docs/00-foundation/00-02-system-architecture">
-  One Express application, split into strictly-bounded modules. One database. One deployable API image, one worker image, three static frontends.
+  <Card title="00-02 System architecture" href="/docs/00-foundation/00-02-system-architecture">
+    The shape of the system and why it is that shape. Conventions that follow from it are in 01-standards/.
   </Card>
-  <Card title="00-03 · Domain Model" href="/docs/00-foundation/00-03-domain-model">
-  Every entity in the platform, who owns it, and how it moves. This is the single reference — module specs give column-level detail, this gives the map.
+  <Card title="00-03 Domain model" href="/docs/00-foundation/00-03-domain-model">
+    Every entity in the platform in one place: what owns it, what reads it, and where its lifecycle is specified. Column-level detail lives in each component's §5 Data model; this page…
   </Card>
-  <Card title="00-04 · Component Map" href="/docs/00-foundation/00-04-component-map">
-  The complete component register, what depends on what, and how the delivery plan's 204 items map onto them.
+  <Card title="00-04 Component map" href="/docs/00-foundation/00-04-component-map">
+    The component register for the Apollo platform. The delivery plan is organised by when work is sold and scheduled (milestones M0–M15).
   </Card>
-  <Card title="00-05 · Delivery Roadmap" href="/docs/00-foundation/00-05-delivery-roadmap">
-  Six months, 126 working days, 1344 person-days, ~10.7 average team size. Sequenced by dependency, not by the original release split.
+  <Card title="00-05 Delivery roadmap" href="/docs/00-foundation/00-05-delivery-roadmap">
+    Seven build phases across six months (126 working days at 21/month). The phases are the engineering sequence; the plan's milestones are the commercial one.
   </Card>
-  <Card title="00-06 · Glossary" href="/docs/00-foundation/00-06-glossary">  </Card>
+  <Card title="00-06 Glossary" href="/docs/00-foundation/00-06-glossary">
+    Terms used precisely across these docs. Where the client and the engineering docs use different words for the same thing, both are given.
+  </Card>
 </Cards>

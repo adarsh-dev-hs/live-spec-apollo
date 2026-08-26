@@ -1,314 +1,209 @@
 ---
-title: "00-03 · Domain Model"
-description: "Every entity in the platform, who owns it, and how it moves. This is the single reference — module specs give column-level detail, this gives the map."
+title: "00-03 Domain model"
+description: "Every entity in the platform in one place: what owns it, what reads it, and where its lifecycle is specified. Column-level detail lives in each component's §5 Data model; this page…"
 ---
 
-Every entity in the platform, who owns it, and how it moves. This is the single reference — module
-specs give column-level detail, this gives the map.
+**Package** `@apollo/db` · **Schema** all · **Plan** all · **Effort** — · **Risk** — · **Build in** Phase 0
 
----
+Every entity in the platform in one place: what owns it, what reads it, and where its lifecycle is
+specified. Column-level detail lives in each component's **§5 Data model**; this page is the index and
+the ownership contract.
 
-## 1. Schema ownership
+**Ownership rule.** Exactly one component writes an entity. Everything else reads it through that
+component's service or a view. Where the plan leaves ownership contested it is called out below with
+its open item.
 
-One Postgres database. Ten schemas. **A table is written by exactly one module.**
+## 1. Entity register
 
-| Schema | Owning modules | Entities |
-|---|---|---|
-| `platform` | iam, audit, config, files, events, links, approvals, adapters | User, Role, Permission, AuditEntry, Setting, ListEntry, Document, EventStore, ClientLink, Approval, AdapterCall |
-| `clients` | clients, contracts | Client, Location, Department, ClientContact, SenderIdentity, RateCard, Contract, ClientWindowConfig |
-| `demand` | intake, requisitions, demand-ops | InboundRecord, Requisition, RequisitionVersion, ShiftTemplate, ShiftDemandLine, AllocationRecord, StatusTransition, PriorityScore |
-| `supply` | candidates, credentials, migration | Candidate, Credential, CandidateDocument, VerificationCase, CategoryAttributeSet, Application, DuplicateCandidate, MigrationBatch |
-| `engage` | engagement | NotificationTemplate, NotificationLog, ContactPreference, Segment, CadenceRule, AvailabilityResponse, VoiceCall, AvailabilityConfidence |
-| `match` | matching | RankedSet, RankEntry, WeightSet, RecruiterOverride, SavedSearch, TalentSegment, OutcomeSignal |
-| `select` | selection | Interview, InterviewFeedback, SelectionDecision, Offer, OfferVersion |
-| `place` | placements, attendance, onboarding, workforce | Placement, DropOut, TrialEvent, TrialResponse, RetentionRecord, ShiftAttendance, Timesheet, AssociateProfile, StatutoryForm, WorkforceRequest |
-| `bill` | billing, collections, payroll | Invoice, InvoiceLine, BillingTrigger, Receivable, Payment, CreditNote, PayrollCycle, PayrollInput |
-| `report` | analytics | ReportingEvent, projection tables, RateBaseline, RateVariance |
+### Platform-owned
 
----
+| Entity | Owner | Schema | Written by | Read by | Lifecycle |
+|---|---|---|---|---|---|
+| `User`, `Role`, `Permission`, `UserSite` | 02-01 | `identity` | 02-01 | every component | `invited → active → deactivated` |
+| `CandidateIdentity` (phone, OTP state) | 02-01 | `identity` | 02-01 | 03-05 | — |
+| `ClientUser`, `ClientUserRole`, `PortalSession` | 02-01 | `identity` | 02-01 | 03-14 | `invited → registered → active → suspended` |
+| `AuditEntry` | 02-02 | `audit` | every component (append-only) | 02-02, 03-11, 03-12 | append-only |
+| `Setting`, `ListEntry`, `SystemConfig` | 02-03 | `settings` | 02-03 | every component | — |
+| `Document`, `DocumentVersion` | 02-04 | `files` | 02-04 | 03-04, 03-05, 03-08, 03-15, 03-17 | `uploaded → scanned → available \| quarantined` |
+| `InboundRecord` | 02-08 | `inbound` | 02-08 | 03-02, 03-06 | `received → identified\|unmatched → parsed\|unparseable → consumed` |
+| `IntentRegistration` | 02-08 | `inbound` | 02-08 | 03-02, 03-06 | — |
+| `NotificationTemplate`, `NotificationLog`, `ContactPreference`, `OptOut`, `Trigger` | 02-09 | `messaging` | 02-09 | 03-02, 03-06, 03-08, 03-09, 03-17, 03-20 | `queued → sent → delivered \| failed → retried → given_up` |
+| `Job`, `JobRun`, `DeadLetter` | 02-10 | `jobs` | 02-10 | operators | `enqueued → running → completed \| failed → retried → dead_letter` |
+| `PlatformEvent` (outbox + log) | 02-11 | `events` | every component | 03-12 | append-only |
+| `Consent`, `RetentionPolicy`, `ErasureRequest` | 02-12 | `dp` | 02-12 | 03-04, 03-05, 03-11, 03-15 | `granted → withdrawn` |
+| `MarketAdapter`, `AdapterCall` | 02-13 | `adapters` | 02-13 | 03-04 | `requested → responded(green\|amber\|red) \| failed → retried \| manual` |
+| `ClientLink`, `LinkType`, `LinkRecipient`, `LinkResponse` | 02-14 | `links` | 02-14 | 03-08, 03-09, 03-10, 03-11 | `issued → sent → opened → answered \| expired → deemed` |
 
-## 2. The core spine
+### Module-owned
 
-The eight entities everything else hangs off:
+| Entity | Owner | Schema | Read by | Lifecycle |
+|---|---|---|---|---|
+| `Client`, `Location`, `Department` | 03-01 | `clients` | 03-02, 03-03, 03-08, 03-11, 03-14 | `draft → active → suspended → closed` |
+| `ClientContact` | 03-01 | `clients` | 02-14 (recipients, `OI-A-12`) | — |
+| `SenderIdentity` | 03-01 | `clients` | 02-08 (`M3-I19` resolves every inbound here) | active / inactive |
+| `RateCard`, `RateCardVersion`, `RateCardLine` | 03-01 | `clients` | 03-03, 03-10, 03-11, 03-12 | `draft → in_effect → superseded` |
+| `Contract`, `ContractVersion` | 03-01 | `clients` | 03-08, 03-09, 03-10, 03-11 | `draft → active → renewed → expired \| terminated` |
+| `ClientWindowConfig` | 03-01 | `clients` | 03-02, 03-09, 03-10, 03-11 | — |
+| `Channel`, `SpreadsheetMapping`, `RequiredFieldSet`, `FollowUpConfig` | 03-02 | `demand` | 02-08 | — |
+| `ParseResult`, `CompletenessScore`, `FollowUpThread`, `DuplicateSuspicion` | 03-02 | `demand` | 03-03 | — |
+| `Requisition`, `RequisitionVersion` | 03-03 | `demand` | 03-07, 03-08, 03-09, 03-11, 03-12, 03-14 | see §3 |
+| `ShiftDemandLine` | 03-03 | `demand` | 03-07, 03-10 | `open → partially_filled → filled \| held \| cancelled` |
+| `AllocationRecord` | 03-03 | `demand` | 03-12, 03-18 | append-only |
+| `StatusTransition` | 03-03 | `demand` | 03-12 | append-only |
+| `Candidate`, `CandidateCategoryAttributes` | 03-04 | `candidates` | 03-05, 03-06, 03-07, 03-08, 03-09, 03-15 | `registered → profile_complete → verification_pending → verified\|partly_verified\|failed` |
+| `SupplyBaseMembership` | 03-04 | `candidates` | 03-06, 03-07 | — |
+| `Credential` | 03-04 | `candidates` | 03-07 | `claimed → submitted → checking → verified\|flagged\|rejected → expired` |
+| `CandidateDocument` | 03-04 | `candidates` | 03-05 | — |
+| `VerificationCase` | 03-04 | `candidates` | 03-07 | `queued → in_progress → resolved\|awaiting_registry\|manual` |
+| `CategoryAttributeSet` (definition) | 03-04 | `candidates` | 03-02, 03-03, 03-05, 03-07 (`AS-04`, `OI-M3-01`) | versioned |
+| `Certification`, `LearnerMatch` | 03-04 | `candidates` | 03-07 | — |
+| `DuplicateCandidate` | 03-04 | `candidates` | 03-13 | `suspected → merged \| distinct` |
+| `Application`, `ShiftAcceptance` | 03-05 | `candidates` | 03-07, 03-08, 03-10 | `applied → shortlisted → interviewing → offered → joined \| rejected \| withdrawn` |
+| `Segment`, `CadenceRule`, `CadenceRun` | 03-06 | `engagement` | 03-07 (segments shared, `M6-I2`) | — |
+| `AvailabilityConfidence` | **03-04 owns the column, 03-06 writes it** (`M5-I10`, coupling 3) | `candidates` | 03-07 | `confirmed → decaying → stale → selected` |
+| `AvailabilityResponse` | 03-06 | `engagement` | 03-04 | `received → understood\|unclear → confirmed` |
+| `VoiceCampaign`, `VoiceCall`, `VoiceTranscript` | 03-06 | `engagement` | 03-09 | `queued → dialling → connected → completed \| no_answer → retry` |
+| `WeightSet`, `RankedSet`, `RankEntry`, `RecruiterOverride` | 03-07 | `matching` | 03-08, 03-12 | `generating → current → stale` |
+| `SavedSearch`, `TalentSegment` | 03-07 | `matching` | 03-06 | — |
+| `OutcomeSignal` | 03-07 | `matching` | 03-07 | `captured → written_back → included` |
+| `Interview`, `InterviewFeedback` | 03-08 | `selection` | 03-07 | `proposed → confirmed → held → feedback_recorded \| rescheduled \| cancelled` |
+| `Shortlist`, `ShortlistEntry` | 03-07 | `matching` | 02-14, 03-08 | `draft → submitted → awaiting_client → responded` |
+| `SelectionDecision` | 03-08 | `selection` | 03-07, 03-09 | `pending → accepted\|held\|rejected` |
+| `Offer`, `OfferVersion` | 03-08 | `selection` | 03-09, 03-11 | `draft → generated → sent → opened → signed \| expired \| declined` |
+| `OfferContractMapping` | 03-08 | `selection` | 03-11 | — |
+| `Placement`, `DropOut` | 03-09 | `placement` | 03-03, 03-10, 03-11, 03-12, 03-15, 03-16 | `joined → in_trial → trial_survived \| trial_ended`; `offered → dropped_out` |
+| `PrivilegingRecord` | 03-09 | `placement` | 03-09 | `requested → granted \| rejected` |
+| `TrialEvent`, `TrialResponse` | 03-09 | `placement` | 03-12 | `scheduled → due → answered \| escalated \| missed` |
+| `RetentionRecord` | 03-09 | `placement` | 03-11 | **immutable once written** |
+| `ShiftAttendance`, `AttendanceException` | 03-10 | `timesheets` | 03-16, 03-17 | `expected → checked_in → checked_out \| no_show \| exception → resolved` |
+| `Timesheet`, `TimesheetLine` | 03-10 | `timesheets` | 02-14, 03-11, 03-17, 03-19 | `building → built → sent_for_approval → approved\|deemed_approved → invoiced` |
+| `TimesheetExport` | 03-10 | `timesheets` | manual payroll (`OI-A-15`) | — |
+| `Invoice`, `InvoiceLine` | 03-11 | `billing` | 03-12, 03-14, 03-20 | `draft → raised → exported` (+ `partly_paid → paid \| credited` in 03-20) |
+| `BillingTrigger` | 03-11 | `billing` | 03-11 | `pending → confirmed\|deemed → consumed` |
+| `Receivable` | 03-11 | `billing` | 03-20 | `open → settled` |
+| `RateBaseline`, `RateVariance` | 03-12 | `reporting` | — | — |
+| `ReportingMart` tables | 03-12 | `reporting` | — | rebuilt from `PlatformEvent` |
+| `MigrationBatch`, `MigrationRecord`, `MigrationException` | 03-13 | `migration` | 03-04 | `staged → profiled → transformed → loaded → reconciled → cut_over` |
+| `AssociateProfile`, `StatutoryForm`, `OnboardingChecklist` | 03-15 | `onboarding` | 03-17 | `not_started → in_progress → complete → verified` |
+| `WorkforceRequest`, `SalaryRevision`, `SalaryAdvance`, `SalaryHold` | 03-16 | `workforce` | 03-17 | `drafted → submitted → approved\|rejected → applied` |
+| `AttendanceUpload`, `GeoFence` | 03-16 | `workforce` | 03-10 | — |
+| `PayrollCycle`, `PayrollInput`, `PayrollOutput`, `StatutoryReport` | 03-17 | `payroll` | 03-05 (payslips) | `open → inputs_locked → sent → results_received → payslips_issued → closed` |
+| `PriorityScore`, `AllocationSuggestion`, `RecruiterCapacity`, `ApprovalRequest` | 03-18 | `demand` | 03-03 | — |
+| `LeaveType`, `LeaveRecord`, `OvertimeRule`, `TimesheetApprovalRoute` | 03-19 | `timesheets` | 03-17 | — |
+| `Payment`, `PaymentAllocation`, `CreditNote`, `DebitNote`, `DunningSchedule` | 03-20 | `billing` | 03-12 | `received → matched → remainder_unmatched` |
+
+## 2. Core relationships
 
 ```
-   Client ──< Location ──< Department
-     │                          │
-     │                          ▼
-     ├──< Contract ──< ContractVersion ────┐
-     ├──< RateCard ──< RateCardLine        │  (temporal: read AS AT a date)
-     │                                     │
-     └──< Requisition ──< RequisitionVersion
-              │    │
-              │    └──< ShiftDemandLine  (contract staffing only)
-              │
-              ▼
-          RankedSet ──< RankEntry ──▶ Candidate ──< Credential
-              │                           │    └──< CandidateDocument
-              ▼                           │
-          Application ─────────────────────┘
-              │
-              ▼
-          Interview ──< InterviewFeedback
-              │
-              ▼
-          SelectionDecision
-              │
-              ▼
-            Offer ──< OfferVersion
-              │
-              ▼
-          Placement ──┬──< TrialEvent ──< TrialResponse
-                      │        │
-                      │        └──▶ RetentionRecord (day 90)  ─────┐
-                      │                                            │
-                      └──< ShiftAttendance ──< Timesheet ──────────┤
-                                                                   ▼
-                                                            BillingTrigger
-                                                                   │
-                                                                   ▼
-                                                        Invoice ──< InvoiceLine
-                                                                   │
-                                                                   ▼
-                                                              Receivable
+ Client 1──n Location 1──n Department
+   │  1──n ClientContact ──n LinkRecipient ──n ClientLink ──1 LinkResponse
+   │  1──n SenderIdentity  ◀── resolved by every InboundRecord
+   │  1──n RateCard 1──n RateCardVersion 1──n RateCardLine
+   │  1──n Contract 1──n ContractVersion ──▶ read at every billing trigger
+   │  1──1 ClientWindowConfig  (retention · timesheet · follow-up windows, defaults in Setting)
+   │
+   └──n Requisition ──1 RequisitionVersion(current)
+          │  n──1 category (nurse|doctor|allied)   n──1 care_setting (hospital|home)
+          │  1──n ShiftDemandLine   (contractual only; carries visit_address for home care)
+          │  1──n AllocationRecord  (append-only)   1──n StatusTransition (append-only)
+          │  1──n RankedSet 1──n RankEntry ──1 Candidate
+          │  1──n Shortlist 1──n ShortlistEntry ──▶ ClientLink(type=shortlist)
+          │
+          └──n Application ──1 Candidate
+                 │ 1──n Interview 1──n InterviewFeedback
+                 │ 1──1 SelectionDecision ──▶ OutcomeSignal ──▶ next RankedSet
+                 │ 1──1 Offer 1──n OfferVersion ──1 OfferContractMapping ──1 ContractVersion
+                 └──1 Placement
+                        │ 1──n TrialEvent 1──1 TrialResponse
+                        │ 1──1 RetentionRecord (immutable) ──▶ BillingTrigger ──▶ Invoice(permanent)
+                        └──1 DropOut ──▶ position returns to Requisition
+
+ Candidate 1──n Credential ──n VerificationCase ──n AdapterCall
+   │ 1──n CandidateDocument ──1 Document
+   │ 1──n SupplyBaseMembership (Base A and/or Base B — OI-HS-09)
+   │ 1──1 AvailabilityConfidence (column on Candidate, written by 03-06)
+   │ 1──n ShiftAcceptance ──1 ShiftDemandLine
+   │ 1──n ShiftAttendance ──n TimesheetLine ──1 Timesheet ──▶ Invoice(shift)
+   └──1 AssociateProfile 1──n StatutoryForm ──▶ PayrollInput ──1 PayrollCycle
 ```
 
-**Read this diagram as the revenue chain.** Every arrow is a place where a break stops billing.
+## 3. Lifecycles that cross components
 
----
+Full transition tables live in the owning spec's §6. These three cross enough boundaries to belong here.
 
-## 3. Entity register
+### `Requisition` (owner 03-03, `M3-I27`)
 
-### `platform` — foundations
+```
+                   ┌───────────── revise (new version, re-score) ──────────────┐
+                   ▼                                                            │
+ incomplete ──▶ awaiting_client ──▶ complete ──▶ open ──▶ in_fulfilment ──▶ partially_filled ──▶ filled
+      │              │  (escalates to owner on window expiry, AS-01)   ▲   │
+      │              └──────────────────────────────────────────┐      │   │
+      └── complete ──────────────────────────────────────────┐  │      │   │
+                                                              ▼  ▼      │   │
+                                        (M14 only) awaiting_approval ───┘   │
+                                                                            │
+                    in_fulfilment ◀──── release (aging resumes from held) ──┤
+                              │                                             │
+                              └──▶ on_hold (aging clock stops)              │
+                                                                            │
+ any state ──▶ closed   (reason mandatory, from 02-03 list; OI-M3-11)  ◀────┘
+```
 
-| Entity | Owner | Purpose | Notes |
+Aging counts from **first reaching `complete`**, excluding held days (`M3` BR4, AC3). Auto-close on
+`filled` is configurable and unresolved (`OI-M3-12`). The `awaiting_approval` state is added by 03-18
+and does not exist in Phase 3.
+
+### `ClientLink` (owner 02-14, `M7-I17`)
+
+```
+ issued ──▶ sent ──▶ opened ──▶ answered ──▶ routed (M7-I18)
+    │                   │
+    │                   └──▶ resubmitted → treated as the same answer, no second response
+    └──▶ expired ──▶ deemed   ← ONLY for link_type ∈ {day_90_retention, timesheet_approval}
+                              and only after the per-client window from ClientWindowConfig,
+                              falling back to the platform default (OI-A-05)
+```
+
+`day_30_check_in` and `day_60_check_in` can never reach `deemed` and can never carry
+`is_billing_trigger` — the flag is not editable on those types (`M7-I8`).
+
+### `Timesheet` → `Invoice` (owners 03-10 → 03-11)
+
+```
+ ShiftAttendance(resolved) ──▶ Timesheet.building ──▶ built
+        │                                              │
+        │                        (03-19 adds: ──▶ internally_approved)
+        │                                              ▼
+        │                                      sent_for_approval ──▶ approved
+        │                                              │                 │
+        │                                              └──▶ deemed_approved
+        │                                                                ▼
+        └──────────────────────────────────────────────────────▶ invoiced (03-11)
+```
+
+A deemed approval is **as valid an invoice input as an explicit one** (`M8-I16`, `M9-I15`), and the two
+are visibly distinguished on the record.
+
+## 4. Contested and constrained ownership
+
+| Entity | Contest | Position held | Open item |
 |---|---|---|---|
-| `User` | iam | Apollo staff account | Email + password. Separate from candidates and client users. |
-| `Role` | iam | Named permission bundle | Permission set held in configuration, not editable on screen in R1 |
-| `Permission` | iam | One capability | `<module>.<resource>.<action>` |
-| `UserSiteAssignment` | iam | Which sites a user covers | Distinguishes 15 site-resident recruiters from 7 floating |
-| `Session` | iam | Active login | Redis-backed, sliding idle expiry |
-| `AuditEntry` | audit | Who did what, when | **Append-only.** Written by six modules. Never edited or deleted from any surface. |
-| `Setting` / `ListEntry` | config | Configurable lists and waiting periods | Per-client override over platform default |
-| `Document` | files | Every uploaded file | Versioned; replacing keeps the previous version |
-| `EventStore` | events | Every domain event | **Append-only.** M9 reads this months later. |
-| `Outbox` | events | Transactional publish buffer | Drained by relay, deleted after publish |
-| `ClientLink` | links | Tokenised no-login URL | Four types on one mechanism |
-| `LinkRecipient` | links | Who at the client received it | Identity model **open** (`OI-A-12`) |
-| `ApprovalRequest` | approvals | Maker-checker request | Raiser can never be approver — enforced in service |
-| `MarketAdapter` / `AdapterCall` | adapters | External config + every call made | Call log is the evidence when a supplier misbehaves |
+| `CategoryAttributeSet` definition | M3 or M4 defines the requisition-side attribute set | **03-04 owns one definition; 03-02/03-03 consume it as configuration** so requisition and candidate sides cannot drift | `OI-M3-01` (`AS-04`) |
+| `AvailabilityConfidence` | M4 owns the candidate record; M5 computes the value | Column lives on `candidates.candidate`, written **only** through 03-06's service, read by 03-07 | Part A coupling 3 |
+| `LinkRecipient` | Held per client, per location, per requisition or per placement? | Modelled with **all four scope columns, exactly one non-null**, so a decision is a data change not a migration | `OI-A-12` |
+| `RejectionReason` taxonomy | M6 feature schema and M7 taxonomy are one design | Single list in `02-03`, consumed by 03-07 and 03-08; schema agreed in a joint session before either builds | Part A coupling 1 |
+| Duplicate resolution | Migrated base via 03-13 or via 03-04's mechanism | **03-04 owns the merge**; 03-13 calls it, so there is one merge implementation and lineage is uniform | `OI-A-03` |
 
-### `clients` — commercial
+## 5. Conventions every entity obeys
 
-| Entity | Purpose | Notes |
-|---|---|---|
-| `Client` | The hospital group | Every requisition, offer and invoice hangs off this |
-| `Location` | A hospital / site | A requisition must attach to one |
-| `Department` | A unit within a location | |
-| `ClientContact` | People at the client | Probably also where link recipients live (`OI-A-12`) |
-| `SenderIdentity` | Email / WhatsApp number / HRMS tenant → one client | Intake checks **every** inbound against this |
-| `RateCard` / `RateCardVersion` / `RateCardLine` | Charges by role, skill, location | **Temporal.** Old versions never deleted — an old requisition prices at the rate that applied when raised. |
-| `Contract` / `ContractVersion` | The signed agreement | M9 reads the version in force **at the moment the trigger fired**, not today's |
-| `ClientWindowConfig` | Three waiting periods per client | Retention deemed-confirmation, timesheet deemed-approval, requisition follow-up. Platform default if unset. |
-
-### `demand` — what the client needs
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `InboundRecord` | One row per incoming message or file | **Kept forever**, including raw payload, even after the requisition is created |
-| `Requisition` | The demand record | Client, site, role, positions, category, category-attributes, rate, completeness, missing fields, owner, status, age |
-| `RequisitionVersion` | Every change | Revision is a versioning event, not an edit |
-| `ShiftTemplate` | Repeating shift pattern | Expands into demand lines without per-shift entry |
-| `ShiftDemandLine` | One row per shift | Contract staffing only. Consumed by M6 ranking and M8 attendance. |
-| `AllocationRecord` | Which recruiters, when, by whom | **Append-only.** A record of the morning call, not an assignment engine (R1). |
-| `StatusTransition` | Every status change with a timestamp | **Append-only.** Stage-level conversion loss cannot be computed retrospectively without it. |
-| `PriorityScore` / `AllocationSuggestion` / `RecruiterCapacity` | M14 only | Scores and suggestions; never writes an allocation directly |
-
-### `supply` — who we have
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `Candidate` | The person | Category, base assignment, availability confidence (M5 writes, M6 reads) |
-| `Credential` | A registration or qualification | Issuer, validity period, verification method. **Shared across both bases** — one record, not two. |
-| `CandidateDocument` | CVs, ID scans, certificates | OCR-extracted text attaches here with per-field confidence |
-| `VerificationCase` | One check | Green / amber / red, with pendency tracking |
-| `CategoryAttributeDefinition` / `CategoryAttributeValue` | Per-category fields | Configuration, not columns. Served to app, Ops, M3 and M6 from one place so they cannot drift. |
-| `Application` | What the candidate applied for | |
-| `ShiftAcceptance` | A shift the candidate agreed to work | |
-| `DuplicateCandidate` | Two records that look like one person | Merge never deletes either record |
-| `MigrationBatch` / `MigrationRecord` / `MigrationException` | CPAL import | Placeholder sizing until profiling runs (`OI-A-02`) |
-
-### `engage` — staying in touch
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `NotificationTemplate` | Message text per channel | WhatsApp templates need provider approval first — **weeks of calendar time** |
-| `NotificationLog` | One row per message per person | Delivery outcome and cost |
-| `ContactPreference` / `OptOut` | Channels the candidate accepts | Every send must respect this |
-| `Segment` / `CadenceRule` | Who to contact and how often | Base B: whole base every 3–4 days |
-| `AvailabilityResponse` | The reply | **One schema** whether it came from WhatsApp, app or phone call |
-| `VoiceCall` / `VoiceTranscript` | Automated call log | |
-| `AvailabilityConfidence` | Freshness score | Lives on the candidate, written here, read by matching |
-
-### `match` — who fits
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `RankedSet` | One ranked list for one requisition or shift | Records which weight set produced it and when |
-| `RankEntry` | One candidate in that list | Score, **why**, and what they do not meet |
-| `WeightSet` | How much each factor counts | Per category per base — **at least six**. Model unspecified (`OI-A-11`). |
-| `RecruiterOverride` | Manual move up or down, with reason | Append-only |
-| `SavedSearch` / `TalentSegment` | Reusable searches and groups | Segments shared with engagement |
-| `OutcomeSignal` | Rejection reasons and outcomes from M7 | Fed back into the next ranking run |
-
-### `select` — choosing and offering
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `Interview` | Slot, format, panel, state | Neither candidate nor client has a login — slots are proposed via links/app |
-| `InterviewFeedback` | Structured feedback | **Fixed fields, not free text** — free text cannot feed back into ranking |
-| `SelectionDecision` | Accept / hold / reject | Rejection reason mandatory, from a configured taxonomy |
-| `Offer` / `OfferVersion` | The document | Picked by state, role and skill. Expiry and reminders. |
-
-### `place` — working
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `Placement` | The person in the job | The 90-day clock hangs off this |
-| `DropOut` | Did not join, or left early | Position returns to M3 as open |
-| `TrialEvent` | Day 0 / 7 / 30 / 60 / 90 check-in | Both candidate side and client side |
-| `TrialResponse` | The answers | Attendance, pay timeliness, preceptor, accommodation |
-| `RetentionRecord` | **The day-90 answer** | Or the deemed version. This is the evidence behind the permanent invoice. Immutable. |
-| `ShiftAttendance` | Check-in and check-out | Location recorded, **not enforced** in R1 (enforcement is M12) |
-| `Timesheet` | A period of shifts | Carries a client approval state |
-| `AssociateProfile` / `StatutoryForm` / `OnboardingChecklist` | M11 | Blocks payroll if incomplete |
-| `WorkforceRequest` / `SalaryRevision` / `SalaryAdvance` / `SalaryHold` / `GeoFence` | M12 | All through the approval engine |
-
-### `bill` — money
-
-| Entity | Purpose | Notes |
-|---|---|---|
-| `BillingTrigger` | The evidence that allowed the invoice | Day-90 confirmation, or approved timesheet. Immutable, queryable years later. |
-| `Invoice` / `InvoiceLine` | Two kinds: placement fee, shift invoice | |
-| `Receivable` | Money owed | **This is where R1 stops.** |
-| `Payment` / `PaymentAllocation` / `CreditNote` / `DebitNote` / `DunningSchedule` | M15 | Part-payments, TDS, ageing, chasing |
-| `PayrollCycle` / `PayrollInput` / `PayrollOutput` / `StatutoryReport` | M13 | We do not calculate pay |
-
-### `report` — measuring
-
-| Entity | Purpose |
+| Rule | Detail |
 |---|---|
-| `ReportingEvent` | Events from every module, reshaped |
-| Projection tables | Funnel, fill rate, time-to-fill, trial survival, stage loss, channel/recruiter performance |
-| `RateBaseline` / `RateVariance` | Agreed rate vs standard, by client/role/specialty/acuity |
-
----
-
-## 4. State machines
-
-Every one of these is a transition table in the owning module's spec. Reproduced here as the master
-list — **if a state appears here it must exist in code, and if it appears in code it must be here.**
-
-| Entity | States |
-|---|---|
-| `User` | `invited → active → deactivated` (deactivated cannot sign in, stays visible on past records) |
-| `Document` | `uploaded → scanned → available` \| `quarantined` |
-| `Client` | `draft → active → suspended → closed` |
-| `Contract` | `draft → active → renewed (new version) → expired` \| `terminated (reason)` |
-| `RateCardVersion` | `draft → in_effect → superseded` (never deleted) |
-| `InboundRecord` | `received → identified \| unmatched → parsed \| unparseable → consumed` |
-| `Requisition` | `incomplete \| complete → awaiting_client → complete → open → in_fulfilment → partially_filled → filled` |
-| `Requisition` (hold) | `in_fulfilment ⇄ on_hold` — **hold stops the age clock; release resumes from where it stopped, not zero** |
-| `Requisition` (close) | `any → closed` — reason from configured list is mandatory |
-| `Requisition` (M14) | gains `created → awaiting_approval → approved → open` \| `rejected` |
-| `Candidate` | `registered → profile_complete → verification_pending → verified \| partly_verified \| failed` |
-| `Credential` | `claimed → submitted → checking → verified(green) \| flagged(amber) \| rejected(red) → expired` |
-| `VerificationCase` | `queued → in_progress → resolved \| awaiting_registry \| manual_review` |
-| `Application` | `applied → shortlisted → interviewing → offered → joined` \| `rejected` \| `withdrawn` |
-| `MigrationBatch` | `staged → profiled → transformed → loaded → reconciled → cut_over` |
-| `MigrationRecord` | `extracted → mapped → loaded` \| `extracted → exception → resolved → loaded` \| `rejected(reason)` |
-| `AdapterCall` | `requested → responded(green\|amber\|red)` \| `failed → retried` \| `manual_fallback` |
-| `Notification` | `queued → sent → delivered` \| `failed → retried → abandoned` |
-| `AvailabilityConfidence` | `confirmed(full) → decaying → stale → reselected` |
-| `AvailabilityResponse` | `received → understood \| unclear(→human review) → confirmed` |
-| `VoiceCall` | `queued → dialling → connected → answered` \| `no_answer → retried` |
-| `RankedSet` | `generating → current → stale` (requisition changed or new outcome data) |
-| `RankEntry` | `ranked → shortlisted → sent_to_client → outcome_recorded` |
-| `Interview` | `proposed → confirmed → held → feedback_recorded` \| `rescheduled` \| `cancelled(reason)` |
-| `SelectionDecision` | `pending → accepted \| held \| rejected(reason)` |
-| `Offer` | `draft → generated → sent → opened → signed` \| `expired` \| `declined` → linked to contract |
-| `ClientLink` | `issued → sent → opened → answered` \| `expired → deemed_agreed` (**day-90 and timesheet types only**, and only after the contract window) |
-| `Placement` | `joined → in_trial → trial_survived \| trial_ended(reason)` |
-| `Placement` (drop) | `offered → dropped_out(reason)` → position returns to open in M3 |
-| `TrialEvent` | `scheduled → due → answered \| escalated_to_call \| missed` |
-| `ShiftAttendance` | `expected → checked_in → checked_out` \| `no_show` \| `issue_raised → resolved` |
-| `Timesheet` | `building → built → sent_for_approval → approved \| deemed_approved → invoiced` |
-| `Timesheet` (M15) | gains `built → internally_approved → sent_to_client → client_approved → invoiced` |
-| `BillingTrigger` | `pending → confirmed \| deemed_confirmed → used_by_invoice` |
-| `Invoice` | `draft → raised → exported` (R1 stops here) → M15: `part_paid → paid` \| `credited` |
-| `WorkforceRequest` | `drafted → submitted → approved \| rejected(reason) → applied` |
-| `SalaryHold` | `requested → approved → held → released` |
-| `AssociateProfile` | `not_started → in_progress → complete → verified` |
-| `StatutoryForm` | `pending → submitted → verified` \| `returned(reason)` |
-| `PayrollCycle` | `open → inputs_locked → sent_to_engine → results_received → payslips_issued → closed` |
-| `PayrollInput` | `draft → validated → sent` \| `rejected(reason)` |
-| `Payment` | `received → matched → (remainder unmatched)` |
-
-**Rule:** state transitions are executed only by the owning module's service, in a transaction, and
-every transition writes a `StatusTransition` (where the entity has one) and a domain event. No
-module sets another module's status column.
-
----
-
-## 5. Cross-module reference rules
-
-Foreign keys **within** a schema. Across schemas, hold the ID and read through the owning module's
-service.
-
-| Reference | Rule |
-|---|---|
-| `demand.requisition.client_id` → `clients.client` | ID only. Client details read via `ClientService.getById`. |
-| `match.rank_entry.candidate_id` → `supply.candidate` | ID only |
-| `bill.invoice.contract_version_id` → `clients.contract_version` | ID only — **and it is the version in force at trigger time**, resolved once and frozen on the invoice |
-| Anything → `platform.document` | ID only, via `FileService` |
-| Anything → `platform.user` | ID only, via `IamService` |
-
-Why: a foreign key across schemas is a hidden coupling that makes a module impossible to test or
-lift out. An ID plus a service call is explicit and mockable.
-
----
-
-## 6. Records that must never be mutated
-
-These are the ones that end up in front of a lawyer or an auditor:
-
-| Record | Why |
-|---|---|
-| `AuditEntry` | Compliance. Insert-only grant at the database role level. |
-| `EventStore` | Reporting integrity. A rewritten event silently rewrites history. |
-| `StatusTransition` | Conversion-loss reporting cannot be recomputed retrospectively. |
-| `AllocationRecord` | Who was put on what, and when. Corrections are new rows. |
-| `RetentionRecord` | **The billing trigger.** Must still make sense to someone querying a charge a year later. |
-| `BillingTrigger` | Same. |
-| `RecruiterOverride` | Explains why ranking was ignored. |
-| `AdapterCall` | Evidence of what an external actually returned. |
-| `LinkResponse` | What the client actually clicked, and when, and as whom. |
-
-Enforce with `REVOKE UPDATE, DELETE` on the table for the application role. Not a code convention —
-a database grant.
-
----
-
-## 7. Configuration, not columns
-
-Nine known configurable lists and windows (`02-03`). Adding an option must never require a release:
-
-close reason · hold reason · rejection reason · required fields per category · contact schedule ·
-retention confirmation window · timesheet approval window · follow-up window · market configuration
-
-Plus, per category: the attribute set itself (`03-05`), and per client: the three waiting periods
-(`03-02`).
-
-**A deactivated list entry stays readable on records that already used it.** Changing a setting never
-retrospectively alters records created under the old value.
-
+| Identifier | `uuid` v7 primary key named `id`; human references (`REQ-2026-000431`, `INV-…`) are separate generated columns |
+| Timestamps | `created_at`, `updated_at` (`timestamptz`, UTC); business dates are `date` in `Asia/Kolkata` |
+| Attribution | `created_by`, `updated_by` referencing `identity.user.id`, or the literal `'system'` principal |
+| Soft state | Reference data is deactivated, never deleted, and stays readable on records that used it (`M0-I5`) |
+| Candidate data | **Never deleted.** A losing duplicate is merged with lineage to both sources (`M1-I12`, `M4-I21`) |
+| Money | `numeric(14,2)` plus an ISO currency column; INR throughout Release 1 |
+| Versioned commercial records | `Contract`, `RateCard`, `Offer`, `WeightSet`, `CategoryAttributeSet` are versioned; readers resolve **by effective date**, never "latest" |
+| Snapshots | An invoice snapshots the terms it read; it does not re-resolve them later (`M9-I13`) |

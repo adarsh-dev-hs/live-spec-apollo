@@ -1,0 +1,104 @@
+---
+title: "04-15 Legacy CPAL"
+description: "The source system for the A10 migration: Apollo's existing candidate data, held in CPAL and current tooling."
+---
+
+**Package** `@apollo/migration` · **Schema** `migration` · **Plan** A10 · **Effort** within `03-13` · **Risk** High `DATA` · **Effort basis** unestablished · **Build in** Phase 1–2
+
+## 1. Purpose
+
+The source system for the A10 migration: Apollo's existing candidate data, held in CPAL and current
+tooling. Once the migrated data reconciles, **the platform becomes the system of record and CPAL is
+switched off.**
+
+**Nobody has seen this data.** Volume, completeness, duplicate rate and field mappability are all
+unknown, which is why every figure attached to A10 is a placeholder.
+
+## 2. Scope
+
+**In scope:** read access to the source; extraction into the staging tables; the mapping definition;
+delta extraction between the main load and cutover; a lineage reference from every loaded record back
+to its source record.
+
+**Explicitly out of scope:** the migration pipeline, screens and reconciliation (`03-13`); duplicate
+merging (`03-04` owns the merge, `03-13` calls it); cutover and retirement (`05-05`).
+
+**Explicitly not built:** two-way sync; writing anything back to CPAL; migrating clients, contracts or
+rate cards — nothing in the plan scopes those.
+
+## 3. Plan traceability
+
+Effort sits in `03-13` (`M1-I10`, `M1-I11`). This file specifies the source-side contract and what is
+unknown about it.
+
+## 4. Dependencies
+
+**Must exist first:** nothing in the codebase. **Access is the dependency.**
+
+**Consumed by:** `03-13`, and therefore `03-04`'s candidate base at go-live.
+
+**External:** `X20` — **legacy ATS data access, month 1.** *"The single largest unpriced item in the six
+months. Until profiling runs we do not know how many records there are, how complete they are or how
+many duplicates exist, so none of the migration can be estimated."*
+
+## 5. Data model
+
+Source shape **unknown**. The extraction contract is deliberately minimal so that whatever arrives can
+be staged before it is understood:
+
+```ts
+interface LegacySource {
+  extract(i: { since?: string; cursor?: string }): Promise<{
+    records: Array<{ sourceRef: string; payload: Record<string, unknown>; updatedAt?: string }>
+    cursor?: string
+    total?: number                              // may be unavailable
+  }>
+  listDocuments(sourceRef: string): Promise<Array<{ name: string; url: string }>>
+}
+```
+
+`migration.record.source_payload` stores **exactly what was extracted**, before any mapping, so a
+mapping mistake is recoverable without re-extracting.
+
+## 6. State machines
+
+`migration.batch` and `migration.record` (`03-13`). Source-side: **extraction is resumable by cursor**,
+because a source that cannot report a total also cannot be assumed to be stable mid-read.
+
+## 7. API surface
+
+**N/A** — extraction is a job, not an endpoint. If CPAL exposes no API, extraction is a database read or
+a file drop; **which one is unknown until access is granted**, and the contract above is satisfiable by
+any of the three.
+
+## 8. Events and jobs
+
+`migration.load` and `migration.delta` (`batch` class, `03-13`), checkpointed and resumable.
+
+## 9. Frontend
+
+**N/A** — the migration screens are `03-13`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Volume, quality and duplicate rate are **measured and documented** before any estimate is committed | `M1-I10` |
+| AC2 | A mapping feasibility assessment identifies **fields with no target** | `M1-I10` |
+| AC3 | The raw source payload is retained **before mapping**, so a mapping error is recoverable | `M1-I11` |
+| AC4 | **Every loaded record retains a reference to its source record** | `M1-I11` |
+| AC5 | Extraction is resumable and a re-run produces **no duplicate records** | `M1-I11` |
+| AC6 | A delta run picks up source changes between the main load and cutover | `M1-I11` |
+| AC7 | Migrated candidate documents land in `02-04` with residency and retention applied | `M0-I6`, `M4-I27` |
+| AC8 | Migrated candidates are flagged with a consent basis that **excludes them from cadence** until Apollo confirms | `02-12`, `OI-HS-02` |
+| AC9 | **The platform becomes system of record only after reconciliation passes** | `M1-I9`, `M1-I11` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-02` | **How much data is in CPAL, and what condition is it in?** | **A10 cannot be sized at all.** The figures in the plan are placeholders holding the shape. Apollo provides access; Hiresense runs the profiling. **The single largest unpriced item in the six months, and an estimate blocker.** | `M1-I10`, `M1-I11`, `M1-I12`, `M1-I2` |
+| `OI-A-03` | Migrated duplicates through the D3 mechanism or a one-time process | The D3 mechanism, called from `03-13`. The migration-side option is cheaper but **leaves no ongoing dedupe for the legacy base**. | `M1-A10`, `M4-D3` |
+| `X20` | Access for profiling — month 1 | Until it is granted, nothing here is estimable | All of A10 |
+| `OI-HS-64` **[raised here]** | **How is CPAL reached** — API, database, or a file export? | The contract above is satisfiable by all three, so the shape of the answer does not block design. **The content does.** | `M1-I11` |
+| `OI-HS-65` **[raised here]** | Do candidate documents exist in CPAL, and do they migrate? | Assumed yes and yes. If CVs and certificates do not come across, the migrated base arrives unverifiable and `03-04`'s verification queue faces a backlog nobody has sized. | `M1-I11`, `M4-I11` |

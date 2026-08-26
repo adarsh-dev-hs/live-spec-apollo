@@ -1,352 +1,184 @@
 ---
-title: "01-02 · Backend Conventions"
-description: "Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino"
+title: "01-02 Backend conventions"
+description: "Fastify 5 on Node 22, TypeScript strict, no ORM. These rules are assumed by every spec's §7 API surface and §8 events and jobs."
 ---
 
-Express 5 · TypeScript · Drizzle · Zod · BullMQ · Pino
+**Package** `@apollo/api`, `@apollo/worker` · **Schema** all · **Plan** D11 · **Effort** — · **Risk** Low · **Build in** Phase 1
 
----
+Fastify 5 on Node 22, TypeScript strict, **no ORM**. These rules are assumed by every spec's §7 API
+surface and §8 events and jobs.
 
 ## 1. The four layers
 
-| Layer | Job | May import | Must never |
-|---|---|---|---|
-| **Route** | Path → middleware → controller | controllers, middleware, contracts | contain logic |
-| **Controller** | HTTP in, HTTP out | own service, own contracts | touch a repository, call another module's service |
-| **Service** | Business logic, transaction boundary, events | own repos, own services, other modules' **exported** services, platform packages | see `req`/`res`, touch another module's repository |
-| **Repository** | SQL. The only layer that touches the database. | db client, own schema | contain business rules, call a service |
-
-**The single most important rule:** a service never receives `req` or `res`. That is what makes the
-same service callable from HTTP, from a queue consumer, and from a test without adaptation.
-
----
-
-## 2. Route
-
-```ts
-// src/routes.ts
-import { Router } from 'express'
-import { requirePermission, requireAuth } from '@apollo/iam'
-import { validate } from '@apollo/shared-http'
-import * as c from './controllers/requisition.controller'
-import * as s from './contracts/requisition.contract'
-
-export const router = Router()
-
-router.use(requireAuth())
-
-router.get('/',
-  requirePermission('demand.requisition.read'),
-  validate({ query: s.listRequisitionsQuery }),
-  c.list)
-
-router.post('/:id/hold',
-  requirePermission('demand.requisition.hold'),
-  validate({ params: s.idParam, body: s.holdRequisitionBody }),
-  c.hold)
+```
+route      validate input · resolve principal · call one service · shape one response   (no logic)
+service    business rules · owns the transaction · writes audit · emits events           (no SQL)
+repository hand-written SQL · maps rows to domain types                                  (no rules)
+domain     entities, state machines, invariants — pure, no I/O, unit-tested alone
 ```
 
-Paths and middleware. Nothing else. If a route file has an `if`, it is wrong.
+A route that contains an `if` about business state is in the wrong layer. A repository that decides
+anything is in the wrong layer.
 
----
+## 2. Route definition
 
-## 3. Controller
-
-```ts
-// src/controllers/requisition.controller.ts
-import type { RequestHandler } from 'express'
-import { RequisitionService } from '../services/requisition.service'
-import { ok, created } from '@apollo/shared-http'
-
-export const hold: RequestHandler = async (req, res) => {
-  const result = await RequisitionService.hold({
-    requisitionId: req.params.id,
-    reasonCode:    req.body.reasonCode,
-    note:          req.body.note,
-    actor:         req.actor,          // { userId, roles, siteIds, clientId? }
-  })
-  ok(res, result)
-}
-```
-
-Controllers do exactly four things: read validated input, build an actor, call one service method,
-shape the response. No `try/catch` — errors propagate to the central mapper (§8).
-
----
-
-## 4. Service
+Schema-first. The JSON Schema that validates the request is the same object that generates the
+OpenAPI document (`01-04`), so the contract cannot drift from the handler.
 
 ```ts
-// src/services/requisition.service.ts
-export const RequisitionService = {
-  async hold(input: HoldInput): Promise<Requisition> {
-    return withTransaction(async (tx) => {
-      const req = await requisitionRepo.findByIdForUpdate(tx, input.requisitionId)
-      if (!req) throw new NotFoundError('requisition', input.requisitionId)
+// modules/requisitions/src/routes/hold-requisition.ts
+import { HoldRequisitionBody, RequisitionResponse } from '@apollo/contracts'
 
-      assertTransition(req.status, 'on_hold')                    // state machine, not an if-chain
-
-      const reason = await config.assertListEntry('demand.hold_reason', input.reasonCode)
-
-      const updated = await requisitionRepo.update(tx, req.id, {
-        status: 'on_hold',
-        ageClockPausedAt: now(),                                  // hold stops the age clock
-      })
-
-      await statusTransitionRepo.append(tx, {
-        requisitionId: req.id, from: req.status, to: 'on_hold',
-        reasonCode: reason.code, actorId: input.actor.userId,
-      })
-
-      await audit.record(tx, {
-        entity: 'requisition', entityId: req.id, action: 'hold',
-        actor: input.actor, before: { status: req.status }, after: { status: 'on_hold' },
-      })
-
-      await events.emit(tx, 'demand.requisition.held', {
-        requisitionId: req.id, reasonCode: reason.code, at: now(),
-      })
-
-      return updated
+export const holdRequisition: FastifyPluginAsyncZod = async (app) => {
+  app.post('/v1/requisitions/:id/hold', {
+    schema: {
+      operationId: 'holdRequisition',
+      tags: ['requisitions'],
+      params: RequisitionIdParams,
+      body: HoldRequisitionBody,
+      response: { 200: RequisitionResponse, 409: ProblemDetails },
+    },
+    preHandler: [app.authenticate, app.requirePermission('requisition:hold')],
+  }, async (req, reply) => {
+    const requisition = await app.services.requisitions.hold({
+      requisitionId: req.params.id,
+      reasonId: req.body.reasonId,
+      actor: req.principal,
     })
-  },
+    return reply.send(requisition)
+  })
 }
 ```
 
-Note the shape — it is the same in every service:
+Rules: `operationId` on every route (the client generator uses it); every route declares its error
+responses; `preHandler` carries auth and permission — **never** an `if` inside the handler;
+one service call per route.
 
-1. Open a transaction
-2. Load with `FOR UPDATE` if you are about to change state
-3. Assert the transition against the state machine
-4. Validate against configuration (never a hardcoded list)
-5. Mutate
-6. Append to the immutable trail
-7. Audit
-8. Emit the event **inside the transaction** (outbox)
-9. Return
+## 3. Services and transactions
 
-**Steps 6–8 are not optional.** A state change without a transition row is unreportable, without an
-audit row is indefensible, and without an event is invisible to M9.
-
----
-
-## 5. Repository
+A service method is one unit of work. It opens one transaction and the audit write and the event
+outbox write happen inside it.
 
 ```ts
-// src/repositories/requisition.repository.ts
-export const requisitionRepo = {
-  findByIdForUpdate: (tx: Tx, id: string) =>
-    tx.select().from(requisition).where(eq(requisition.id, id)).for('update').then(one),
+async hold({ requisitionId, reasonId, actor }: HoldInput): Promise<Requisition> {
+  return this.db.tx(async (tx) => {
+    const current = await this.repo.findForUpdate(tx, requisitionId)
+    if (!current) throw new NotFoundError('requisition', requisitionId)
 
-  list: (tx: Tx, filter: ListFilter, scope: Scope) =>
-    applyScope(                                    // row-level scoping — see 01-07
-      tx.select().from(requisition).where(buildWhere(filter)),
-      scope,
-    ),
+    // domain layer decides — pure, testable without a database
+    const next = requisitionMachine.apply(current, { type: 'HOLD', reasonId, at: actor.now })
+
+    await this.repo.updateState(tx, next)
+    await this.repo.insertStatusTransition(tx, {          // append-only (M3-I28)
+      requisitionId, from: current.status, to: next.status, actor: actor.id, at: actor.now,
+    })
+    await this.audit.record(tx, {                          // 02-02, same transaction
+      entity: 'requisition', entityId: requisitionId, action: 'hold',
+      actor, before: current, after: next,
+    })
+    await this.events.emit(tx, 'demand.requisition.held', { // 02-11 outbox, same transaction
+      requisitionId, clientId: next.clientId, reasonId, at: actor.now,
+    })
+    return next
+  })
 }
 ```
 
-Repositories return plain rows. **No business rules and no mapping to other modules' shapes.**
-If a repository has a `switch`, the logic belongs in the service.
-
-Every list repository takes a `Scope` and applies it. Scoping is not the controller's job, because a
-new caller must not be able to forget it.
-
----
-
-## 6. Transactions
-
-```ts
-await withTransaction(async (tx) => { ... })
-```
-
-| Rule | |
+| Rule | Why |
 |---|---|
-| One service method = one transaction | Nested calls join the parent, never open a second |
-| The transaction is opened in the service, never in a controller or repository | |
-| Events go to the outbox **inside** the transaction | An event for a rolled-back change is a lie |
-| No external HTTP call inside a transaction | Enqueue a job instead — an adapter timeout must not hold a row lock |
-| No `await` on something slow inside a transaction | Same reason |
+| One transaction per service method, never nested | Predictable rollback |
+| Audit and event writes are **inside** the transaction | An action that happened but was not recorded is worse than one that failed |
+| No HTTP call inside a transaction | A provider timeout must not hold a row lock. Enqueue a job instead. |
+| `SELECT … FOR UPDATE` before any state transition | Two recruiters pressing Hold at once |
+| Idempotency key on every externally triggered write | Webhook redelivery is normal (`M3-I18`) |
 
-Cross-module writes in one transaction are **not allowed**. If placing a candidate must also close a
-requisition, `placements` commits the placement and emits `place.placement.created`; `requisitions`
-subscribes and closes in its own transaction. Eventually consistent, and the seam is visible.
+## 4. No ORM — what replaces it
 
----
-
-## 7. Validation
-
-Zod at every boundary. One schema per shape, in `contracts/`, and the type is inferred from it —
-never hand-written alongside it.
+`pg` (node-postgres) with a thin `@apollo/db` layer. Nothing generates SQL.
 
 ```ts
-export const holdRequisitionBody = z.object({
-  reasonCode: z.string().min(1),
-  note:       z.string().max(2000).optional(),
-})
-export type HoldRequisitionBody = z.infer<typeof holdRequisitionBody>
-```
-
-Validate: HTTP request (params, query, body), job payloads, webhook payloads, external adapter
-responses, and environment variables at boot.
-
-**Adapter responses especially.** An external supplier changing a field silently is one of the more
-likely failure modes on this project, and a zod parse turns it into a clear error at the boundary
-instead of `undefined` three layers in.
-
----
-
-## 8. Errors
-
-One error hierarchy, one mapper, no `try/catch` in controllers.
-
-```ts
-export class AppError extends Error {
-  constructor(
-    readonly code: string,        // machine-readable: 'requisition.invalid_transition'
-    readonly status: number,
-    message: string,
-    readonly details?: unknown,
-  ) { super(message) }
+// modules/requisitions/src/repositories/requisition-repository.ts
+export class RequisitionRepository {
+  async findBoardRows(tx: Queryable, filter: BoardFilter): Promise<BoardRow[]> {
+    const { rows } = await tx.query<BoardRowDto>(sql`
+      SELECT r.id, r.reference, r.status, r.category, r.care_setting,
+             r.positions_requested, r.positions_filled,
+             r.positions_requested - r.positions_filled AS positions_open,
+             r.days_aged, r.rate_matched,
+             c.name AS client_name, l.name AS location_name,
+             owner.full_name AS owner_name,
+             COALESCE(a.recruiters, '[]'::jsonb) AS allocated_recruiters
+        FROM demand.requisition r
+        JOIN clients.client   c     ON c.id = r.client_id
+        JOIN clients.location l     ON l.id = r.location_id
+        LEFT JOIN identity.user owner ON owner.id = r.owner_id
+        LEFT JOIN LATERAL (
+              SELECT jsonb_agg(jsonb_build_object('id', u.id, 'name', u.full_name)) AS recruiters
+                FROM demand.allocation_record ar
+                JOIN identity.user u ON u.id = ar.recruiter_id
+               WHERE ar.requisition_id = r.id AND ar.removed_at IS NULL
+        ) a ON TRUE
+       WHERE r.status = ANY(${filter.statuses})
+         AND (${filter.clientId}::uuid IS NULL OR r.client_id = ${filter.clientId})
+         AND (${filter.unallocatedOnly} = FALSE OR a.recruiters IS NULL)
+         AND r.location_id = ANY(${filter.scopeLocationIds})   -- data scope, never optional
+       ORDER BY r.days_aged DESC
+       LIMIT ${filter.limit} OFFSET ${filter.offset}
+    `)
+    return rows.map(toBoardRow)
+  }
 }
-
-export class NotFoundError      extends AppError {}  // 404
-export class ValidationError    extends AppError {}  // 422
-export class ConflictError      extends AppError {}  // 409
-export class ForbiddenError     extends AppError {}  // 403
-export class ExternalError      extends AppError {}  // 502 — always includes adapterCallId
-export class InvalidTransition  extends ConflictError {}
 ```
 
-The mapper is the last middleware. It logs with the request id, maps to the wire format in `01-04`,
-and **never leaks a stack trace or a SQL string** to a client.
+| Rule | Detail |
+|---|---|
+| Every query is parameterised through the `sql` tagged template | String concatenation of user input is a build failure (lint rule) |
+| One repository per aggregate, one method per query shape | The fulfilment board's query is written once, not assembled |
+| **No N+1.** A list endpoint issues exactly one query | Use `LATERAL` + `jsonb_agg` for children, as above |
+| Row DTO → domain type mapping is explicit (`toBoardRow`) | `snake_case` never leaks past the repository |
+| Repositories accept a `Queryable` (pool or transaction) as the first argument | The service decides the transaction, not the repository |
+| Query timeout: 5s interactive, 60s job | A slow board query fails visibly instead of hanging the console |
+| `EXPLAIN ANALYZE` in the PR description for any new query over a table expected past 100k rows | Migrated base volume is unknown (`OI-A-02`) |
 
-Rules:
-- Throw domain errors from services. Do not return `null` to mean "forbidden".
-- Never catch an error only to re-throw a vaguer one.
-- Catch only where you can genuinely handle it — an adapter fallback, a retry decision.
+## 5. Errors
 
----
+`@apollo/errors` defines the taxonomy; every route returns RFC 9457 Problem Details (`01-04`).
 
-## 9. State machines
+| Class | HTTP | Use |
+|---|---|---|
+| `ValidationError` | 400 | Schema or business validation, with `errors[]` naming each field |
+| `AuthenticationError` | 401 | No or invalid principal |
+| `PermissionError` | 403 | Authenticated but not allowed — never leaks whether the record exists |
+| `NotFoundError` | 404 | Also returned instead of 403 where existence itself is sensitive |
+| `ConflictError` | 409 | Illegal state transition, duplicate, concurrent edit |
+| `PreconditionError` | 422 | Valid request the domain refuses — "close requires a reason" (`M3-I15`) |
+| `UpstreamError` | 502 | A named provider failed; `retryable` boolean decides whether the job retries |
+| `UpstreamUnavailableError` | 503 | Provider down; routes to the manual fallback (`02-13`) rather than failing the candidate |
 
-Declared as data, never as scattered `if`s.
+Never throw a bare `Error` in a service. Never catch and swallow. An unexpected error is a 500 with a
+correlation id and a full log entry, and the response body carries nothing else.
+
+## 6. Logging, tracing, config
+
+- Structured JSON via `@apollo/observability` (pino). **Never** log personal data: no name, phone,
+  email, Aadhaar, PAN, bank details or document content. Log ids.
+- Every request carries `x-correlation-id`, generated if absent, propagated into jobs and provider
+  calls, and returned on the response.
+- OpenTelemetry spans around HTTP handlers, SQL calls, queue handlers and provider calls. Provider
+  spans record cost units — conversations, minutes, pages, checks — because `OI-HS-05` needs them.
+- Config is read **once** at boot through `@apollo/config`, Zod-validated, and fails to start on a
+  missing variable. `process.env` appears nowhere else.
+- Secrets come from AWS Secrets Manager at boot; nothing is baked into an image.
+
+## 7. Async work
+
+Anything that calls a provider, takes more than 200ms, or must survive a restart is a job (`02-10`),
+never a floating promise. Fire-and-forget is a lint failure.
 
 ```ts
-// src/internal/requisition.states.ts
-export const requisitionTransitions = {
-  incomplete:      ['awaiting_client', 'complete', 'closed'],
-  awaiting_client: ['complete', 'incomplete', 'closed'],
-  complete:        ['open', 'closed'],
-  open:            ['in_fulfilment', 'on_hold', 'closed'],
-  in_fulfilment:   ['partially_filled', 'filled', 'on_hold', 'closed'],
-  on_hold:         ['in_fulfilment', 'closed'],
-  partially_filled:['filled', 'in_fulfilment', 'on_hold', 'closed'],
-  filled:          ['closed'],
-  closed:          [],
-} as const satisfies TransitionMap<RequisitionStatus>
+// wrong — lost on deploy, invisible when it fails
+void this.whatsapp.send(message)
+
+// right — retried, dead-lettered, observable, and it survives a restart
+await this.jobs.enqueue('messaging.send', { messageId }, { idempotencyKey: messageId })
 ```
-
-`assertTransition(from, to)` throws `InvalidTransition`. The table is exported so tests can assert
-every path in the spec's state table exists, and that nothing else does.
-
-**Only the owning module transitions its own entities.** No module writes another's status column.
-
----
-
-## 10. Configuration over constants
-
-Anything a business user might ever want to change is a setting, not a constant:
-
-```ts
-const days = await config.get('demand.follow_up_window_days', { clientId: req.clientId })
-```
-
-`config.get` resolves per-client override → platform default → throws if neither exists. Nine known
-settings are listed in `02-03`. A hardcoded reason list, waiting period or threshold anywhere in a
-module is a review rejection.
-
----
-
-## 11. Time, money, IDs
-
-| | Rule |
-|---|---|
-| Time | **Always UTC** in the database (`timestamptz`). Convert at the edge. `Asia/Kolkata` for display and for "which day is this shift". |
-| Business dates | `date` columns for things that are a day, not an instant (joining date, contract effective date) |
-| Money | `numeric(14,2)` + a `currency` column. **Never floats.** Arithmetic in SQL or `decimal.js`, never in JS numbers. |
-| Percentages | `numeric(6,3)`. The placement fee is 5–6% of salary; rounding matters on a real invoice. |
-| IDs | UUID v7 (time-sortable) generated in the application, not the database — so a service knows the id before insert and can build the event payload |
-| Human refs | Separate readable column where users need one: `REQ-2026-00142`, `INV-2026-00087`. Sequence-backed, never the primary key. |
-
----
-
-## 12. Logging
-
-Pino, JSON, one line per event. Never `console.log`.
-
-```ts
-logger.info({ requisitionId, from, to, actorId }, 'requisition status changed')
-```
-
-| Level | Use |
-|---|---|
-| `error` | Something broke and a human should look |
-| `warn` | Degraded: adapter fallback taken, retry exhausted, deemed window applied |
-| `info` | State changes, job start/finish, external calls |
-| `debug` | Local only |
-
-**Never log:** passwords, OTPs, tokens, full documents, Aadhaar/PAN numbers, bank details, or the raw
-body of an inbound message containing personal data. Redaction list is configured in the logger, not
-left to each call site.
-
-Every log line carries `requestId` (HTTP) or `jobId` (worker), propagated through async context.
-
----
-
-## 13. Idempotency
-
-Assume everything runs twice, because it will.
-
-| Surface | Mechanism |
-|---|---|
-| Webhooks | Provider message id → Redis `SETNX` with 7-day TTL, then a unique DB constraint as the backstop |
-| Jobs | `jobId` = deterministic hash of the meaningful inputs. BullMQ drops duplicates. |
-| Mutating API | `Idempotency-Key` header supported on POST for invoices, offers and messages |
-| Migration | Re-running a completed batch produces **no duplicate records** — a stated acceptance criterion |
-| Invoicing | Unique constraint on `(billing_trigger_id)`. One trigger can only ever produce one invoice. |
-
----
-
-## 14. Performance
-
-| Rule | |
-|---|---|
-| No `SELECT *` across a join in a list endpoint | Select the columns the screen needs |
-| No N+1 | Batch-load with `inArray`, or a `DataLoader` for composed responses |
-| Every list endpoint is paginated | No unbounded queries, ever. Default 25, max 200. |
-| Every filter column has an index | And the migration that adds the filter adds the index |
-| Reports read projections, never the operational tables | `02-09` |
-| Exports over ~5k rows are a job producing an S3 link, not a synchronous response | `02-06` |
-
-Latency and load targets for ingestion, the unmatched queue and the fulfilment board are
-**unspecified (`OI-M3-14`)**. Working assumption `AS-14`: p95 &lt; 500ms for list screens, &lt; 2s for the
-fulfilment board, and inbound visible in the queue within 60s of receipt. Revise when Apollo answers.
-
----
-
-## 15. What gets rejected in review
-
-- A controller that touches a repository
-- A service that takes `req`
-- A cross-module import of anything but a package root
-- A hardcoded reason, threshold or waiting period
-- A state change with no transition row, audit entry or event
-- An external HTTP call inside a transaction
-- An unpaginated list endpoint
-- A float used for money
-- A `catch` that swallows
-- A new list screen not using `<DataTable/>` (`02-06`)
-- A new external call not behind a port (`02-12`)
-- Personal data in a log line
-

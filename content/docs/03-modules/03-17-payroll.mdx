@@ -1,0 +1,231 @@
+---
+title: "03-17 Payroll"
+description: "Paying the shift workers. This connects the platform to a third-party payroll engine — we do not build a payroll calculator."
+---
+
+**Package** `@apollo/payroll` · **Schema** `payroll` · **Plan** D24 · **Effort** ~35.0pd · **Risk** High `EXT` · **Build in** Phase 7
+
+## 1. Purpose
+
+Paying the shift workers. This connects the platform to a **third-party payroll engine — we do not
+build a payroll calculator**. It assembles the inputs the engine needs, configures the pay cycle, takes
+the results back, produces the PF and ESIC reports and challans, and delivers payslips in the app and
+over WhatsApp.
+
+Until this exists payroll is done by hand, which puts **a hard ceiling on how many shift workers Apollo
+can take on** (`OI-A-16`). It is the last milestone and sits behind three others, so it is the item most
+exposed to everything upstream.
+
+## 2. Scope
+
+### In scope
+
+- Pay run: open a cycle, lock inputs, send, receive results, issue payslips, close
+- Payroll settings: cycle frequency, cut-off dates, field mapping to the engine, deduction rates
+- Statutory reports: PF and ESIC reports and challans for a period
+- Payslips in the app and over WhatsApp
+- The engine integration boundary: assemble inputs, take back outputs, report exceptions
+
+### Explicitly out of scope
+
+- The payroll engine itself — `04-14`. Hirecraft and PayBooks are the candidates; **not chosen**.
+- Approved timesheets, salary revisions, advances and holds — `03-10`, `03-19`, `03-16` produce them.
+- Onboarding completeness — `03-15` gates the run.
+- The app payslip screen's shell — `03-05`; this module owns the screen.
+
+### Explicitly not built
+
+- **Calculating pay.** A third-party engine does that.
+- **Submitting statutory filings.** Reports and challans are produced; someone else files them.
+- Payroll for permanent placements. Those people are the client's employees.
+- Reversing or re-running a closed cycle without an audited override.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M13-I1` | D24 | Pay run | L | 3.0 |
+| `M13-I2` | D24 | Payroll settings | L | 3.0 |
+| `M13-I3` | D24 | Statutory reports | L | 3.0 |
+| `M13-I4` | D24 | App: payslips | L | 3.0 |
+
+`M13-I5` (the engine integration) is `04-14`.
+
+**Specification basis:** named in Part A as D24 with its contents listed; no client module chapter. All
+items Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `03-10` and `03-19` (approved timesheets **including leave and overtime**),
+`03-15` (statutory forms — **payroll cannot run for an incomplete associate**), `03-16` (approved
+salary revisions, advances and holds), `02-09` (payslip delivery), `02-03`, `02-12` (encrypted bank
+details).
+
+**Consumed by:** `03-05` renders payslips; `03-10`'s manual export is **retired** once this connects.
+
+**External:** `04-14` payroll engine — **`X23`: choose the engine, sign the contract, obtain the field
+specification and sandbox credentials.** Last milestone, but the contract and field specification are
+needed well before build.
+
+## 5. Data model
+
+```sql
+CREATE TABLE payroll.settings (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    cycle_frequency text NOT NULL CHECK (cycle_frequency IN ('monthly','fortnightly','weekly')),
+    cut_off_day integer NOT NULL,
+    pay_day integer NOT NULL,
+    engine_code text,                          -- 'hirecraft' | 'paybooks' | … — not chosen
+    field_mapping jsonb NOT NULL,              -- platform field → engine field; changes without a release
+    deduction_rates jsonb NOT NULL,            -- statutory rates as CONFIGURATION, updatable without a release
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE payroll.cycle (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    period_start date NOT NULL, period_end date NOT NULL,
+    state text NOT NULL DEFAULT 'open' CHECK (state IN
+      ('open','inputs_locked','sent','results_received','payslips_issued','closed','failed')),
+    locked_at timestamptz, locked_by uuid,
+    sent_at timestamptz, results_received_at timestamptz, closed_at timestamptz,
+    reopened_reason text, reopened_by uuid,    -- an audited override
+    associate_count integer, blocked_count integer,
+    UNIQUE (period_start, period_end)
+);
+
+CREATE TABLE payroll.input (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    cycle_id uuid NOT NULL REFERENCES payroll.cycle(id),
+    associate_profile_id uuid NOT NULL,
+    -- FROZEN at lock, so what was sent matches what was recorded
+    hours numeric(8,2), rate numeric(14,2),
+    timesheet_ids uuid[] NOT NULL DEFAULT '{}',
+    salary_revision_id uuid, advance_recovery numeric(14,2) NOT NULL DEFAULT 0,
+    is_held boolean NOT NULL DEFAULT false,
+    adjustments jsonb NOT NULL DEFAULT '[]'::jsonb,
+    state text NOT NULL DEFAULT 'draft'
+      CHECK (state IN ('draft','validated','sent','rejected','accepted')),
+    rejection_reason text,                     -- from the engine, correctable and resendable
+    UNIQUE (cycle_id, associate_profile_id)
+);
+
+CREATE TABLE payroll.output (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    cycle_id uuid NOT NULL REFERENCES payroll.cycle(id),
+    payroll_input_id uuid NOT NULL UNIQUE REFERENCES payroll.input(id),
+    gross numeric(14,2), deductions jsonb, net numeric(14,2),
+    payslip_document_id uuid,
+    received_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE payroll.blocked_associate (       -- who cannot be paid, and why (M11-I5)
+    cycle_id uuid NOT NULL REFERENCES payroll.cycle(id),
+    associate_profile_id uuid NOT NULL,
+    reason text NOT NULL,                      -- incomplete onboarding, missing document, hold
+    override_request_id uuid,                  -- an override requires approval and is audited
+    PRIMARY KEY (cycle_id, associate_profile_id)
+);
+
+CREATE TABLE payroll.statutory_report (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    cycle_id uuid NOT NULL REFERENCES payroll.cycle(id),
+    report_type text NOT NULL CHECK (report_type IN ('pf_ecr','esic_return','pf_challan','esic_challan')),
+    document_id uuid NOT NULL,
+    reconciles_to_cycle boolean NOT NULL,      -- must reconcile to the run it came from
+    generated_at timestamptz NOT NULL DEFAULT now(), generated_by uuid NOT NULL
+);
+```
+
+## 6. State machines
+
+### `PayrollCycle` (`M13-I1`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | period opens | `open` | Inputs accumulate |
+| `open` | lock | `inputs_locked` | **Cannot lock while associates are blocked on incomplete onboarding.** Inputs are frozen so what is sent matches what is recorded |
+| `inputs_locked` | send to engine | `sent` | Through `04-14` |
+| `sent` | results returned | `results_received` | **Every person sent is accounted for, or reported as an exception** |
+| `results_received` | payslips issued | `payslips_issued` | App and WhatsApp, through `02-09` |
+| `payslips_issued` | closed | `closed` | |
+| `closed` | reopened | `open` | **Requires an audited override** |
+
+### `PayrollInput`
+
+`draft → validated → sent → accepted`, or `rejected` by the engine **with its reason, correctable and
+resendable**.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST` | `/v1/payroll/cycles` | `payroll:manage` | List and open |
+| `GET` | `/v1/payroll/cycles/:id/inputs` | `payroll:read` | Assembled inputs before lock |
+| `GET` | `/v1/payroll/cycles/:id/blocked` | `payroll:read` | **Who cannot be paid and why, before the run** |
+| `POST` | `/v1/payroll/cycles/:id/lock` | `payroll:manage` | 422 while blocked associates remain |
+| `POST` | `/v1/payroll/cycles/:id/send` | `payroll:manage` | |
+| `POST` | `/v1/payroll/cycles/:id/inputs/:inputId/correct` | `payroll:manage` | Fix a rejection and resend |
+| `POST` | `/v1/payroll/cycles/:id/issue-payslips` · `/close` · `/reopen` | `payroll:manage` | Reopen requires an override |
+| `GET`/`PUT` | `/v1/payroll/settings` | `payroll:manage` | Cycle, cut-off, field mapping, deduction rates |
+| `POST` | `/v1/payroll/cycles/:id/statutory-reports` | `payroll:manage` | Generate PF/ESIC reports and challans |
+| `GET` | `/v1/me/payslips` | candidate | Their own payslips by period |
+
+## 8. Events and jobs
+
+**Events emitted:** `payroll.cycle.locked` · `.sent` · `.results_received` · `.closed` · `.reopened` ·
+`payroll.input.rejected` · `payroll.payslip.issued` · `payroll.statutory_report.generated`.
+
+**Events subscribed:** `timesheets.timesheet.approved` and `.deemed_approved` → assemble inputs;
+`workforce.request.applied` → apply approved revisions, advances and holds;
+`onboarding.associate.blocked` → add to the blocked list.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `payroll.assemble-inputs` | daily during an open cycle | From approved timesheets, revisions, advances and holds |
+| `payroll.evaluate-blocked` | before lock | Recomputes who cannot be paid |
+| `payroll.send-to-engine` | on send, `provider` class | Through `04-14` |
+| `payroll.issue-payslips` | on results | App and WhatsApp, **reusing `02-09`, not a separate sender** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Pay run — periods and states; lock, send, receive; **associates blocked from the run and why** | `/payroll` | `M13-I1` |
+| Payroll settings — frequency, cut-off, engine field mapping, deduction rates | `/admin/payroll` | `M13-I2` |
+| Statutory reports — PF and ESIC reports and challans, download | `/payroll/statutory` | `M13-I3` |
+| **App: payslips** — by period, open and download | mobile stack | `M13-I4` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | **A cycle cannot be locked while associates are blocked on incomplete onboarding** | `M13-I1`, `M11-I5` |
+| AC2 | Inputs are frozen at lock **so the figures sent match the figures recorded** | `M13-I1` |
+| AC3 | A rejected input from the engine is shown with its reason and can be corrected and resent | `M13-I1` |
+| AC4 | **A closed cycle cannot be reopened without an audited override** | `M13-I1` |
+| AC5 | Cycle frequency and cut-off are **configuration, not code** | `M13-I2` |
+| AC6 | Input mapping can change when the engine changes, **without touching the platform** | `M13-I2` |
+| AC7 | Statutory deduction rates come from configuration so they can be updated **without a release** | `M13-I2` |
+| AC8 | Reports reconcile to the pay run they were generated from | `M13-I3` |
+| AC9 | **Filing with the authorities is explicitly not in scope** | `M13-I3` |
+| AC10 | Generation is audited | `M13-I3` |
+| AC11 | A payslip is available in the app **and delivered over WhatsApp** | `M13-I4` |
+| AC12 | Payslip delivery reuses the messaging layer from M5, **not a separate sender** | `M13-I4` |
+| AC13 | A payslip document is retained and downloadable for past periods | `M13-I4` |
+| AC14 | A query routes to finance **without changing the payslip** | `M13-I4` |
+| AC15 | Inputs are assembled from approved timesheets, approved salary revisions, advances and holds | `M13-I5` |
+| AC16 | **Every person sent is accounted for in the results, or reported as an exception** | `M13-I5` |
+| AC17 | **We do not build a payroll calculator** | `M13-I5` |
+| AC18 | The `03-10` manual export is retired once this connects directly | `M8-I17` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `X23` | **Which payroll engine?** Hirecraft, PayBooks or another. Contract, field specification and sandbox credentials all outstanding | Behind an interface with a stub adapter, the same pattern as the registry adapters. **The contract and field specification are needed well before build, not in month six.** | `M13-I5`, all of `M13` |
+| `OI-A-16` | The contractual volume ceiling imposed by manual payroll | Until this ships, throughput is capped by hand-processing. The number bounds `03-10` and `03-11` and **should be stated, not discovered in month five.** | `M8-D22`, `M9-D25` |
+| — | **No client module chapter exists for D24** | Five items derived from the listed contents. Low confidence throughout. | All of `M13` |
+| `OI-HS-42` **[raised here]** | Who actually disburses the money — the engine, Apollo's bank, or a file to the bank? | Assumed: the engine returns net pay and Apollo disburses outside the platform. If the platform is expected to produce a bank payment file, that is an addition. | `M13-I5` |
+| `OI-HS-43` **[raised here]** | Payroll sits **last, behind three other modules**. If any of `03-15`, `03-16` or `03-19` slips, this slips with it | Stated in `00-05` as the most schedule-exposed item in the plan. If the contractual line matters commercially, this is the first thing to protect. | Delivery risk |

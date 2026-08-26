@@ -1,0 +1,86 @@
+---
+title: "04-12 App stores (Apple and Google)"
+description: "Publishing the candidate app. This is the only route by which shift attendance reaches the platform, so it sits directly on the contractual invoice chain — no app, no attendance,…"
+---
+
+**Package** `apps/mobile` (EAS) · **Schema** `n/a` · **Plan** D3 · **Effort** included in `M4-I1` · **Risk** High `EXT` · **Build in** Phase 2
+
+## 1. Purpose
+
+Publishing the candidate app. **This is the only route by which shift attendance reaches the platform**,
+so it sits directly on the contractual invoice chain — no app, no attendance, no timesheet, no shift
+invoice.
+
+The accounts must be **Apollo's**, which means the paperwork is Apollo's to complete, and **first
+submission is reviewed more slowly than later updates.**
+
+## 2. Scope
+
+**In scope:** the EAS Build and Submit pipeline; store metadata, screenshots and privacy declarations;
+release channels; OTA updates for JS-only changes; a placeholder build through review early to retire
+the risk.
+
+**Explicitly out of scope:** the app itself (`03-05`); push notification delivery (`02-09` via Expo).
+
+**Explicitly not built:** enterprise or sideloaded distribution; a web fallback for check-in — the plan
+is explicit that there is **no alternative attendance route**.
+
+## 3. Plan traceability
+
+No item of its own. Publishing is part of `M4-I1` and is named as a dependency of `M4-D3` and
+`M8-D22`.
+
+## 4. Dependencies
+
+**Must exist first:** `03-05`, `02-12` (the privacy declarations both stores require).
+
+**Consumed by:** `03-05`, and therefore `03-10` and the whole contractual chain.
+
+**External:** `X12` Google Play Console and `X13` Apple App Store Connect — **organisation enrolment in
+Apollo's legal name; Apple requires a D-U-N-S number from Dun & Bradstreet, which is not instant.**
+
+## 5. Data model
+
+**N/A**.
+
+## 6. State machines
+
+### Release
+
+`build (EAS) → submit → in review → approved | rejected → released`. A **rejection is calendar time no
+team size removes**, which is why a placeholder build goes through review in Phase 2 rather than
+discovering the review process in Phase 4.
+
+**OTA** for JS-only changes bypasses review entirely; native changes do not.
+
+## 7. API surface
+
+**N/A** — EAS CLI in GitHub Actions.
+
+## 8. Events and jobs
+
+**N/A** — release is a pipeline concern (`01-09`), not a runtime one.
+
+## 9. Frontend
+
+**N/A**.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Both store accounts are **held in Apollo's name**, not Hiresense's | `X12`, `X13` |
+| AC2 | A placeholder build passes review **before Phase 4**, retiring the first-submission risk | `OI-HS-08` |
+| AC3 | A JS-only fix reaches candidates by OTA **without a store review** | `OI-HS-08` |
+| AC4 | Privacy declarations match what `02-12` actually collects | `M4-I27` |
+| AC5 | Release from `main` is automated through EAS in the pipeline | `01-09` |
+| AC6 | A store rejection is visible as a delivery risk, not discovered at go-live | `00-05` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-08` | Native or cross-platform, and the store release cycle it implies | **Confirmed: React Native + Expo.** Store review remains calendar time. | `M4-D3` |
+| `X13` | Apple organisation enrolment needs a D-U-N-S number in Apollo's legal name | Obtained from Dun & Bradstreet; **not instant**. Week one. | `M4-I1` |
+| `X12` | Google Play Console account in Apollo's name | Week one | `M4-I1` |
+| `OI-HS-59` **[raised here]** | Minimum supported OS versions, and what proportion of the candidate base is below them? | iOS 15+ and Android 8+. The base is field healthcare workers on a wide range of devices; **if a meaningful share cannot install the app, the attendance chain has a coverage gap nothing else fills.** | `M4-I7` |

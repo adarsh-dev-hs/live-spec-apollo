@@ -1,0 +1,462 @@
+---
+title: "06-16 M9 — Billing, Revenue & Reporting"
+description: "Two separate jobs sit here. The first is billing: raise a permanent placement invoice once the client confirms at day 90 that the person is still there, and raise shift invoices from…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M9 · D8, A7, D25 (thin), D9, D28, A11 · Months 5–6*
+
+`Release 1` · `17 items` · `78 conditions` · `88.5pd` · `6 high risk` · `Ops/Admin`
+
+Two separate jobs sit here. The first is billing: raise a permanent placement invoice once the client confirms at day 90 that the person is still there, and raise shift invoices from approved timesheets. Both must keep the evidence that triggered them, because Apollo may be asked months later to justify a charge. The second is reporting: how many vacancies get filled, how fast, where candidates drop out, how each recruiter and each intake channel performs, and how the rate agreed compares to the standard rate. These two halves share nothing except the underlying event data and can be staffed separately.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D8 | Billing & receivables | Original R1 | M9 — Billing, Revenue & Reporting |
+> | D9 | Intelligence & analytics | Original R1 | M9 — Billing, Revenue & Reporting |
+> | D25 | Billing — auto-invoice | Thin slice from R2 | M9 — Billing, Revenue & Reporting |
+> | D28 | Analytics — performance & MIS | Moved from R2 | M9 — Billing, Revenue & Reporting |
+> | A7 | Retention-linked invoicing | New addition | M9 — Billing, Revenue & Reporting |
+> | A11 | Rate variance instrumentation | New addition | M9 — Billing, Revenue & Reporting |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M9 — Billing, Revenue & Reporting. Reproduced without alteration.*
+>
+> Generates the permanent placement invoice on the day-90 client-acknowledged retention record rather than at placement, holding that acknowledgement as an auditable trigger record capable of supporting a billing query, and generates shift-level invoices from the client-approved timesheet and contract for the contractual scope. It reports funnel and conversion, fill rate, time-to-fill, trial survival, stage-level conversion loss by client and by recruiter, channel and recruiter performance, the monthly MIS pack, and rate agreed against baseline by client, role, specialty and acuity.
+>
+> Deliverables: D8, A7, D25 (thin slice), D9, D28, A11
+>
+> Surfaces: Ops/Admin. The trigger record it depends on is produced by the A13 client link surface in M7.
+>
+> For team shape: this module holds two workstreams with no shared component beyond the underlying event data — a billing engine covering two distinct invoice paths, and a reporting layer. They can be staffed and sequenced independently.
+>
+> **OPEN** — Guarantee and replacement period. Invoicing at day 90 removes the need to reverse a pre-confirmation failure. What remains is a failure after day 90 inside a longer guarantee window. If the guarantee period is aligned to the 90-day trial, D25 debit and credit notes stay in the later release; if it is longer, that capability returns to Release 1. Apollo will confirm the period before estimation.
+>
+> **OPEN** — Collections and the finance system. The chain ends at invoice raised and receivable recorded. Payment receipt, reconciliation including part-payments and TDS, ageing, reminders and dunning, and credit and debit notes are all outside Release 1. The finance system invoices post to has not been named; Apollo will confirm. Regardless of the answer, build the invoice object addressable by API or file export so the target system attaches later without reopening the module.
+>
+> Hard dependency: D28 stage-level loss by recruiter cannot be produced without the D14 owner field in M3.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 9** — Billing trigger by line and by category. D8 and A7 fire on a day-90 confirmed retention record, which is built for permanent placement. A locum doctor bills per session against an approved timesheet, which is the D25 path. That permanent and locum use different triggers is not stated anywhere.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+Nothing is shared between the billing engine and the reporting layer except the event data underneath. They can be built by different people at the same time.
+
+### Records this milestone owns
+
+- Invoice, InvoiceLine — two kinds: a permanent placement fee (5-6% of salary), and a shift invoice.
+- BillingTrigger — the evidence that allowed the invoice: either the day-90 confirmation or the approved timesheet.
+- Receivable — money owed against the invoice. This is where the process stops in this contract.
+- ReportingEvent — events collected from every module and reshaped for reporting.
+- RateBaseline, RateVariance — the standard rate against what was actually agreed.
+
+### How records move
+
+- BillingTrigger: pending → confirmed by the client, or automatically treated as confirmed after the waiting period → used by an invoice
+- Invoice: draft → raised → sent to the finance system. A receivable opens.
+
+### Not in this milestone
+
+- Receiving payments, matching them off, part-payments, TDS, chasing overdue money, and credit or debit notes. All milestone M15.
+- The finance system itself. Nobody has said which one it is, so we build a generic export it can attach to later.
+- Forecasting demand. Not in this contract.
+- Any client-facing dashboard. Clients only see the links from M7 until the portal in M10.
+
+### Needs to exist first
+
+- M8 for the day-90 record and the approved timesheet. M7 for the client link that captures the confirmation. M2 for the contract terms read at the moment of invoicing. M3 for the owner field the recruiter reports need. Events from every module.
+
+### What breaks without it
+
+- Nothing inside the platform. The chain ends at invoice raised and money owed recorded.
+
+### Items — 17 to build · design 15.5pd, build 48.0pd, QA 25.0pd
+
+#### M9-I1 — Invoices
+
+`D8` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Finance.** Both kinds of invoice in one list, each linked to the evidence behind it.
+
+##### Screens to build
+
+1. **Invoices**
+  - Lists invoices with their client, type, value and state
+  - Opens an invoice and shows its lines
+  - Opens the record that allowed it to be raised
+
+##### Conditions it must satisfy
+
+- A permanent invoice links to the day-90 trigger record it fired against (Part A stage 17)
+- A shift invoice links to the approved timesheet it derives from (Part A contractual stage 10)
+- Each invoice records which contract version supplied its terms (M2-I12)
+- Finance can trace any invoice back to its trigger evidence in two clicks
+- The chain ends at invoice raised and receivable open; collections are out of scope (Part A OPEN item)
+- A permanent placement invoices from the day-90 retention record; a contractual engagement, including a locum doctor paid per session, invoices from the approved timesheet. The trigger follows the service line, not the candidate category.
+
+Index **M9-I1** · Client ref **D8** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I12, M8-I13**
+
+#### M9-I2 — Money owed
+
+`D8` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Finance.** Money owed against invoices raised. The process stops here in this milestone.
+
+##### Screens to build
+
+1. **Money owed**
+  - Lists invoices raised and not yet paid, by client
+  - Shows how long each has been outstanding
+
+##### Conditions it must satisfy
+
+- A receivable is opened against every raised invoice (Part A stage 17)
+- Payment receipt, reconciliation including part-payments and TDS, ageing, reminders, dunning and credit or debit notes are all outside Release 1 (Part A OPEN item)
+- Ageing is displayed but not acted on, since dunning is out of scope
+- The finance system invoices post to has not been named (OI-A-14)
+- The receivable is exportable so the eventual target attaches without reopening the module
+
+Index **M9-I2** · Client ref **D8** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Low** · Open items **OI-A-14** · Linked items **M9-I16**
+
+#### M9-I3 — Billing evidence
+
+`A7` · `Screen` · `L · 3.0pd` · `AI High` · `High` · `COMP` · `Low`
+
+**Who uses it: Finance, Compliance.** The evidence behind each permanent invoice: who confirmed, when, against which terms.
+
+##### Screens to build
+
+1. **Billing evidence**
+  - Lists the day 90 records invoices were raised against
+  - Shows who confirmed, when, and against which contract terms
+  - Shows whether the client answered or the waiting period ran out
+
+##### Conditions it must satisfy
+
+- Each trigger record is auditable and supports a billing query: who acknowledged, when, and against which contract terms (Part A stage 16)
+- An acknowledged trigger is visibly distinguished from a deemed-confirmed one
+- The recipient identity is shown - which requires the recipient model to exist (OI-A-12)
+- Invoicing at day 90 removes the need to reverse a pre-confirmation failure (Part A OPEN item)
+- A failure after day 90 inside a longer guarantee window is a different case - period unconfirmed (OI-A-13)
+
+Index **M9-I3** · Client ref **A7** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-12, OI-A-13** · Linked items **M8-I13, M7-I13**
+
+#### M9-I4 — Shift invoices
+
+`D25` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Finance.** Shift invoices, each linked to the timesheet it came from.
+
+##### Screens to build
+
+1. **Shift invoices**
+  - Lists shift invoices with the timesheet each came from
+  - Opens the approved timesheet behind an invoice
+
+##### Conditions it must satisfy
+
+- A shift invoice generates from the client-approved timesheet and contract (Part A contractual stage 10)
+- The approval evidence - explicit or deemed - is linked from the invoice
+- Internal approval routing, debit and credit notes and automated payment reminders remain in the later release (Part A contractual stage 10)
+- Volume is capped by manual payroll throughput, which bounds what this must support (OI-A-16)
+
+Index **M9-I4** · Client ref **D25** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **OI-A-16** · Linked items **M8-I9, M9-I15**
+
+#### M9-I5 — Funnel
+
+`D9` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `DATA` · `Medium`
+
+**Who uses it: Fulfilment lead, Shalu, Suman.** Where vacancies turn into placements, and where they do not.
+
+##### Screens to build
+
+1. **Funnel**
+  - Shows how many requisitions reach each stage through to placement
+  - Shows the drop between each stage
+  - Filters by client, category and period
+
+##### Conditions it must satisfy
+
+- The funnel is computed from StatusTransition records, so it is correct retrospectively (M3-I28)
+- Conversion is reported per stage, not only end to end
+- Filtering by candidate category is possible, since category is on the requisition (M3 BR2)
+- Without the event foundation written at build time this report cannot be produced at all (M3-I31)
+
+Index **M9-I5** · Client ref **D9** · Band **M** · Design **1.5pd** · Build **2.0pd** · QA **1.0pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M3-I31, M3-I28**
+
+#### M9-I6 — Fill and time to fill
+
+`D9` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `DATA` · `Medium`
+
+**Who uses it: Fulfilment lead, Shalu.** How many vacancies get filled and how long it takes.
+
+##### Screens to build
+
+1. **Fill and time to fill**
+  - Shows what proportion of positions were filled
+  - Shows how long requisitions took to fill, not counting days on hold
+  - Filters by client, category and recruiter
+
+##### Conditions it must satisfy
+
+- Time-to-fill is measured from the requisition reaching complete, consistent with the aging rule (M3 BR4)
+- Held days are excluded from aging (M3 AC6)
+- Distribution is shown, not only an average, since the tail is the operational problem
+- Fill rate by recruiter requires the D14 allocation (M3-I16)
+- Unfilled requisitions are analysable by close reason (M0-I5)
+
+Index **M9-I6** · Client ref **D9** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I31, M3-I28**
+
+#### M9-I7 — Trial survival
+
+`D9` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `DATA` · `Medium`
+
+**Who uses it: Fulfilment lead, Finance.** How many people last to day 90, which is also when Apollo gets paid.
+
+##### Screens to build
+
+1. **Trial survival**
+  - Shows what proportion of placements last to day 90
+  - Shows the reasons given where they did not
+  - Filters by client, category and recruiter
+
+##### Conditions it must satisfy
+
+- Survival is reported across the full day 0 to 90 curve, not only the final outcome (Part A stage 18)
+- Drop-out reasons come from the M8 taxonomy
+- Revenue at risk is calculable, since the invoice fires at day 90
+- Survival by recruiter requires the D14 allocation
+
+Index **M9-I7** · Client ref **D9** · Band **M** · Design **1.5pd** · Build **2.0pd** · QA **1.0pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M8-I6, M3-I31**
+
+#### M9-I8 — Where candidates drop out
+
+`D28` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `DATA` · `Medium`
+
+**Who uses it: Shalu, Fulfilment lead.** Where candidates drop out, by client and by recruiter.
+
+##### Screens to build
+
+1. **Where candidates drop out**
+  - Shows at which stage candidates are lost, by client and by recruiter
+  - Shows the rejection reasons behind those losses
+
+##### Conditions it must satisfy
+
+- Loss by client and by stage is computed from StatusTransition timestamps (M3-I28)
+- Loss by recruiter cannot be produced at all without the D14 owner and allocation (Part A dependency table)
+- Loss reasons come from the structured rejection taxonomy in M7, not free text (M0-I5)
+- The report is correct retrospectively only if events were written at the time (M3-I31)
+- Recruiter attribution uses the allocation history, covering the period the recruiter held the requisition (M3 D14 BR3)
+
+Index **M9-I8** · Client ref **D28** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I16, M3-I28, M3-I31**
+
+#### M9-I9 — Channel and recruiter performance
+
+`D28` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `DATA` · `Medium`
+
+**Who uses it: Shalu, Suman.** Which intake channels and which recruiters actually produce placements.
+
+##### Screens to build
+
+1. **Channel and recruiter performance**
+  - Shows how many placements came from each intake channel
+  - Shows requisitions held, fill rate and time to fill per recruiter
+
+##### Conditions it must satisfy
+
+- Channel performance is reportable because source channel is retained on every requisition (M3 AC2, BR2)
+- Verbal capture is measurable rather than invisible, since it is recorded with source and capturing recruiter (M3 BR4)
+- Site-resident and floating recruiters are comparable, which requires site attribution in M0-I2
+- Channel quality includes completeness at intake, which is the A1 value case
+- Recruiter performance uses allocation history, not current allocation only
+
+Index **M9-I9** · Client ref **D28** · Band **M** · Design **1.5pd** · Build **2.0pd** · QA **1.0pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I16, M0-I2, M3-I31**
+
+#### M9-I10 — Monthly pack
+
+`D28` · `Screen` · `L · 3.0pd` · `AI High` · `Low` · `DATA` · `Medium`
+
+**Who uses it: Shalu, Suman, Apollo leadership.** The monthly pack for Apollo leadership, generated on a schedule rather than assembled by hand.
+
+##### Screens to build
+
+1. **Monthly pack**
+  - Produces the monthly management pack on a schedule
+  - Exports it as a document
+
+##### Conditions it must satisfy
+
+- The pack generates on schedule without manual assembly (Part A M9)
+- Composition is configurable so the pack can change without a deployment
+- The pack exports in formats leadership actually uses
+
+Index **M9-I10** · Client ref **D28** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M9-I17**
+
+#### M9-I11 — Rate variance
+
+`A11` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `DATA` · `Medium`
+
+**Who uses it: Finance, BD, Suman.** What was agreed against the standard rate, by client, role, specialty and acuity.
+
+##### Screens to build
+
+1. **Rate variance**
+  - Shows the rate agreed against the standard rate
+  - Splits it by client, role, specialty and acuity
+
+##### Conditions it must satisfy
+
+- Variance is reported by client, role, specialty and acuity (Part A M9)
+- Baseline comes from the rate card baseline attribute (M2-I5)
+- Specialty and acuity breakdown requires the A9 attribute set on the requisition (M4-I26)
+
+Index **M9-I11** · Client ref **A11** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I5, M4-I26**
+
+#### M9-I12 — Permanent invoice
+
+`D8` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Raise the permanent invoice once the day-90 record exists. Not at placement.
+
+##### Screens to build
+
+1. **No screen**
+  - Raises the permanent invoice when the day 90 record exists
+  - Reads the contract terms that applied at that date
+  - Cannot raise a second invoice for the same placement
+
+##### Conditions it must satisfy
+
+- The invoice generates against the day-90 client-acknowledged retention record, not at placement (Part A stage 17)
+- Terms resolve to the contract version in force at the trigger event (M2-I12)
+- The placement fee is 5-6% of CTC, held per contract rather than as a constant (Part A stage 17)
+- A duplicate trigger cannot produce a second invoice for the same placement
+- Without D13 there are no contract terms at trigger time and permanent billing does not run at all - no fallback (Part A dependency table)
+
+Index **M9-I12** · Client ref **D8** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-A-05** · Linked items **M2-I12, M8-I13**
+
+#### M9-I13 — Day 90 record store
+
+`A7` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `COMP` · `Medium`
+
+**Who uses it: System.** Store the billing trigger so it cannot be changed and can be queried years later.
+
+##### Screens to build
+
+1. **No screen**
+  - Stores the day 90 record so it cannot be changed
+  - Keeps who answered, when, and the contract terms at that moment
+
+##### Conditions it must satisfy
+
+- The record is immutable once created, cannot be edited from any surface, and stays auditable years later
+- It captures whether retention was acknowledged or deemed, and by whom (Part A stage 16)
+- The contract terms in force are snapshotted, not resolved again later
+- The record is queryable long after the placement closes, for a billing dispute
+- Retention follows the finance retention period, which may exceed the DPDP candidate retention (OI-HS-02)
+
+Index **M9-I13** · Client ref **A7** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-HS-02** · Linked items **M8-I13, M0-I4, M4-I27**
+
+#### M9-I14 — Contract terms at trigger
+
+`D8` · `Service` · `M · 2.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Read the contract terms that applied at the moment the trigger fired.
+
+##### Screens to build
+
+1. **No screen**
+  - Reads the contract version in force on the date the trigger fired
+  - Records on the invoice which version it read
+
+##### Conditions it must satisfy
+
+- Terms resolve against the contract version in force at the trigger event date, not at invoice generation
+- A missing per-client window resolves to the platform default (OI-A-05)
+- A client with no active contract at trigger time raises an exception rather than invoicing on defaults
+- The invoice records which contract version it read, for audit
+- This coupling is why D13 moved into Release 1 (Part A coupling 6)
+
+Index **M9-I14** · Client ref **D8** · Band **M** · Design **0.0pd** · Build **2.0pd** · QA **1.5pd** · Total **3.5pd** · Confidence **Medium** · Open items **OI-A-05** · Linked items **M2-I12**
+
+#### M9-I15 — Shift invoice
+
+`D25` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** Turn an approved timesheet into an invoice at the right rate.
+
+##### Screens to build
+
+1. **No screen**
+  - Raises the shift invoice from an approved timesheet
+  - Cannot invoice the same timesheet period twice
+
+##### Conditions it must satisfy
+
+- The invoice generates against an approved timesheet rather than raw attendance (Part A CLOSED item)
+- A deemed-approved timesheet is as valid an input as an explicitly approved one
+- A timesheet cannot be invoiced twice for the same period
+- Rates resolve against the contract version in force for the period (M2-I11)
+- Debit and credit notes are out of scope unless the guarantee period changes the position (OI-A-13)
+
+Index **M9-I15** · Client ref **D25** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **2.0pd** · Total **5.0pd** · Confidence **Medium** · Open items **OI-A-13** · Linked items **M8-I15, M2-I11**
+
+#### M9-I16 — Invoice export
+
+`D25` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: System.** Expose the invoice by API and file export so a finance system can attach later. Nobody has said which one.
+
+##### Screens to build
+
+1. **No screen**
+  - Makes the invoice available by API and as a file export for a finance system to collect
+
+##### Conditions it must satisfy
+
+- The invoice object is addressable by API or file export so the target system attaches later without reopening the module (Part A instruction)
+- The finance system has not been named; the export is built to a generic contract (OI-A-14)
+- A re-export does not duplicate the invoice in the target
+- Export activity is audited
+- This is a direct instruction in Part A, not a Hiresense assumption
+
+Index **M9-I16** · Client ref **D25** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-A-14** · Linked items **M3-I26**
+
+#### M9-I17 — Reporting tables
+
+`D28` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `DATA` · `Medium`
+
+**Who uses it: System.** Reshape events from every module into the tables the reports read.
+
+##### Screens to build
+
+1. **No screen**
+  - Reshapes the events written by every module into the tables the reports read
+
+##### Conditions it must satisfy
+
+- Marts materialise from the M3-I31 event foundation, not by querying operational tables
+- Stage-level loss requires StatusTransition, which M3 writes append-only (M3-I28)
+- Recruiter dimension requires the D14 allocation history (M3-I16)
+- Query performance supports interactive dashboards - target not set (OI-M3-14)
+
+Index **M9-I17** · Client ref **D28** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-M3-14** · Linked items **M3-I31, M3-I28**

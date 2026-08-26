@@ -1,266 +1,130 @@
 ---
-title: "01-07 · Authentication, Authorisation and Data Scope"
-description: "The plan is explicit that these must not be conflated: \"Candidate logins are completely separate from this — they use phone and code in M4\" (M0-I1)."
+title: "01-07 Auth and RBAC"
+description: "Four principal kinds, one permission model, deny by default. 02-01 implements this; every other component obeys it."
 ---
 
----
+**Package** `@apollo/identity` · **Schema** `identity` · **Plan** F01, F02, F03, D11, D12, A13 · **Effort** — · **Risk** High `SPEC` · **Build in** Phase 1
 
-## 1. Four identity types, deliberately separate
+Four principal kinds, one permission model, deny by default. `02-01` implements this; every other
+component obeys it.
 
-The plan is explicit that these must not be conflated: *"Candidate logins are completely separate
-from this — they use phone and code in M4"* (`M0-I1`).
+## 1. Realms
 
-| Identity | Who | Auth | Store | Introduced |
+| Realm | Who | Credential | Built in | Never |
 |---|---|---|---|---|
-| **AppUser** | Apollo staff | Email + password + session cookie | `platform.app_user` | M0 |
-| **Candidate** | Nurses, doctors, allied health | Phone + OTP → JWT + refresh | `supply.candidate` | M4 |
-| **ClientUser** | Hospital staff | Email + password + session cookie | `platform.client_user` | M10 |
-| **LinkRecipient** | Hospital staff, no account | **Signed token in a URL** | `platform.link_recipient` | M7 |
+| `staff` | Apollo internal users | Email + password, sliding idle session (SSO pending `X06`) | Phase 1 | reaches a candidate or portal-only route |
+| `candidate` | Healthcare professionals | Phone + OTP, long-lived refresh | Phase 2 | reaches any Ops route |
+| `client_user` | Client portal users | Email + password, separate cookie and signing key | Phase 6 | reaches any Apollo internal screen (`M10-I1`) |
+| `link` | A client contact holding a token | Opaque single-purpose token | Phase 4 | reaches more than one record or more than one action |
 
-Separate tables, separate password/credential storage, separate session stores, separate cookie
-names, separate middleware, separate route namespaces. A candidate cannot authenticate to an Ops
-endpoint by any code path, because there is no code path.
+**Candidate identity is entirely separate from the Apollo internal user model** (`AS-06`, `M4-I22`),
+and client identity is separate again. Three tables, three session mechanisms, three cookie/token
+namespaces. A token from one realm presented to another is a **401**, never a 403.
 
-**LinkRecipient is not really an identity** — it is a capability. The token grants the right to
-answer one question about one record, once. That is the whole model, and it is why clients need no
-account in Release 1.
-
----
-
-## 2. Apollo staff sessions
-
-| | |
-|---|---|
-| Password | `argon2id`, minimum 12 characters, checked against a breached-password list |
-| Session | Random 256-bit, stored **hashed** in Redis, cookie is `HttpOnly` `Secure` `SameSite=Lax` |
-| Idle timeout | Configurable (`platform.session_idle_minutes`), default 60 min, sliding |
-| Absolute timeout | 12 hours, non-sliding |
-| Lockout | 5 failed attempts / 15 min, per account **and** per IP |
-| Reset link | Single use, 30-minute expiry, invalidates all sessions on use |
-| Audit | Every login, failed login, lockout, reset and logout (`M0-I1`) |
-
-**Session expiry must not lose unsaved form state** (`M1-I1`). The client detects 401, shows a
-re-authentication dialog in place, and resumes the request on success — it does not hard-redirect
-away from a half-filled requisition form.
-
----
-
-## 3. Candidate authentication
-
-| | |
-|---|---|
-| Identifier | Phone number, E.164 |
-| OTP | 6 digits, hashed in Redis, 5-minute TTL, single use |
-| Rate limit | 3 requests/hour per phone, 10/hour per IP |
-| Tokens | Access JWT 15 min, refresh token 30 days, **rotating** with reuse detection |
-| Reuse detection | A replayed refresh token revokes the whole family and logs a security event |
-| Device | Refresh tokens are per-device; a candidate can be signed in on two phones |
-| Recovery | Phone change requires Ops verification — it is the only identifier |
-
-No password anywhere in the candidate flow. This is correct for the population: many shift workers
-will not maintain one, and the phone is already the account.
-
----
-
-## 4. Client link tokens
-
-The mechanism behind every no-login client interaction (`02-10`).
-
-```
-https://links.apollo-gwd.in/l/<48-char-random-token>
-```
-
-| Property | |
-|---|---|
-| Token | 256-bit random, URL-safe. Stored **hashed** — the plaintext exists only in the message we sent. |
-| Scope | One link record: one type, one target entity, one recipient |
-| Expiry | Per link type, configurable. Unanswered links expire on a schedule. |
-| Reuse | Answerable once. Re-opening after answering shows the answer, read-only. |
-| Attribution | Every open and every answer is timestamped **against the identified recipient** |
-| Rate limit | 20 req/min per token |
-| Enumeration | No sequential ids, no listing endpoint, constant-time comparison |
-
-**Why attribution is non-negotiable:** the day-90 answer is the legal evidence behind a placement
-invoice. "Somebody at the hospital clicked yes" does not survive a billing query. The recipient
-identity model is **open (`OI-A-12`)** — working assumption `AS-05`: recipients are held as
-`ClientContact` records against a client + location, and the link records which contact it was sent
-to and which contact answered.
-
----
-
-## 5. Permission model
-
-```
-<module>.<resource>.<action>
-```
-
-```
-demand.requisition.read
-demand.requisition.close
-supply.candidate.merge
-bill.invoice.raise
-platform.user.deactivate
-```
-
-| Layer | |
-|---|---|
-| **Permission** | One capability. Declared by the module that owns the resource, in `permissions.ts`. |
-| **Role** | A named bundle of permissions |
-| **Assignment** | A user holds one or more roles, plus a site assignment |
-
-**Roles are configuration, not screen-edited.** `M0-I3` is explicit: *"Read only — the permission set
-for each role is held in configuration, not edited on screen."* The role screen shows what each role
-can reach; changing it is a config change through the settings mechanism, which is audited.
-
-### Release 1 roles
-
-| Role | Reaches |
-|---|---|
-| `platform_admin` | Everything, including settings, users, adapters, templates |
-| `fulfilment_lead` | Demand, allocation, matching, selection, placements, trial, timesheets |
-| `recruiter` | Requisitions, candidates, search, shortlist, interviews — scoped to their sites |
-| `bd` | Clients, contracts, rate cards, offers |
-| `verification` | Verification queue, credentials, documents |
-| `finance` | Invoices, receivables, timesheets, rate variance, billing evidence |
-| `leadership` | Read-only reporting across everything |
-| `client_user` (M10) | Portal only, scoped to their own client |
-
-A user with **no** role can sign in but reaches nothing — and sees a proper "no access" screen rather
-than an error on every page (`M0-I3`).
-
----
-
-## 6. Enforcement
-
-Server-side, on every request, without exception.
+## 2. Principal
 
 ```ts
-router.post('/:id/close',
-  requirePermission('demand.requisition.close'),
-  validate({ params: idParam, body: closeBody }),
-  c.close)
+type Principal =
+  | { realm: 'staff';       userId: string; roles: RoleCode[]; siteIds: string[]; permissions: Set<Permission> }
+  | { realm: 'candidate';   candidateId: string }
+  | { realm: 'client_user'; clientUserId: string; clientId: string; siteIds: string[]; permissions: Set<Permission> }
+  | { realm: 'link';        linkId: string; linkType: LinkType; recipientId: string; clientId: string;
+                            subjectType: 'shortlist'|'placement'|'timesheet'; subjectId: string }
 ```
 
-| Rule | |
+Resolved once in a `preHandler`. No handler re-reads a cookie or a token.
+
+## 3. Permissions
+
+Permission is `<resource>:<action>` — `requisition:hold`, `invoice:raise`, `candidate:merge`,
+`settings:edit`, `link:issue`. Roles are **sets of permissions held in configuration**, not editable
+on screen (`M0-I3`: the role list is read-only, and the permission set is configuration).
+
+### Release 1 staff roles
+
+| Role | Holds |
 |---|---|
-| The frontend check is **UX only** | It hides buttons. It is never the enforcement. |
-| Permission changes take effect on the **next request**, not the next login (`M0-I3`) | Permission sets are cached in Redis with a 60s TTL and explicitly invalidated on role change |
-| Every permission change is audited | |
-| No module builds its own access rules | The role set covers every Apollo user across every module (`M0-I3`) |
-| A test calls each mutating endpoint as the wrong role and asserts 403 | Part of the definition of done |
+| `platform_admin` | Everything in `settings:*`, `channel:*`, `template:*`, `weights:*`, `adapter:*`, `user:*`, plus read everywhere |
+| `fulfilment_lead` | Requisition, allocation, shortlist, interview, trial, timesheet — full; candidate read/write; reporting read |
+| `recruiter` | Requisition read/write, allocation read, search, shortlist build, interview, selection decision |
+| `bd` | Client, contract, rate card, client contact, link recipient — full; requisition create; reporting read |
+| `verification` | Candidate, credential, verification case, document review — full; requisition read |
+| `finance` | Invoice, receivable, billing evidence, timesheet, contract, placement — **read** and finance actions; **no recruiter permissions** (`M7-I13`, `M8-I2`) |
+| `leadership` | Reporting read across everything, no write |
+| *(none)* | Signs in, reaches nothing — a defined state, not an error on every page (`M0-I3`) |
 
----
+A role change takes effect on the user's **next request**, not their next login (`M0-I3`). Sessions
+carry a version stamp compared against the role set on every request.
 
-## 7. Data scope (row-level)
+## 4. Data scope — the unresolved one
 
-Separate from permissions, and applied separately.
+> Does a site-resident recruiter see only their own site's requisitions and candidates, or the whole
+> base? — **`OI-HS-01`**, open, and it touches every list in the platform.
 
-```
-Permission answers: may this role do this kind of thing?
-Scope answers:      which rows may this user do it to?
-```
+Row-level scoping is a different build from screen-level permissions and is expensive to retrofit. The
+position taken so the work is not blocked:
+
+> **`AS-18`** — Every scoped query takes a `scopeLocationIds` predicate from the principal from day
+> one. In Release 1 the resolver returns **all active locations** for every staff role, so behaviour is
+> "sees everything" as today. Closing `OI-HS-01` in favour of site scoping changes one resolver, not
+> twenty queries.
 
 ```ts
-interface Scope {
-  kind:     'all' | 'sites' | 'client'
-  siteIds?: string[]      // AppUser with site assignment
-  clientId?: string       // ClientUser — portal
-}
+// every list repository, without exception
+WHERE r.location_id = ANY(${principal.scopeLocationIds})
 ```
 
-Applied **inside the repository**, never in a controller:
+The predicate is **not optional and not a filter parameter**. A caller cannot widen it. A new list
+endpoint without it fails the scope test suite, which asserts every `GET` collection route rejects a
+cross-scope id.
 
-```ts
-list: (tx, filter, scope) => applyScope(baseQuery(filter), scope)
-```
-
-Because a new caller must not be able to forget it. A repository method that takes a filter but no
-scope is a review rejection.
-
-| Actor | Scope |
+| Realm | Scope |
 |---|---|
-| `platform_admin`, `leadership`, `finance` | `all` |
-| `recruiter` (site-resident) | `sites` — **open (`OI-HS-01`)** |
-| `recruiter` (floating) | `all` |
-| `client_user` | `client` — always, no exceptions |
+| `staff` | `scopeLocationIds` per `AS-18` above |
+| `candidate` | Their own records only, enforced by `candidate_id = principal.candidateId` |
+| `client_user` | **`client_id = principal.clientId` AND `location_id = ANY(siteIds)`** — hard, tested automatically, fails closed on a new endpoint (`M10-I8`) |
+| `link` | Exactly `subjectId`, exactly the one action the type allows |
 
-**`OI-HS-01` is the most important open item in this document.** Whether a site-resident recruiter
-sees only their own site's requisitions and candidates, or the whole base, changes every list in the
-platform. It is cheap to decide now and expensive to retrofit.
+## 5. Link authorisation (`02-14`)
 
-Working assumption `AS-02`: **build the scope mechanism from day one and apply it everywhere**,
-defaulting `recruiter` to `all` until Apollo decides. Switching the default is then a config change,
-not twenty migrations and twenty query rewrites.
-
-### Portal scoping is a security boundary, not a filter
-
-`M10-I8`: *"Every portal query must be limited to the signed-in user's client and sites. One mistake
-here leaks another hospital's data."*
-
-For the portal specifically:
-- Scope is applied at the repository **and** re-asserted on the returned rows before serialisation
-- A cross-client access attempt returns 403, is logged as a security event, and alarms
-- An integration test suite exists whose entire purpose is attempting cross-client access on every
-  portal endpoint
-
----
-
-## 8. Actor context
-
-Resolved once by middleware, carried everywhere:
-
-```ts
-interface Actor {
-  type:     'user' | 'candidate' | 'client_user' | 'link' | 'system'
-  id:       string
-  roles:    string[]
-  scope:    Scope
-  sessionId?: string
-}
-```
-
-| Rule | |
+| Rule | Plan ref |
 |---|---|
-| Every service method takes an `actor` | Never reads it from a global or from `req` |
-| Every audit entry records the actor | |
-| `system` is used by jobs and schedulers, and is a **real, distinguishable actor** in the audit trail | "who deemed this timesheet approved" must have an answer |
-| A job triggered by a user carries that user's actor, not `system` | |
+| Tokens are unguessable (≥128 bits of entropy), stored hashed, single-purpose and expiring | `M7-I17` |
+| Reissue invalidates the previous token | `M7-I13` |
+| A link answer is timestamped **against an identified recipient** | `M7-I17`, and the invoice is not defensible without it (`OI-A-12`) |
+| Only `day_90_retention` may carry `is_billing_trigger`; the flag is **not editable** on `day_30`/`day_60` | `M7-I8` |
+| A second submission on a re-opened link returns the original answer and does not create a second response | `M7-I18` |
+| Expiry without response → `deemed` **only** for `day_90_retention` and `timesheet_approval`, only after the per-client window with a platform default fallback | `M7-I17`, `OI-A-05` |
 
----
+## 6. Session and credential rules
 
-## 9. Service-to-service and machine callers
+| Rule | Value | Source |
+|---|---|---|
+| Staff idle timeout | configurable in `02-03`; default 30 min | `M0-I1` |
+| Password reset link | single use, expires | `M0-I1` |
+| Password hashing | Argon2id | `AS-19` |
+| Failed-login lockout | progressive, and **every login, failed login and lockout is audited** | `M0-I1` |
+| Candidate OTP | 6 digits, short expiry, rate-limited per number, delivered over **SMS with WhatsApp fallback** | `M4-I22` |
+| Candidate re-auth | long refresh — a low-engagement base must not be forced to sign in often | `M4-I22` |
+| Number change | recovers the account without creating a duplicate | `M4-I22` |
+| Client portal invite | expired invite is reissuable **without creating a second account** | `M10-I1` |
+| Apollo can suspend a client user | without going through the client | `M10-I2` |
 
-| Caller | Mechanism |
-|---|---|
-| Client HRMS feed | Per-client API key + HMAC-SHA256 body signature + timestamp window. Keys rotate; both old and new valid during rotation. |
-| Provider webhooks | Provider's own signature scheme, verified **before parsing the body** |
-| Finance system export | Pull with API key, or file drop to S3 — decided when the system is named (`OI-A-14`) |
-| Internal (api → worker) | No auth — same VPC, same trust boundary, not exposed |
+## 7. What is audited, always
 
----
+Every one of these writes an `AuditEntry` (`02-02`) with actor, timestamp, before and after:
 
-## 10. Secrets
+sign-in · failed sign-in · lockout · permission change · role assignment · user activation and
+deactivation · every requisition status change · allocation · every selection decision with its
+structured reason · every recruiter rank override with its reason · link issue, open, answer and deem ·
+manual verification override · document accept/reject · attendance time correction · timesheet
+correction after approval · invoice raise · export of an invoice or a report · credit and debit note ·
+salary revision, advance and hold · payroll cycle lock and reopen · adapter configuration change ·
+setting change.
 
-| Rule | |
-|---|---|
-| All credentials in AWS Secrets Manager | Nothing in env vars, nothing in the image, nothing in git |
-| Rotation | Database and Redis credentials rotate automatically; external API keys manually with a documented runbook |
-| Local development | `.env.local`, gitignored, containing only fake-adapter values |
-| **After handover, no Hiresense-held credential is required at runtime** | `M1-I5` — a stated acceptance criterion |
-| `gitleaks` runs in CI | A committed secret fails the build |
+## 8. Provisioning scope in Release 1
 
----
-
-## 11. What gets audited
-
-Everything in this list, without exception (`02-02`):
-
-authentication (login, failed login, lockout, logout, password reset) · permission and role changes ·
-user creation, activation, deactivation, site assignment · every state transition on every entity ·
-every configuration change · every client link issued, opened and answered · every billing trigger
-and invoice · every merge of duplicate records · every manual override of a system decision · every
-approval and rejection · every export of personal data · every cross-client access attempt.
-
-The day-90 billing trigger cannot be defended without this, which is the plan's own reason for
-building the audit trail once rather than six times (`M0-I4`).
-
+D1 includes "user provisioning with role-based access". Since D12 is deferred and A13 needs no login,
+**Release 1 provisioning covers Apollo internal users only** (`OI-A-04`, expected to confirm). Client
+identity arrives in Phase 6 with `03-14`. Until then no client-side credential exists anywhere in the
+system, which is also why the link mechanism carries the entire client relationship.

@@ -1,6 +1,6 @@
 {
-  "title": "Documentation",
   "root": true,
+  "title": "Documentation",
   "pages": [
     "index",
     "00-foundation",
@@ -8,6 +8,7 @@
     "02-platform",
     "03-modules",
     "04-integrations",
-    "05-delivery"
+    "05-delivery",
+    "06-source-plan"
   ]
 }

@@ -1,0 +1,284 @@
+---
+title: "03-16 Workforce operations"
+description: "The day-to-day changes that happen once people are working: salary revisions for one person or in bulk, salary advances, and putting a salary on hold or releasing it."
+---
+
+**Package** `@apollo/workforce` · **Schema** `workforce` · **Plan** D23 · **Effort** ~38.0pd · **Risk** Low `SHARED` · **Build in** Phase 6
+
+## 1. Purpose
+
+The day-to-day changes that happen once people are working: salary revisions for one person or in bulk,
+salary advances, and putting a salary on hold or releasing it. Each needs two people — one to request
+and one to approve — so nobody can change their own pay. It also covers uploading attendance from
+outside and pairing it against what the app recorded, and it is where **geo-fencing enforcement finally
+switches on**.
+
+The request-and-approve engine built here is reused by `03-19` for internal timesheet approval, so it
+is built first of the two.
+
+## 2. Scope
+
+### In scope
+
+- The maker-checker request engine: request types as configuration, thresholds by value, raiser ≠ approver
+- Salary revision, individual and bulk
+- Salary advances with a recovery plan, and holds with release
+- Attendance upload from outside, paired against app check-ins with mismatch resolution
+- Geo-fence configuration and enforcement, for both a site and a per-visit address
+
+### Explicitly out of scope
+
+- Paying anyone — `03-17`.
+- Statutory filings.
+- Shift attendance capture and timesheets — `03-10`, which this module extends rather than replaces.
+- The associate profile — `03-15`.
+
+### Explicitly not built
+
+- Approval chains longer than one checker. Thresholds vary the **seniority** of the approver, not the
+  number of steps.
+- Retrospective salary revision without a higher approval. An effective date in the past is blocked or
+  escalated.
+- Any change taking effect before approval.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M12-I1` | D23 | Requests — the maker-checker queue | L | 3.0 |
+| `M12-I2` | D23 | Salary revision, individual and bulk | L | 3.0 |
+| `M12-I3` | D23 | Advances and holds | L | 3.0 |
+| `M12-I4` | D23 | Attendance upload and pairing | L | 3.0 |
+| `M12-I5` | D23 | Geo-fence settings | L | 3.0 |
+| `M12-I6` | D23 | Request and approve engine | XL | 5.0 |
+
+**Specification basis:** named in Part A as D23 with its contents listed; no client module chapter. All
+items Low confidence.
+
+## 4. Dependencies
+
+**Must exist first:** `03-09` and `03-10` (placements and attendance), `03-15` (the associate profile),
+`02-01` (**approvals depend on who someone is**), `02-02`, `03-01` (site coordinates), `03-03` (visit
+addresses on shift lines).
+
+**Consumed by:** `03-17` reads approved salary changes, advances and holds; `03-19` reuses the approval
+engine; `03-10` gains enforcement on its location flag.
+
+**External:** none.
+
+## 5. Data model
+
+```sql
+CREATE TABLE workforce.request_type (
+    code text PRIMARY KEY,                    -- 'salary_revision' | 'advance' | 'hold' | 'release'
+                                              -- | 'timesheet_internal_approval' (03-19)
+    name text NOT NULL,
+    approval_thresholds jsonb NOT NULL,       -- [{maxValue, requiredRole}] — seniority by value
+    is_enabled boolean NOT NULL DEFAULT true,
+    owner_component text NOT NULL             -- a new type is CONFIGURATION, not a build
+);
+
+CREATE TABLE workforce.request (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    request_type text NOT NULL REFERENCES workforce.request_type(code),
+    subject_type text NOT NULL, subject_id uuid NOT NULL,   -- associate, timesheet …
+    batch_id uuid,                            -- bulk: one request PER PERSON, individually auditable
+    before_value jsonb, after_value jsonb,    -- what the approver sees
+    value_amount numeric(14,2),               -- drives the threshold
+    state text NOT NULL DEFAULT 'drafted' CHECK (state IN
+      ('drafted','submitted','approved','rejected','applied','cancelled')),
+    raised_by uuid NOT NULL, raised_at timestamptz NOT NULL DEFAULT now(),
+    approver_role_required text,
+    approved_by uuid, approved_at timestamptz,
+    rejected_reason text,
+    applied_at timestamptz,
+    CONSTRAINT raiser_is_not_approver CHECK (approved_by IS NULL OR approved_by <> raised_by)
+);
+CREATE INDEX ON workforce.request (state, request_type, raised_at);
+
+CREATE TABLE workforce.salary_revision (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    request_id uuid NOT NULL UNIQUE REFERENCES workforce.request(id),
+    associate_profile_id uuid NOT NULL,
+    current_amount numeric(14,2) NOT NULL, revised_amount numeric(14,2) NOT NULL,
+    effective_from date NOT NULL,
+    is_retrospective boolean GENERATED ALWAYS AS (effective_from < CURRENT_DATE) STORED
+);
+
+CREATE TABLE workforce.salary_advance (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    request_id uuid NOT NULL UNIQUE REFERENCES workforce.request(id),
+    associate_profile_id uuid NOT NULL,
+    amount numeric(14,2) NOT NULL,
+    recovery_plan jsonb NOT NULL,             -- HOW it will be recovered, not just that it was paid
+    recovered_amount numeric(14,2) NOT NULL DEFAULT 0,
+    state text NOT NULL DEFAULT 'approved'
+      CHECK (state IN ('approved','disbursed','recovering','recovered','written_off'))
+);
+
+CREATE TABLE workforce.salary_hold (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    request_id uuid NOT NULL UNIQUE REFERENCES workforce.request(id),
+    associate_profile_id uuid NOT NULL,
+    reason text NOT NULL,
+    state text NOT NULL DEFAULT 'requested'
+      CHECK (state IN ('requested','approved','held','released')),
+    held_from date, released_from date, release_request_id uuid
+);
+
+CREATE TABLE workforce.attendance_upload (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid, period_start date NOT NULL, period_end date NOT NULL,
+    document_id uuid NOT NULL,
+    rows_total integer NOT NULL, rows_loaded integer NOT NULL, rows_failed integer NOT NULL,
+    state text NOT NULL DEFAULT 'uploaded'
+      CHECK (state IN ('uploaded','matched','resolved')),
+    uploaded_by uuid NOT NULL, uploaded_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE workforce.attendance_mismatch (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    attendance_upload_id uuid NOT NULL REFERENCES workforce.attendance_upload(id),
+    shift_attendance_id uuid,
+    uploaded_row jsonb NOT NULL,
+    kind text NOT NULL,                       -- 'time_differs' | 'no_app_record' | 'no_upload_record'
+    state text NOT NULL DEFAULT 'open' CHECK (state IN ('open','resolved')),
+    resolution text, resolution_reason text,  -- resolved BY A PERSON, never silently overwritten
+    resolved_by uuid, resolved_at timestamptz
+);
+
+CREATE TABLE workforce.geo_fence (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    scope text NOT NULL CHECK (scope IN ('location','visit_address')),
+    location_id uuid,                         -- facility work: the site record
+    client_id uuid,
+    radius_m integer NOT NULL,
+    tolerance_m integer NOT NULL,             -- a phone indoors is less accurate than one outside
+    mode text NOT NULL DEFAULT 'off'
+      CHECK (mode IN ('off','warn','flag','block')),
+    is_enabled boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE workforce.geo_breach (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    shift_attendance_id uuid NOT NULL,
+    geo_fence_id uuid NOT NULL REFERENCES workforce.geo_fence(id),
+    distance_m numeric(10,1) NOT NULL,
+    action_taken text NOT NULL,               -- 'warned' | 'flagged' | 'blocked'
+    occurred_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+## 6. State machines
+
+### `Request` (`M12-I1`, `M12-I6`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | raised | `drafted` | |
+| `drafted` | submitted | `submitted` | Threshold selects the required approver role |
+| `submitted` | approved | `approved` → `applied` | **The raiser can never be the approver — enforced in the service, not the screen** |
+| `submitted` | rejected | `rejected` | Reason required |
+| `drafted`/`submitted` | cancelled | `cancelled` | |
+
+A bulk revision produces **one request per person**, each individually auditable, sharing a `batch_id`.
+
+### `SalaryHold`
+
+`requested → approved → held → released`. A hold **stops the next pay run for that person and is
+visible before the run**; release restores normal pay from the next cycle.
+
+### Geo-fence enforcement (`M12-I5`)
+
+| Mode | Behaviour |
+|---|---|
+| `off` | **Exactly as `03-10` today** — location recorded, nothing blocked |
+| `warn` | Candidate sees a warning at check-in; the check-in proceeds |
+| `flag` | Check-in proceeds and raises an exception for a person to resolve |
+| `block` | Check-in is rejected |
+
+The same check runs for both cases; **only the reference point differs** — the site record for facility
+work, the visit address on the shift line for home visits. The location field already exists from
+`03-10`, so switching this on **needs no data change**.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/workforce/requests?state=&type=` | `workforce:read` | The approval queue with before and after values |
+| `POST` | `/v1/workforce/requests/:id/approve` · `/reject` | `workforce:approve` | 403 if the caller raised it |
+| `POST` | `/v1/workforce/salary-revisions` | `workforce:request` | Individual |
+| `POST` | `/v1/workforce/salary-revisions/bulk` | `workforce:request` | One request per person |
+| `POST` | `/v1/workforce/advances` · `/holds` · `/holds/:id/release` | `workforce:request` | |
+| `POST` | `/v1/workforce/attendance-uploads` | `workforce:manage` | **Row-level errors; valid rows still load** |
+| `GET` | `/v1/workforce/attendance-mismatches?state=open` | `workforce:manage` | |
+| `POST` | `/v1/workforce/attendance-mismatches/:id/resolve` | `workforce:manage` | Reason required, audited |
+| `GET`/`PUT` | `/v1/workforce/geo-fences` | `settings:edit` | Scope, radius, tolerance, mode |
+| `GET` | `/v1/workforce/geo-breaches?from=&to=` | `workforce:read` | The breach report |
+| `GET`/`POST`/`PATCH` | `/v1/workforce/request-types` | `settings:edit` | **A new request type is configuration** |
+
+## 8. Events and jobs
+
+**Events emitted:** `workforce.request.submitted` · `.approved` · `.rejected` · `.applied` ·
+`workforce.hold.applied` · `.released` · `workforce.geo.breached`.
+
+**Events subscribed:** `timesheets.attendance.checked_in` → evaluate the geo-fence when enforcement is
+on.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `workforce.apply-approved` | on approval | Applies the change from its effective date |
+| `workforce.pair-attendance` | on upload | Matches uploaded rows against app check-ins and surfaces differences |
+| `workforce.recover-advance` | per pay cycle | Applies the recovery plan into `03-17` inputs |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Requests — waiting for approval with **before and after values shown**; approve or reject with a reason; the raiser cannot approve | `/workforce/requests` | `M12-I1` |
+| Salary revision — one associate or a group, effective date, send for approval | `/workforce/salary` | `M12-I2` |
+| Advances and holds — advance with its recovery plan; hold and release | `/workforce/advances` | `M12-I3` |
+| Attendance upload — upload, matched against app check-ins, mismatches listed and resolved with a reason | `/workforce/attendance-upload` | `M12-I4` |
+| Geo-fence settings — boundary per site and per visit address, mode, tolerance | `/admin/geo-fences` | `M12-I5` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | **A request cannot be approved by the person who raised it** | `M12-I1`, `M12-I6` |
+| AC2 | Every approval and rejection records who, when and why | `M12-I1` → `M0-I4` |
+| AC3 | **Before and after values are shown so the approver sees what changes** | `M12-I1` |
+| AC4 | This same engine is reused for internal timesheet approval in M15 | `M12-I1`, `M15-I2` |
+| AC5 | A revision goes through the approval engine **before it takes effect** | `M12-I2` |
+| AC6 | A bulk revision produces **one request per person, each individually auditable** | `M12-I2` |
+| AC7 | An effective date in the past is **either blocked or requires higher approval** | `M12-I2` |
+| AC8 | Payroll reads only **approved** revisions | `M12-I2`, `M13-I5` |
+| AC9 | An advance records **how it will be recovered, not just that it was paid** | `M12-I3` |
+| AC10 | A hold stops the next pay run for that person and **is visible before the run** | `M12-I3` |
+| AC11 | Release restores normal pay from the next cycle | `M12-I3` |
+| AC12 | All three go through the approval engine | `M12-I3` |
+| AC13 | Uploaded attendance is matched against app check-ins and differences are surfaced | `M12-I4` |
+| AC14 | **A mismatch is resolved by a person, not silently overwritten** | `M12-I4` |
+| AC15 | Resolution is audited because it changes what gets invoiced and paid | `M12-I4` |
+| AC16 | Row-level errors are named and valid rows still load | `M12-I4`, `M1-I4` |
+| AC17 | **With enforcement off, behaviour is exactly as in M8 — location recorded, nothing blocked** | `M12-I5` |
+| AC18 | With enforcement on, a check-in outside the boundary is rejected or flagged per the mode | `M12-I5` |
+| AC19 | **The location field already exists from M8, so switching this on needs no data change** | `M12-I5` |
+| AC20 | A breach report shows attempts outside the boundary | `M12-I5` |
+| AC21 | The same check runs for both cases; **only the reference point differs** — the site record for facility work, the visit address on the shift line for home visits | `M12-I5`, `OI-HS-17` |
+| AC22 | Tolerance is set wide enough that **a phone indoors does not produce false rejections** | `M12-I5` |
+| AC23 | A request type is added **as configuration, not as a new build** | `M12-I6` |
+| AC24 | Approval thresholds vary by value, so a large revision needs a more senior approver | `M12-I6` |
+| AC25 | The raiser can never be the approver, **enforced in the service, not the screen** | `M12-I6` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| — | **No client module chapter exists for D23** | The six items are derived from the listed contents. Low confidence throughout. | All of `M12` |
+| `OI-HS-18` | Should geo-fencing enforcement move from here into `03-10` for home healthcare? In a hospital a check-in is corroborated by a ward and colleagues; **in a home the location stamp is the only evidence there is** | Enforcement stays here as planned, but the mode is **per geo-fence**, so a home-healthcare client can be set to `block` on the day this ships without waiting for the rest of D23. That is the cheapest form of the answer either way. | `M8-I7`, `M12-I5` |
+| `OI-HS-17` | Who supplies the home-healthcare visit coordinate, and in what form? | Held on the shift line by `03-03`. **Without a coordinate, a visit-address geo-fence cannot be evaluated**, so those check-ins stay `unknown` rather than falsely passing. | `M12-I5` |
+| `OI-HS-41` **[raised here]** | Who may raise, and who may approve, a salary revision? | `workforce:request` for Ops, `workforce:approve` for finance and the fulfilment lead, with thresholds escalating to leadership. Not specified anywhere and it decides who can change someone's pay. | `M12-I1` |

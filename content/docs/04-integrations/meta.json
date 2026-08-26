@@ -1,14 +1,23 @@
 {
-  "title": "Integrations",
+  "title": "04 Integrations",
+  "icon": "PlugZap",
   "pages": [
     "index",
-    "04-01-integration-register",
-    "04-02-whatsapp",
-    "04-03-voice-and-transcription",
-    "04-04-document-ocr-and-esignature",
-    "04-05-identity-and-registry-verification",
-    "04-06-payroll-and-finance"
-  ],
-  "icon": "Cable",
-  "description": "Every external system the platform touches."
+    "04-00-integration-register",
+    "04-01-whatsapp",
+    "04-02-sms",
+    "04-03-email",
+    "04-04-outbound-voice",
+    "04-05-speech-to-text",
+    "04-06-ai-parsing-and-classification",
+    "04-07-client-hrms-ats",
+    "04-08-client-spreadsheets",
+    "04-09-credential-registries",
+    "04-10-document-ocr",
+    "04-11-electronic-signature",
+    "04-12-app-stores",
+    "04-13-finance-system",
+    "04-14-payroll-engine",
+    "04-15-legacy-cpal"
+  ]
 }

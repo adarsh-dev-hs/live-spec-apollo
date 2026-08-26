@@ -1,0 +1,334 @@
+---
+title: "06-13 M6 — Matching & Ranking"
+description: "Given a vacancy, produce a ranked list of candidates, best first, with a plain explanation of why each one ranked where they did and which requirements they do not meet. The weightings…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M6 · D5, D18, A8 · Months 4–5*
+
+`Release 1` · `10 items` · `60 conditions` · `72.0pd` · `6 high risk` · `Ops/Admin`
+
+Given a vacancy, produce a ranked list of candidates, best first, with a plain explanation of why each one ranked where they did and which requirements they do not meet. The weightings are different for each candidate category and each pool, so there are at least six sets. Recruiters can search manually and can move someone up or down the list, and every override is recorded. When a client or interviewer rejects someone with a reason, that reason feeds back in and affects later rankings.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D5 | Matching & shortlisting | Original R1 | M6 — Matching & Ranking |
+> | D18 | Matching & shortlisting (AI) | Moved from R2 | M6 — Matching & Ranking |
+> | A8 | Outcome write-back to ranking | New addition | M6 — Matching & Ranking |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M6 — Matching & Ranking. Reproduced without alteration.*
+>
+> Produces a ranked candidate set against a requisition, exposing the rationale for each rank together with unmet or partially met criteria, applying different weightings per candidate category and supply base, with saved searches, talent segments, advanced search on skill, location, experience and status, and recruiter override. It consumes selection outcomes and structured rejection reasons written back from M7 so that subsequent ranking reflects them.
+>
+> Deliverables: D5, D18, A8
+>
+> Surfaces: Ops/Admin.
+>
+> **OPEN** — Manual shortlist assembly. D5 is described as retaining search and submission while manual shortlist building is superseded by ranked output. Whether hand-assembly survives as a recruiter fallback, or whether recruiter override on the ranked set is the only manual path, is not stated.
+>
+> **OPEN** — Ranking input weighting. D18 consumes the credential record (D16), specialty and acuity (A9), availability confidence and recency (A3), and written-back outcomes (A8). With three candidate categories and two supply bases, the weight sets multiply accordingly, and the inputs themselves differ by category. The relative weighting model across those inputs, and its configurability, is not specified.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 4** — Per-category ranking weight profiles under D18, configurable rather than coded. Both the weights and the inputs differ by category.
+>
+> **Context** — Your note records that the D18 weighting model is not specified. Under the current sequence M6 completes around month three or four, and that is the first time a recruiter sees a ranked shortlist. A crude ranked list on three fields, put in front of recruiters against a live requisition in week eight, gives you the weighting from their overrides instead of from a specification.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+The list of rejection reasons in M7 and the data the ranking model reads are one design, not two. If the ranking model has no slot for outcome data, feeding rejections back in later means rebuilding it. Agree both before either module is built.
+
+### Records this milestone owns
+
+- RankedSet — one ranked list for one vacancy or one shift, recording which weighting set produced it and when.
+- RankEntry — one candidate in that list: their score, why they scored it, and what they do not meet.
+- WeightSet — how much each factor counts. One per candidate category per pool, so at least six.
+- RecruiterOverride — a manual move up or down, with a reason. Rows are only added, never changed.
+- SavedSearch, TalentSegment — searches and candidate groups recruiters reuse.
+- OutcomeSignal — rejection reasons and selection results fed back from M7.
+
+### How records move
+
+- RankedSet: generating → current → out of date (once the vacancy changes or new outcome data arrives)
+- RankEntry: ranked → shortlisted → sent to client → outcome recorded
+- OutcomeSignal: captured → written back → included in the next ranking run. This happens in the background and does not hold anything up.
+
+### Not in this milestone
+
+- Retraining the model automatically. We apply a configured set of weights; continuous learning is not in this contract.
+- Showing candidates their own match score. Ranking is an internal tool only.
+- Sending a shortlist to a client without a recruiter pressing the button.
+- Using the clinical and communication rating. Nothing produces that value — see open item OI-A-07.
+
+### Needs to exist first
+
+- M3 for the vacancy. M4 for credentials and category fields. M5 for the freshness score. All three are needed; ranking cannot run on a partial set.
+
+### What breaks without it
+
+- M7 takes the shortlist. Everything after M7 depends on this indirectly.
+
+### Items — 10 to build · design 9.0pd, build 43.0pd, QA 20.0pd
+
+#### M6-I1 — Candidate search
+
+`D5` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Recruiter.** Search the candidate pool on skill, location, experience, credentials and availability.
+
+##### Screens to build
+
+1. **Candidate search**
+  - Advanced search on skill, location, experience and status
+  - Filters further by category, pool, specialty, credential state and availability
+  - Saves the search so it can be run again later
+  - Adds a candidate from the results to a shortlist
+
+##### Conditions it must satisfy
+
+- Search returns candidates filtered on availability confidence and last-confirmed recency (Part A stage 7)
+- Specialty and acuity filters use the same taxonomy as capture, per category (M4-I26)
+- Verification state is a filter, so an unverifiable candidate is excludable before shortlisting
+- Search respects the user's data scope (OI-HS-01)
+- Whether hand-assembly survives as a recruiter fallback is unresolved (OI-A-10)
+
+Index **M6-I1** · Client ref **D5** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-10, OI-HS-01** · Linked items **M4-I26, M2-I14**
+
+#### M6-I2 — Talent segments
+
+`D5` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Fulfilment lead, Recruiter.** Named groups of candidates, shared with the contact groups in M5.
+
+##### Screens to build
+
+1. **Talent segments**
+  - Lists the named groups of candidates
+  - Creates a group from a set of filters, or by picking candidates
+  - Shows how many candidates are in the group
+
+##### Conditions it must satisfy
+
+- A segment definition is shared with the M5 cadence model rather than duplicated (M5-S09)
+- A dynamic segment refreshes on read; a static segment holds its membership
+- Segment size is visible before it is used for a bulk action
+- Segments respect data scope on read
+- A segment defined here is consumed by the M5 contact schedule as well as by search, so it is defined once
+
+Index **M6-I2** · Client ref **D5** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **-** · Linked items **M5-S09**
+
+#### M6-I3 — Ranked candidates
+
+`D18` · `Screen` · `XL · 6.0pd` · `AI Medium` · `High` · `MODEL` · `Low`
+
+**Who uses it: Recruiter.** The ranked list of candidates for a vacancy, best first.
+
+##### Screens to build
+
+1. **Ranked candidates**
+  - Lists candidates for a requisition, best first, with their score
+  - Shows each candidate's credentials, specialty, availability and location
+  - Marks the set as out of date when the requisition changes
+  - Runs the same way against a single shift for shift work
+2. **Why this rank**
+  - Opens from a candidate in the ranked list
+  - Lists which requirements the candidate meets, partly meets and does not meet
+  - Shows how fresh the availability behind the rank is
+3. **Override rank**
+  - Moves a candidate up or down the list
+  - Requires a reason for the move
+
+##### Conditions it must satisfy
+
+- A ranked set is produced against a requisition with rationale and unmet or partially met criteria exposed per rank (Part A stage 8)
+- Weights differ by candidate category and supply base - six combinations minimum (Part A M6)
+- A set generated before a requisition revision is marked stale and regenerable
+- Contractual ranking runs against a shift demand line, not only a requisition (Part A contractual stage 6)
+- Ranking cannot run where category, credentials or availability are missing - it fails visibly rather than ranking on a partial input set
+- The weighting model across inputs is unspecified (OI-A-11)
+- Rationale names the specific criteria met, partially met and unmet, not a generic score breakdown (Part A stage 8)
+- A candidate ranked highly on stale availability shows that staleness in the rationale
+- The rationale is defensible to a client without exposing the weight model itself
+- Verification state is visible in the rationale so a shortlist can be defended on it (Part A dependency table)
+- Where the clinical and communication rating is unpopulated, its absence is stated rather than silently weighted at zero (OI-A-07)
+- Overrides are recorded where applied and visible in the submitted shortlist (Part A stage 8)
+- An override requires a reason, so override patterns are analysable
+- Overriding does not silently retrain the model - Release 1 applies a configured weight set
+- Override history is retained per requisition and exposed to M9 reporting
+
+Index **M6-I3** · Client ref **D18** · Band **XL** · Design **3.0pd** · Build **6.0pd** · QA **3.0pd** · Total **12.0pd** · Confidence **Low** · Open items **OI-A-11** · Linked items **M6-I6, M6-I8**
+
+#### M6-I4 — Build shortlist
+
+`D5` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter.** Turn a ranked list into a shortlist and send it to the client.
+
+##### Screens to build
+
+1. **Build shortlist**
+  - Ticks candidates from the ranked list to put forward
+  - Adds a candidate found through search
+  - Sends the shortlist to the client, which issues the client link
+  - Lists the shortlists already sent for that requisition
+
+##### Conditions it must satisfy
+
+- Submitting generates a tokenised client link issued to an identified recipient (Part A stage 9)
+- A candidate can be added from search as well as from the ranked set - subject to OI-A-10
+- A recruiter can override the ranked order before submitting, and the override is recorded (D5 manual path)
+- Submission is an explicit recruiter act; nothing is auto-submitted to a client
+- The shortlist status moves to awaiting client response on submission
+- Resubmission after a client response creates a new submission rather than overwriting the first
+
+Index **M6-I4** · Client ref **D5** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **OI-A-10** · Linked items **M7-A13, M7-I17**
+
+#### M6-I5 — Ranking weights
+
+`D18` · `Config` · `XL · 5.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Set how much each factor counts, per candidate category and per pool.
+
+##### Screens to build
+
+1. **Ranking weights**
+  - Lists a set of weights for each candidate category and pool
+  - Sets how much credentials, specialty, availability and past outcomes each count
+  - Saves the set with the date it applies from
+
+##### Conditions it must satisfy
+
+- A weight set exists per candidate category and supply base combination (Part A M6)
+- Inputs differ by category, so the weight editor shows only inputs valid for that category
+- Changing a weight set does not retrospectively alter shortlists already submitted
+- The relative weighting model and its configurability are unspecified - this screen is designed to the more configurable of the two possibilities (OI-A-11)
+
+Index **M6-I5** · Client ref **D18** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Low** · Open items **OI-A-11** · Linked items **M6-I8, M0-I5**
+
+#### M6-I6 — Ranking engine
+
+`D18` · `Service` · `XXL · 8.0pd` · `AI Medium` · `High` · `MODEL` · `Low`
+
+**Who uses it: System.** Score and order the candidates, and produce the reasoning at the same time.
+
+##### Screens to build
+
+1. **No screen**
+  - Scores and orders candidates against a requisition or a single shift
+  - Produces the reasons and the unmet requirements at the same time
+  - Refuses to run where category, credentials or availability are missing
+
+##### Conditions it must satisfy
+
+- Ranking runs against a requisition and against a shift demand line with the same engine
+- Ranking cannot run on a partial input set - M3, M4 and M5 must all be present (Part A dependency map)
+- Rationale is generated as part of scoring, not reconstructed afterwards
+- A regeneration produces a new set; the prior set remains retrievable for audit
+- Scoring latency supports interactive use on the shortlist screen - target not set
+
+Index **M6-I6** · Client ref **D18** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **OI-A-11, OI-M3-14** · Linked items **M6-I7, M6-I8**
+
+#### M6-I7 — Ranking inputs
+
+`D18` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `XMOD` · `Low`
+
+**Who uses it: System.** Pull credentials, category fields, availability and past outcomes into a form the scorer can use.
+
+##### Screens to build
+
+1. **No screen**
+  - Pulls credentials, category fields, availability and past outcomes into a form the scorer can use
+  - Treats an expired credential differently from a missing one
+
+##### Conditions it must satisfy
+
+- Features are extracted from the credential record, specialty and acuity, availability confidence and recency, and written-back outcomes (Part A M6)
+- A missing feature is handled explicitly per feature rather than defaulting to zero
+- An expired credential is a distinct feature state from a missing one (M4-I25)
+- Stale availability is a distinct state from unknown availability
+- Extraction is versioned so a taxonomy change does not silently alter historic scores
+- Certifications held on the candidate record are available as a ranking input alongside credentials (M4-I19)
+
+Index **M6-I7** · Client ref **D18** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-11** · Linked items **M4-I25, M4-I26, M5-I10**
+
+#### M6-I8 — Weight set selection
+
+`D18` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Low`
+
+**Who uses it: System.** Pick the right set of weights for this vacancy's category and this candidate's pool.
+
+##### Screens to build
+
+1. **No screen**
+  - Picks the right weight set from the requisition's category and the candidate's pool
+  - Records which weight set produced the ranked list
+
+##### Conditions it must satisfy
+
+- The correct weight set resolves from the requisition's candidate category and the candidate's supply base
+- A combination with no configured set fails visibly rather than falling back to a default silently
+- The ranked set records which weight set version produced it, for audit and comparison
+- Without candidate category on the requisition, M6 cannot select the correct weight set (M3 4c)
+
+Index **M6-I8** · Client ref **D18** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Low** · Open items **OI-A-11** · Linked items **M3-D2, M4-I17**
+
+#### M6-I9 — Outcome write-back
+
+`A8` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `XMOD` · `Low`
+
+**Who uses it: System.** Take rejection reasons and outcomes from M7 and feed them into future rankings.
+
+##### Screens to build
+
+1. **No screen**
+  - Takes selection outcomes and rejection reasons from M7
+  - Writes them onto the candidate record so later ranking uses them
+
+##### Conditions it must satisfy
+
+- Selection outcomes and rejection reasons write back onto the candidate record and become an input to subsequent ranking (Part A stage 12)
+- Write-back is asynchronous and does not gate the offer stage (Part A stage 12)
+- The D6 rejection taxonomy and the D18 feature schema are agreed before either is built - A8 is not an additive layer on a ranking model with no slot for outcome data (Part A coupling 1)
+- An outcome recorded after a ranked set was generated marks that set stale
+- The schema agreement is scheduled as a joint session ahead of both M6 and M7 build
+
+Index **M6-I9** · Client ref **A8** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-11** · Linked items **M7-I4, M6-I7**
+
+#### M6-I10 — Shift ranking
+
+`D18` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: System.** Rank candidates against a single shift rather than a permanent vacancy.
+
+##### Screens to build
+
+1. **No screen**
+  - Ranks candidates against a single shift using the shift pool weights
+  - Leaves out candidates already committed to a clashing shift
+
+##### Conditions it must satisfy
+
+- A shift demand line is ranked against Base B weights (Part A contractual stage 6)
+- Availability time windows and travel radius are matching criteria, not just weights
+- A candidate already committed to a conflicting shift is excluded rather than ranked and rejected later
+- Bulk ranking across a period is possible without one run per shift
+- The same engine serves both permanent and contractual ranking (M6-I6)
+
+Index **M6-I10** · Client ref **D18** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Low** · Open items **-** · Linked items **M3-I14, M6-I6**

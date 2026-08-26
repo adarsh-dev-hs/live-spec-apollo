@@ -1,0 +1,192 @@
+---
+title: "02-10 Job runtime and scheduler"
+description: "One place that runs deferred work: queues with per-class concurrency, retry policy, dead letters an operator can see and re-queue, scheduled jobs, resumable batches, and a record…"
+---
+
+**Package** `@apollo/jobs` · **Schema** `jobs` · **Plan** **[engineering addition]** · **Effort** ~5.0pd · **Risk** Medium · **Build in** Phase 1
+
+> **[engineering addition]** — The plan assumes a queue, retries, dead-letters and a scheduler in
+> fourteen places without ever naming the runtime that executes them: `M3-I18` queue and retry,
+> `M3-I22` follow-up escalation, `M3-I30` retry and re-queue, `M2-I13` renewal alerts, `M4-I25`
+> credential expiry, `M5-I9` retry policy, `M5-I11` cadence runs, `M5-I10` decay schedules, `M8-I11`
+> check-in generation, `M8-I16` deemed-approval countdown, `M9-I12` billing trigger sweep, `M9-I17`
+> mart refresh, `M1-I11` resumable migration batches, `M15-I7` dunning. Building it fourteen times is
+> fourteen different answers — the same argument the plan itself makes for F04 and F05.
+
+## 1. Purpose
+
+One place that runs deferred work: queues with per-class concurrency, retry policy, dead letters an
+operator can see and re-queue, scheduled jobs, resumable batches, and a record of every run. Everything
+in the platform that is not an interactive request happens here.
+
+## 2. Scope
+
+### In scope
+
+- BullMQ queues on Redis, grouped into four classes with independent concurrency
+- Retry policy per class: transient backoff, permanent straight to dead-letter
+- Dead-letter visibility and operator re-queue
+- Scheduled jobs, triggered by EventBridge → `edge-schedule` Lambda → enqueue (`01-09`)
+- Singleton enforcement via Postgres advisory locks
+- Idempotency keys, so a repeat enqueue is a no-op rather than a second send
+- Resumable batch checkpointing
+- A run record per execution: which rule, which rows, when, outcome
+
+### Explicitly out of scope
+
+- The jobs themselves. Each is owned and specified by its module (`01-06` §2 lists all fourteen).
+- Event publication semantics — `02-11` owns the outbox; this runs the publisher.
+- Infrastructure provisioning — `02-15`.
+
+### Explicitly not built
+
+- A general workflow engine with branching and human tasks. The one genuine approval workflow in the
+  plan is `03-16`'s maker-checker engine, which is domain logic, not job orchestration.
+- Distributed transactions or sagas. The monolith uses database transactions (`00-02`).
+- User-schedulable jobs. Schedules are code plus configuration; cadences are configured in `03-06`.
+
+## 3. Plan traceability
+
+**N/A — no plan item.** Declared as an engineering addition above, with the fourteen items that assume
+it. Effort is estimated at 5.0pd build and is **additive to the plan's 780.5pd**, not carved out of it.
+
+## 4. Dependencies
+
+**Must exist first:** Redis and Postgres (`02-15`), `02-02` (operator actions on dead letters are
+audited).
+
+**Consumed by:** every component with a job — twenty of them.
+
+**External:** ElastiCache Redis; EventBridge Scheduler and the `edge-schedule` Lambda.
+
+## 5. Data model
+
+Queue state lives in Redis. Postgres holds the durable record, because "which rule selected which
+candidates on which date" (`M5-I11`) must survive a Redis flush.
+
+```sql
+CREATE TABLE jobs.job_run (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    queue        text NOT NULL,             -- 'engagement.cadence-run' | 'billing.trigger-sweep' …
+    job_class    text NOT NULL CHECK (job_class IN ('interactive','provider','batch','schedule')),
+    idempotency_key text,
+    status       text NOT NULL DEFAULT 'enqueued' CHECK (status IN
+                   ('enqueued','running','completed','failed','dead_letter','cancelled')),
+    attempt      integer NOT NULL DEFAULT 0,
+    max_attempts integer NOT NULL,
+    input        jsonb NOT NULL,
+    result       jsonb,
+    error        jsonb,
+    checkpoint   jsonb,                     -- resumable batches (M1-I11, M1-I2)
+    rows_affected integer,
+    enqueued_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz, finished_at timestamptz,
+    correlation_id text NOT NULL,
+    cost_units numeric(12,4), cost_unit_type text   -- provider jobs (OI-HS-05)
+);
+CREATE UNIQUE INDEX ON jobs.job_run (queue, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX ON jobs.job_run (status, enqueued_at);
+CREATE INDEX ON jobs.job_run (queue, started_at DESC);
+
+CREATE TABLE jobs.schedule (
+    code text PRIMARY KEY,                  -- 'engagement.decay' | 'links.expire-and-deem' …
+    queue text NOT NULL,
+    cron text NOT NULL,
+    timezone text NOT NULL DEFAULT 'Asia/Kolkata',
+    is_enabled boolean NOT NULL DEFAULT true,
+    last_fired_at timestamptz,
+    last_run_id uuid REFERENCES jobs.job_run(id),
+    owner_component text NOT NULL
+);
+```
+
+## 6. State machines
+
+### `JobRun`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | enqueued | `enqueued` | A repeat with the same idempotency key is a no-op returning the original run |
+| `enqueued` | worker picks up | `running` | Singleton jobs take an advisory lock first |
+| `running` | success | `completed` | `rows_affected` and cost units recorded |
+| `running` | transient failure, attempts remain | `enqueued` | Exponential backoff |
+| `running` | permanent failure | `dead_letter` | **No retry** |
+| `running` | attempts exhausted | `dead_letter` | Visible in the operator UI, re-queueable |
+| `running` | batch checkpoint written, process restarted | `enqueued` | **Resumes from the checkpoint**, not the start |
+| `enqueued`/`running` | operator cancels | `cancelled` | Audited |
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/v1/jobs/runs?queue=&status=&cursor=` | `job:read` | Run history |
+| `GET` | `/v1/jobs/dead-letters` | `job:read` | Everything that gave up |
+| `POST` | `/v1/jobs/runs/:id/requeue` | `job:manage` | Re-queue; audited |
+| `POST` | `/v1/jobs/runs/:id/cancel` | `job:manage` | Cancel; audited |
+| `GET`/`PATCH` | `/v1/jobs/schedules` | `job:manage` | List schedules; enable or disable one |
+| `POST` | `/internal/jobs/enqueue` | `edge-schedule` Lambda only | Fires a scheduled job |
+
+In-process:
+
+```ts
+await jobs.enqueue('engagement.cadence-run', { segmentId }, {
+  idempotencyKey: `cadence:${segmentId}:${runDate}`,   // one run per segment per day
+  jobClass: 'batch',
+  singleton: true,
+})
+```
+
+## 8. Events and jobs
+
+**Events emitted:** `jobs.run.dead_lettered` (alerting), `jobs.schedule.missed` (a schedule that did
+not fire — a stalled `links.expire-and-deem` silently stops invoicing, so this pages).
+
+**Jobs of its own**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `jobs.reap` | hourly | Marks abandoned `running` rows as failed after a heartbeat timeout |
+| `jobs.prune` | daily | Trims completed run history past its retention |
+| `jobs.schedule-audit` | hourly | Compares `schedule.last_fired_at` against `cron`; emits `jobs.schedule.missed` |
+
+### Queue classes
+
+| Class | Concurrency | Retry | Contains |
+|---|---|---|---|
+| `interactive` | high | 3, fast backoff | `messaging.send`, `links.issue`, `files.scan` |
+| `provider` | per-provider rate limit | 5, respecting `Retry-After` | adapter checks, OCR, voice, STT, e-sign |
+| `batch` | low | 2, resumable | cadence runs, migration, mart refresh, timesheet build |
+| `schedule` | 1, singleton | 1 | the fourteen scheduled jobs in `01-06` |
+
+## 9. Frontend
+
+| Screen | Route | Note |
+|---|---|---|
+| Job runs | `/admin/jobs` | Filter by queue, class, status; run detail with input, error and checkpoint |
+| Dead letters | `/admin/jobs/dead-letters` | The operator view the plan requires (`M3-I30`); re-queue and cancel |
+| Schedules | `/admin/jobs/schedules` | Each schedule, when it last fired, enable/disable |
+
+Admin-only. Built on `02-07`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A job that fails transiently is retried per its class policy; a permanent failure goes straight to dead-letter without retrying | `M5-I9`, `M3-I30` |
+| AC2 | Dead letters are visible and re-queueable by an operator | `M3-I30` |
+| AC3 | A repeat enqueue with the same idempotency key is a no-op, not a second execution | `M3-I18`, `M8-I14` |
+| AC4 | A batch resumes from its last checkpoint after a restart, without reprocessing completed work | `M1-I11`, `M1-I2` |
+| AC5 | A singleton job cannot run twice concurrently, proven by test | `M1-I2` |
+| AC6 | Every run records which rule ran, over which rows, when, and its outcome | `M5-I11` |
+| AC7 | A schedule that does not fire raises an alert rather than being noticed by its absence | `01-09` |
+| AC8 | A provider job records its cost units, attributed to the cause | `OI-HS-05` |
+| AC9 | Queue depth and oldest-job age are exported as metrics per class | `01-09` |
+| AC10 | An operator re-queue or cancel is audited | `M0-I4` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-26` **[raised here]** | Job run history retention | 90 days for `completed`, indefinite for `dead_letter` until an operator resolves it | Nothing |
+| `OI-HS-05` | Cadence run volume determines batch sizing | Runs are chunked and rate-limited to the provider ceiling; the projection preview in `03-06` is computed from the same chunking | `M5-I11` |
+| `OI-M3-14` | No throughput target for ingestion | Working budget: 500 inbound records/minute sustained | Sizing the `provider` class |

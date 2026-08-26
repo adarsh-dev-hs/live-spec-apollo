@@ -1,0 +1,342 @@
+---
+title: "03-01 Clients, contracts and rate cards"
+description: "The client side of the business: the hospital or home-healthcare provider, its sites and departments, the rates agreed with it, and the signed contract."
+---
+
+**Package** `@apollo/clients` · **Schema** `clients` · **Plan** D1, D13 · **Effort** ~71.5pd · **Risk** High `XMOD` · **Build in** Phase 2
+
+## 1. Purpose
+
+The client side of the business: the hospital or home-healthcare provider, its sites and departments,
+the rates agreed with it, and the signed contract. Two things here matter more than they look. First,
+the list of email addresses and WhatsApp numbers belonging to each client — `02-08` checks every
+incoming message against it to work out who sent a requisition. Second, the contract terms, because the
+billing engine reads them **at the moment it decides to raise an invoice**, and there is no fallback:
+without contract terms, permanent billing does not run at all.
+
+## 2. Scope
+
+### In scope
+
+- Client entity with legal name, GST, billing address, service lines and **care setting**
+- Locations and departments, with home-healthcare sites having no departments
+- Client contacts, including who receives which type of tokenised link
+- Sender identities: email addresses, WhatsApp numbers and HRMS tenants mapped to exactly one client
+- Rate cards by role, skill and location, versioned by effective date, with a **baseline rate** and the
+  permanent placement fee percentage
+- Contracts with versioning, renewal alerts and history
+- The three per-client waiting periods, each with a platform default fallback
+- The two resolution services billing depends on: rate lookup and contract-terms lookup
+
+### Explicitly out of scope
+
+- Client login and self-service — `03-14`, Phase 6.
+- Link issuing and the link pages — `02-14`. This module holds the contacts; that one holds the links.
+- Invoicing and receivables — `03-11`.
+- The shared list component — `02-07`, first needed here.
+
+### Explicitly not built
+
+- Writing contracts from a template. Contracts are **recorded here, not drafted**.
+- Credit limits and credit control. Billing stops at invoice raised.
+- Client-side user provisioning in Release 1 (`OI-A-04`).
+- E-signature of the client contract. The signed document is attached; signing happens outside.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M2-I1` | D1 | Client list | M | 2.0 |
+| `M2-I2` | D1 | Client details | L | 3.0 |
+| `M2-I3` | D1 | Sites and departments | L | 3.0 |
+| `M2-I4` | D1 | Client contacts, link recipient designation | L | 3.0 |
+| `M2-I5` | D1 | Rate card | XL | 5.0 |
+| `M2-I6` | D1 | Client senders | L | 3.0 |
+| `M2-I7` | D13 | Contract list with renewal window | M | 2.0 |
+| `M2-I8` | D13 | Contract details | XL | 5.0 |
+| `M2-I9` | D13 | Contract versions | L | 3.0 |
+| `M2-I10` | D13 | Client waiting periods | L | 3.0 |
+| `M2-I11` | D1 | Rate lookup service | L | 3.0 |
+| `M2-I12` | D13 | Contract terms lookup service | L | 3.0 |
+| `M2-I13` | D13 | Contract renewal alert | M | 2.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` (roles — finance reads but does not edit), `02-02`, `02-03` (window
+defaults), `02-04` (signed contract document), `02-07` (the lists), `02-09` (renewal alerts).
+
+**Consumed by:** `02-08` sender resolution — **every inbound message** (`M3-I19`); `03-02`/`03-03`
+requisitions cannot exist without a client (`M3-I9` BR1); `02-14` recipients and deemed windows;
+`03-08` offer-to-contract mapping; `03-10` timesheet pricing; `03-11` **every invoice**; `03-12` rate
+variance baseline; `03-14` the portal's whole tenancy.
+
+**External:** none directly. `X29` collects the link recipients this module stores.
+
+## 5. Data model
+
+```sql
+CREATE TABLE clients.client (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    legal_name text NOT NULL,
+    trading_name text,
+    gst_number text,                         -- required before an invoice can be raised
+    billing_address jsonb,
+    care_setting text NOT NULL REFERENCES settings.list_entry(code),  -- hospital | home_healthcare
+    service_lines text[] NOT NULL,           -- {'permanent'} | {'contractual'} | both
+    status text NOT NULL DEFAULT 'draft'
+      CHECK (status IN ('draft','active','suspended','closed')),
+    owner_user_id uuid REFERENCES identity.user(id),   -- alerts and escalations route here
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE clients.location (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL REFERENCES clients.client(id),
+    name text NOT NULL,
+    address jsonb NOT NULL,
+    geo_point point,                         -- geo-fence reference for facility work (03-16)
+    care_setting text NOT NULL REFERENCES settings.list_entry(code),
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE clients.department (            -- absent for home healthcare
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    location_id uuid NOT NULL REFERENCES clients.location(id),
+    name text NOT NULL,
+    is_active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE clients.client_contact (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL REFERENCES clients.client(id),
+    location_id uuid REFERENCES clients.location(id),
+    full_name text NOT NULL, role_title text,
+    email citext, phone_e164 text, whatsapp_e164 text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE clients.sender_identity (       -- 02-08 resolves every inbound against this
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL REFERENCES clients.client(id),
+    location_id uuid REFERENCES clients.location(id),   -- binds so requisitions default correctly
+    identity_type text NOT NULL CHECK (identity_type IN ('email','whatsapp','hrms_tenant')),
+    identity_value citext NOT NULL,
+    is_active boolean NOT NULL DEFAULT true,
+    linked_from_inbound_id uuid,             -- when created by resolving an unmatched record
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+-- an identity maps to EXACTLY ONE client; a second claim is blocked at entry (M2-I6, M3 V1)
+CREATE UNIQUE INDEX ON clients.sender_identity (identity_type, identity_value) WHERE is_active;
+
+CREATE TABLE clients.rate_card (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL REFERENCES clients.client(id),
+    name text NOT NULL
+);
+
+CREATE TABLE clients.rate_card_version (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    rate_card_id uuid NOT NULL REFERENCES clients.rate_card(id),
+    version integer NOT NULL,
+    effective_from date NOT NULL,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','in_effect','superseded')),
+    permanent_fee_pct numeric(5,2),          -- 5–6% of CTC, per contract, never a constant
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (rate_card_id, version)
+);
+
+CREATE TABLE clients.rate_card_line (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    rate_card_version_id uuid NOT NULL REFERENCES clients.rate_card_version(id),
+    role_code text NOT NULL,
+    skill_code text,
+    location_id uuid REFERENCES clients.location(id),
+    candidate_category text REFERENCES settings.list_entry(code),
+    agreed_rate numeric(14,2) NOT NULL,
+    baseline_rate numeric(14,2),             -- what A11 reports variance against (M9-I11)
+    rate_unit text NOT NULL CHECK (rate_unit IN ('per_shift','per_hour','per_placement_pct')),
+    currency text NOT NULL DEFAULT 'INR'
+);
+CREATE INDEX ON clients.rate_card_line (rate_card_version_id, role_code, skill_code, location_id);
+
+CREATE TABLE clients.contract (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    client_id uuid NOT NULL REFERENCES clients.client(id),
+    reference text NOT NULL UNIQUE,
+    status text NOT NULL DEFAULT 'draft'
+      CHECK (status IN ('draft','active','renewed','expired','terminated')),
+    current_version integer NOT NULL DEFAULT 1,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE clients.contract_version (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    contract_id uuid NOT NULL REFERENCES clients.contract(id),
+    version integer NOT NULL,
+    service_lines text[] NOT NULL,
+    starts_on date NOT NULL, ends_on date NOT NULL,
+    value numeric(14,2), currency text NOT NULL DEFAULT 'INR',
+    permanent_fee_pct numeric(5,2),          -- per contract (M9-I12)
+    rate_card_version_id uuid REFERENCES clients.rate_card_version(id),
+    guarantee_period_days integer,           -- OI-A-13 — if > 90, credit/debit notes return to R1
+    payment_terms_days integer,              -- used by 03-20 ageing
+    signed_document_id uuid,                 -- files.document
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    UNIQUE (contract_id, version)
+);
+
+CREATE TABLE clients.client_window_config (
+    client_id uuid PRIMARY KEY REFERENCES clients.client(id),
+    retention_confirmation_days integer,     -- null → platform default (02-03)
+    timesheet_approval_days integer,
+    requisition_followup_days integer,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+```
+
+## 6. State machines
+
+### `Client` (`M2-I2`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | created | `draft` | Cannot be created without the fields the invoice requires (GST, billing address) |
+| `draft` | activated | `active` | Service lines constrain which requisition types can be raised |
+| `active` | suspended | `suspended` | **Does not orphan open requisitions; blocks new ones** |
+| `suspended`/`active` | closed | `closed` | Same rule |
+
+### `Contract` (`M2-I8`, `M2-I9`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | created | `draft` | |
+| `draft` | activated | `active` | **Cannot activate without the terms the billing triggers require** |
+| `active` | renewed | `renewed` → new `active` version | Prior version remains retrievable |
+| `active` | end date passes | `expired` | Blocks new requisitions for that client, **not open ones** |
+| any | terminated | `terminated` | Reason required; full history retained |
+
+### `RateCardVersion`
+
+`draft → in_effect → superseded`. Old versions are **never deleted** — an old requisition must still
+price against the rate that applied when it was raised.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST`/`PATCH` | `/v1/clients` | `client:read` / `client:manage` | List with contract-end date and live requisition count; create; edit |
+| `POST` | `/v1/clients/:id/activate` · `/suspend` · `/close` | `client:manage` | Lifecycle |
+| `GET`/`POST`/`PATCH` | `/v1/clients/:id/locations` · `/departments` | `client:manage` | Sites and departments |
+| `POST` | `/v1/clients/:id/locations/import` | `client:manage` | Bulk, **row-level errors, valid rows still load** |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/v1/clients/:id/contacts` | `client:manage` | Contacts and link-recipient designation |
+| `GET`/`POST`/`PATCH` | `/v1/clients/:id/senders` | `client:manage` | Sender identities; a second claim is rejected |
+| `GET`/`POST` | `/v1/clients/:id/rate-cards` | `ratecard:manage` | Rate card and versions |
+| `POST` | `/v1/rate-card-versions/:id/lines` | `ratecard:manage` | Rate lines |
+| `GET` | `/v1/rates/resolve?clientId=&role=&skill=&locationId=&onDate=` | any service | **Rate lookup** — returns the line effective on that date, or a `no_match` flag |
+| `GET`/`POST`/`PATCH` | `/v1/contracts` | `contract:read` / `contract:manage` | List with renewal window; create; edit |
+| `POST` | `/v1/contracts/:id/activate` · `/renew` · `/terminate` | `contract:manage` | Lifecycle |
+| `GET` | `/v1/contracts/:id/versions` | `contract:read` | Read-only history with changed-term highlighting |
+| `GET` | `/v1/contract-terms/resolve?clientId=&onDate=` | any service | **Contract terms lookup** — version in force on that date, windows resolved with source |
+| `GET`/`PUT` | `/v1/clients/:id/windows` | `contract:manage` | The three waiting periods |
+
+Both resolution endpoints are also in-process calls. `03-11` uses `contract-terms/resolve` at the
+moment a trigger fires, never at invoice generation time.
+
+## 8. Events and jobs
+
+**Events emitted:** `clients.client.created` · `.activated` · `.suspended` ·
+`clients.sender_identity.linked` · `clients.contract.activated` · `.renewed` · `.expired` ·
+`.terminated` · `clients.rate_card_version.in_effect` · `clients.window_config.changed`.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `clients.contract-renewal-alert` | daily | Alerts the client owner ahead of expiry; renewing suppresses remaining alerts for that cycle |
+| `clients.contract-expiry` | daily | Moves contracts to `expired`; **a lapsed contract with open placements raises a distinct escalation** |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Client list — status and contract end date visible **without drilling in**, live requisition count | `/clients` | `M2-I1` |
+| Client details | `/clients/:id` | `M2-I2` |
+| Locations and departments | `/clients/:id/locations` | `M2-I3` |
+| Client contacts, with link-type recipient designation | `/clients/:id/contacts` | `M2-I4` |
+| Rate card — lines by role, skill, location, effective date, baseline, placement fee | `/clients/:id/rate-card` | `M2-I5` |
+| Sender list | `/clients/:id/senders` | `M2-I6` |
+| Contract list with renewal window | `/contracts` | `M2-I7` |
+| Contract details | `/contracts/:id` | `M2-I8` |
+| Contract versions, read-only, changed commercial terms highlighted | `/contracts/:id/versions` | `M2-I9` |
+| Client waiting periods, showing platform default alongside each override | `/clients/:id/windows` | `M2-I10` |
+
+All lists use `02-07`. A finance user can read everything here and edit nothing except contract and
+rate records their permission allows.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A client with an expiring contract is visible from the list without drilling in | `M2-I1` |
+| AC2 | A finance user can read but not edit | `M2-I1` → `M0-I3` |
+| AC3 | Active requisition count reflects M3 in real time | `M2-I1` |
+| AC4 | A client cannot be created without the fields the invoice requires (GST, billing address) | `M2-I2` |
+| AC5 | Service line selection constrains which requisition types can be raised | `M2-I2` |
+| AC6 | Deactivating a client does not orphan open requisitions; it blocks new ones | `M2-I2` |
+| AC7 | Every field change is written to the audit trail | `M2-I2` → `M0-I4` |
+| AC8 | A location and department must belong to the client on the requisition | `M2-I3`, `M3` V5 |
+| AC9 | A site-resident recruiter is attributable to a location, feeding the data-scoping rule | `M2-I3`, `OI-HS-01` |
+| AC10 | Deactivating a location with open requisitions is blocked or warned | `M2-I3` |
+| AC11 | Bulk import produces row-level errors and loads valid rows | `M2-I3` |
+| AC12 | **Department is optional where the client does not use them** — home healthcare has sites without departments | `M2-I3` |
+| AC13 | A contact can be designated as the recipient for a named A13 link type | `M2-I4` |
+| AC14 | A day-90 acknowledgement is timestamped against an identified recipient | `M2-I4`, `M7-A13` |
+| AC15 | A contact is maintained without account provisioning | `M2-I4` |
+| AC16 | Removing a contact does not orphan links already issued to them | `M2-I4` |
+| AC17 | A requisition rate reference resolves against the client rate card | `M2-I5`, `M3` BR3 |
+| AC18 | A requisition with no matching rate card line is **flagged on the board and not blocked** | `M2-I5`, `M3` BR3 |
+| AC19 | The permanent placement fee of 5–6% of CTC is a rate card attribute, **not hardcoded** | `M2-I5` |
+| AC20 | A baseline rate is recorded so A11 can report agreed against baseline | `M2-I5`, `M9-I11` |
+| AC21 | An email address, WhatsApp number or HRMS tenant maps to **exactly one** client | `M2-I6`, `M3` V1 |
+| AC22 | An identity claimed by two clients is blocked **at entry**, rather than producing multi-match at ingestion | `M2-I6` |
+| AC23 | Linking an unmatched sender in M3 writes back here so the next send resolves automatically | `M2-I6`, `M3-I19` |
+| AC24 | Deactivating an identity stops resolution without deleting historic `InboundRecord`s | `M2-I6` |
+| AC25 | An identity can bind to a location so requisitions default correctly | `M2-I6` |
+| AC26 | A contract inside its renewal window is visible without opening the record | `M2-I7` |
+| AC27 | An expired contract blocks new requisitions for that client but not open ones | `M2-I7` |
+| AC28 | Contract terms are readable by the M9 billing trigger **at the moment it fires** | `M2-I8`, `M2-I12` |
+| AC29 | The placement fee percentage is held per contract, not as a platform constant | `M2-I8` |
+| AC30 | The guarantee and replacement period is captured | `M2-I8`, `OI-A-13` |
+| AC31 | A contract cannot be activated without the terms the billing triggers require | `M2-I8` |
+| AC32 | The signed contract document is attached and retained | `M2-I8` → `M0-I6` |
+| AC33 | Renewing creates a new version; the prior version remains retrievable | `M2-I9` |
+| AC34 | **An invoice fired against a day-90 record reads the version in force at day 90, not today's** | `M2-I9`, `M9-I14` |
+| AC35 | A terminated contract retains full history | `M2-I9` |
+| AC36 | Version comparison highlights changed commercial terms specifically | `M2-I9` |
+| AC37 | A client with no configured window falls back to the platform default and **invoicing does not stall** | `M2-I10`, Part A CLOSED |
+| AC38 | The deemed-confirmation window drives the M9 permanent billing trigger | `M2-I10`, `M9-D8` |
+| AC39 | The deemed-approval window drives timesheet approval in M8 | `M2-I10`, `M8-D22` |
+| AC40 | The follow-up window drives escalation in M3 | `M2-I10`, `AS-01` |
+| AC41 | Changing a window does not retrospectively alter deadlines already running | `M2-I10` |
+| AC42 | Rate resolution at requisition creation uses the version effective on that date; at invoice time, the version effective **at the trigger event** | `M2-I11` |
+| AC43 | A no-match returns a flag rather than an error, so the requisition is not blocked | `M2-I11` |
+| AC44 | Baseline and agreed rate are both retrievable for the variance report | `M2-I11` |
+| AC45 | A missing per-client window resolves to the platform default rather than returning null | `M2-I12` |
+| AC46 | **D8 and A7 cannot fire without contract terms lookup — no fallback exists** | `M2-I12` |
+| AC47 | Resolution is auditable: the invoice records which contract version it read | `M2-I12` |
+| AC48 | A renewal alert fires on the configured schedule and renewing suppresses the remainder | `M2-I13` |
+| AC49 | A lapsed contract with open placements raises a distinct escalation | `M2-I13` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-13` | How long is the guarantee period, and does it run past day 90? | `guarantee_period_days` is captured on the contract version from day one. If it exceeds 90, **credit and debit notes move from Phase 7 into the earlier billing work** and this is a scope change, not a number. **Estimate blocker.** | `M9-I12`, `M9-I1`, `M2-I8`, `M15-I5` |
+| `OI-A-05` | Platform default values for the deemed windows | 14 days each, from `02-03`, labelled as a placeholder | `M2-I10`, `M9-D8`, `M8-D22` |
+| `OI-A-12` | Recipient scope — per client, location, requisition or placement | Contacts are stored here; the scope decision lives in `02-14`'s four-column recipient model | `M2-I4`, `M7-A13` |
+| `OI-HS-01` | Whether a site-resident recruiter sees only their own site's clients | `AS-18` — location attribution captured here regardless | `M2-I3`, `M2-I7` |
+| `OI-M3-13` | One monitored email address with sender routing, or one per client | Both supported: `sender_identity` handles either, and a per-client address is just another row | `M2-I6` |
+| `OI-HS-17` | In home healthcare the workplace is a patient residence that changes between shifts — who supplies the visit address and in what form? | The **site** is the client's operating base; the **visit address** sits on the shift line in `03-03`. A coordinate is needed to check against, and its source is unresolved. | `M2-I3`, `M3-I14`, `M8-I7`, `M12-I5` |

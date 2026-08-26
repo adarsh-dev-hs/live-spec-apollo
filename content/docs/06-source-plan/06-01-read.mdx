@@ -1,0 +1,93 @@
+---
+title: "06-01 How to read this plan"
+description: "The engineering index, scope discipline, effort bands, AI leverage, risk drivers and confidence levels the whole plan is written in."
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+This plan covers the whole six-month engagement in one document. It is written to be reviewed by the client product manager and picked up by the UX team, and the milestone detail is written plainly enough for a developer joining cold.
+
+> **Why this is not split into Release 1 and Release 2.** The engagement was scoped as two releases across six months. At revision the client moved nine Release 2 deliverables into Release 1 and added fourteen new ones, so Release 1 alone is now thirty-four deliverables. A three-month-plus-three-month split no longer describes the work. This plan therefore treats the six months as one delivery with fifteen milestones, sequenced by what depends on what. Milestones M10 to M15 are the items still sitting on the client's Release 2 list and are marked as such throughout.
+
+## The engineering index
+
+Every screen, service and integration has one identifier of the form **M&lt;milestone>-I&lt;number>**. This is the reference used in wireframes, tickets, test cases and conversations. It maps to the client's own deliverable numbering, which is shown alongside it, so either side can talk in their own terms without ambiguity.
+
+| Identifier | What it is | Example |
+|---|---|---|
+| M&lt;n>-I&lt;k> | **The engineering index.** One per buildable item. Use this everywhere. | M3-I12 — Fulfilment board |
+| M&lt;n> | Milestone. M1 to M9 are the client's Release 1 list; M10 to M15 are the Release 2 list. | M3 — Demand Intake & Allocation |
+| D&lt;n> / A&lt;n> | The client's own deliverable number, carried unchanged. Shown on every item. | D2, A1, A13 |
+| F&lt;nn> | A platform prerequisite Hiresense identified. Not in the client's list. | F03 — Role & permission model |
+| OI-… | An open decision. Source is the client's Part A, Part B, or Hiresense. | OI-A-12, OI-HS-01 |
+| Linked items | Other items this one touches. The link is not directional — it may be something this item needs, or something that consumes it. Build order is stated at milestone level, on the Sequencing tab. | M3-I17 links to M9-I9 |
+| AS-&lt;nn> | An assumption we are working to until an open item closes. | AS-04 |
+
+## Scope discipline
+
+Every element and scenario listed against an item is required to release that item. Anything that would help but does not gate a release has been taken out, so the estimate reflects the minimum rather than the comfortable version. Five classes of thing were removed:
+
+**Settings we can fix instead** — Where a single sensible value works, it is fixed in the build rather than exposed as a setting. Audit retention is a fixed policy, not a configuration screen. Only the settings the client explicitly asked to vary per client stay configurable.
+
+**Duplication of shared components** — Export, saved views and column choosers appear once in M0-I7 and are inherited by every list. Listing them per screen inflated the estimate without adding work.
+
+**Measurement inside operating screens** — Parse accuracy, override rates, suggestion quality and usage counts have been removed from the screens where the work happens. Reporting lives in M9; instrumenting every screen separately is a second reporting layer nobody asked for.
+
+**Comparison, preview and trend views** — Side-by-side diffs, period-on-period comparisons, sample previews and trend lines. Useful, and none of them stops a release.
+
+**Bulk and shortcut actions** — Removed unless the client named them — bulk salary revision stays because D23 asks for it; bulk reclassification of inbound messages goes because nothing asks for it.
+
+**Anything the client did not state** — Each screen traces to something the client wrote. Where they asked for an outcome, the plan carries the smallest screen that achieves it and nothing more. Where they were silent, there is no screen — the gap is recorded as an open item instead of being filled with a guess.
+
+> **If something here looks thin, that is deliberate.** Where a convenience was cut and you disagree, it is a conversation about adding scope back with a number attached, not a gap in the analysis. Anything the client document names explicitly has been kept, even where it looked optional.
+
+## Effort
+
+Every item carries an **Effort Band** — a readable size that maps to a fixed number of person-days, so bands add up into a timeline. The band covers build. Design and QA are shown separately because they are done by different people at different points.
+
+| Band | Person-days | What it means |
+|---|---|---|
+| `XS` | 0.5 | Trivial. Config toggle, static panel, single read-only view. AI scaffolds it almost entirely. |
+| `S` | 1.0 | Simple CRUD list or form against a settled schema. Low branching. |
+| `M` | 2.0 | Form or view with conditional logic, several states, or moderate server logic. |
+| `L` | 3.0 | Multi-state screen with tabs, or a domain service with a real state machine. |
+| `XL` | 5.0 | Subsystem component, or integration against a documented and stable external API. |
+| `XXL` | 8.0 | Integration with an unconfirmed or unstable external, data migration, or a model/accuracy-dependent component. |
+
+## AI leverage
+
+The effort figures assume AI-assisted development. That help is not even across the work — it removes most of the effort on a standard form and almost none on an integration with a supplier nobody has chosen yet. Stating it per item is what makes the estimate defensible.
+
+**High High** — AI-assisted development removes most of the work. Scaffolded CRUD, forms, list views, standard validation, generated tests. Estimate assumes 60-70% acceleration against manual coding.
+
+**Medium Medium** — AI accelerates the first draft but review, integration wiring and edge cases stay human. Assumes 30-40% acceleration.
+
+**Low Low** — AI gives little leverage. External API debugging, unstable third-party behaviour, migration against unseen data, model tuning, or spec ambiguity that no amount of code generation resolves. Assumes 0-15% acceleration.
+
+## Risk
+
+Risk is about difficulty and exposure, not importance. A big screen with a clear spec is low risk; a small integration with an unnamed supplier is high. The driver code says why.
+
+| Level | Meaning |
+|---|---|
+| `Low` | Self-contained, spec settled, no external party. Slippage affects this item only. |
+| `Medium` | Cross-module contract, shared component, or a spec gap with a workable assumption in place. |
+| `High` | Unconfirmed external dependency, unresolved open item blocking build, accuracy-dependent behaviour, or a component several modules break without. |
+
+| Code | Driver | Meaning |
+|---|---|---|
+| `EXT` | External dependency | Third-party API, provider not yet named, or behaviour outside our control. |
+| `SPEC` | Unresolved specification | An open item must close before this can be built correctly. |
+| `SHARED` | Shared component | Built once, consumed by several modules. A defect or delay multiplies. |
+| `DATA` | Data volume or migration | Depends on data we have not yet profiled. |
+| `MODEL` | Accuracy-dependent | Parsing, transcription or classification quality determines whether it works at all. |
+| `COMP` | Compliance | DPDP, audit or retention obligations attach. |
+| `XMOD` | Cross-module contract | A schema two modules must agree before either is built. |
+
+## Confidence
+
+**High** — the specification is complete. **Medium** — an assumption covers a gap that is unlikely to change the shape of the work. **Low** — an open decision could change what gets built, not just how much. 97 of 208 items are Low, and each one names the open item responsible. Every M10 to M15 item is Low, because no client specification exists for them yet.

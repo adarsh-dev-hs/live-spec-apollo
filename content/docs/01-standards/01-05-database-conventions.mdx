@@ -1,346 +1,162 @@
 ---
-title: "01-05 · Database Conventions"
-description: "PostgreSQL 16 · Drizzle ORM · SQL migrations"
+title: "01-05 Database conventions"
+description: "One PostgreSQL 16 database, one schema per module, hand-written SQL, forward-only plain-SQL migrations. No ORM (AS-09)."
 ---
 
-PostgreSQL 16 · Drizzle ORM · SQL migrations
+**Package** `@apollo/db` · **Schema** all · **Plan** F14, A10, D8, D28 · **Effort** — · **Risk** Medium `DATA` · **Build in** Phase 1
 
----
+One PostgreSQL 16 database, one schema per module, hand-written SQL, forward-only plain-SQL migrations.
+No ORM (`AS-09`).
 
-## 1. One database, ten schemas
+## 1. Schema per module
 
-Schemas make ownership visible in the database itself.
+| Schema | Owner | Schema | Owner |
+|---|---|---|---|
+| `identity` | 02-01 | `clients` | 03-01 |
+| `audit` | 02-02 | `demand` | 03-02, 03-03, 03-18 |
+| `settings` | 02-03 | `candidates` | 03-04, 03-05 |
+| `files` | 02-04 | `engagement` | 03-06 |
+| `inbound` | 02-08 | `matching` | 03-07 |
+| `messaging` | 02-09 | `selection` | 03-08 |
+| `jobs` | 02-10 | `placement` | 03-09 |
+| `events` | 02-11 | `timesheets` | 03-10, 03-19 |
+| `dp` | 02-12 | `billing` | 03-11, 03-20 |
+| `adapters` | 02-13 | `reporting` | 03-12 |
+| `links` | 02-14 | `migration` | 03-13 |
+| | | `onboarding` | 03-15 |
+| | | `workforce` | 03-16 |
+| | | `payroll` | 03-17 |
 
-| Schema | Owned by |
-|---|---|
-| `platform` | iam, audit, config, files, events, links, approvals, adapters |
-| `clients` | clients, contracts |
-| `demand` | intake, requisitions, demand-ops |
-| `supply` | candidates, credentials, migration |
-| `engage` | engagement |
-| `match` | matching |
-| `select` | selection |
-| `place` | placements, attendance, onboarding, workforce |
-| `bill` | billing, collections, payroll |
-| `report` | analytics |
+**One Postgres role per schema.** `app_demand` has `USAGE` on `demand` and `SELECT` on the specific
+cross-schema views it is granted. It has no rights at all on `billing`. A module reaching into another
+module's tables fails at the database, not at review.
 
-**A table is written by exactly one module.** Cross-schema foreign keys are not used — hold the ID
-and read through the owning module's service (`00-03 §5`). A cross-schema FK is a hidden coupling
-that makes a module impossible to test in isolation.
+Cross-schema reads go through an explicit, granted view named `<schema>.v_<thing>_for_<consumer>` —
+for example `clients.v_contract_terms_for_billing`. Adding one is a deliberate act with a migration
+and a reviewer.
 
----
-
-## 2. Naming
-
-| Thing | Convention | Example |
-|---|---|---|
-| Table | `snake_case`, **singular** | `requisition_version` |
-| Column | `snake_case` | `deemed_approved_at` |
-| Primary key | `id uuid` | |
-| Foreign key | `<referenced_table>_id` | `requisition_id` |
-| Boolean | `is_` / `has_` prefix | `is_active`, `has_signed` |
-| Timestamp | `<verb>_at` | `created_at`, `closed_at`, `age_clock_paused_at` |
-| Date | `<noun>_date` | `joining_date`, `effective_date` |
-| Enum type | `<table>_<column>_enum` | `requisition_status_enum` |
-| Index | `idx_<table>__<cols>` | `idx_requisition__client_id_status` |
-| Unique | `uq_<table>__<cols>` | `uq_invoice__billing_trigger_id` |
-| Check | `ck_<table>__<rule>` | `ck_invoice__amount_positive` |
-
----
-
-## 3. Standard columns
-
-Every table:
+## 2. Table conventions
 
 ```sql
-id          uuid        PRIMARY KEY,          -- UUID v7, generated in the app
-created_at  timestamptz NOT NULL DEFAULT now(),
-updated_at  timestamptz NOT NULL DEFAULT now()
-```
-
-Every table a user can change:
-
-```sql
-created_by  uuid  NOT NULL REFERENCES platform.app_user(id),
-updated_by  uuid  NOT NULL REFERENCES platform.app_user(id)
-```
-
-Every table more than one person edits concurrently:
-
-```sql
-version     integer NOT NULL DEFAULT 1        -- optimistic lock, surfaced as ETag
-```
-
-Records with a human-facing reference:
-
-```sql
-reference   text NOT NULL UNIQUE              -- 'REQ-2026-00142' — never the PK
-```
-
----
-
-## 4. No soft delete
-
-There is no `deleted_at` in this platform. Records **deactivate**:
-
-```sql
-is_active   boolean     NOT NULL DEFAULT true,
-retired_at  timestamptz
-```
-
-Because:
-- A deactivated user must stay visible on records they created (`M0-I2`)
-- A deactivated list entry must stay readable on records that already used it (`M0-I5`)
-- Merging duplicate candidates must not delete either record (`M4-I20`, `M1-I12`)
-- Old rate card and contract versions must survive forever — an old requisition prices at the rate
-  that applied when it was raised (`M2-I9`)
-
-`WHERE is_active` is an explicit, greppable decision. `deleted_at IS NULL` scattered everywhere is a
-class of bug where one forgotten predicate silently exposes retired data.
-
----
-
-## 5. Append-only tables
-
-```sql
-REVOKE UPDATE, DELETE ON platform.audit_entry FROM apollo_app;
-```
-
-A **database grant**, not a code convention. Applied to:
-
-`platform.audit_entry` · `platform.event_store` · `demand.status_transition` ·
-`demand.allocation_record` · `place.retention_record` · `bill.billing_trigger` ·
-`match.recruiter_override` · `platform.adapter_call` · `platform.link_response`
-
-Corrections are new rows with a reason, never an edit. These are the records that end up in front of
-an auditor or in a billing dispute; "we changed it later" is not an answer.
-
----
-
-## 6. Temporal data
-
-Two patterns, and using the wrong one is a billing error.
-
-### 6.1 Versioned entity — full history, one current
-
-Requisition, contract, rate card, offer.
-
-```sql
-CREATE TABLE clients.contract (
-  id            uuid PRIMARY KEY,
-  client_id     uuid NOT NULL,
-  reference     text NOT NULL UNIQUE,
-  current_version_id uuid,
-  status        contract_status_enum NOT NULL
+CREATE TABLE demand.requisition (
+    id                  uuid PRIMARY KEY DEFAULT uuidv7(),
+    reference           text NOT NULL UNIQUE,              -- REQ-2026-000431
+    client_id           uuid NOT NULL REFERENCES clients.client(id),
+    location_id         uuid NOT NULL REFERENCES clients.location(id),
+    department_id       uuid     NULL REFERENCES clients.department(id),  -- null for home healthcare
+    service_line        text NOT NULL CHECK (service_line IN ('permanent','contractual')),
+    candidate_category  text NOT NULL REFERENCES settings.list_entry(code),
+    care_setting        text NOT NULL REFERENCES settings.list_entry(code),
+    status              text NOT NULL,
+    positions_requested integer NOT NULL CHECK (positions_requested > 0),
+    positions_filled    integer NOT NULL DEFAULT 0 CHECK (positions_filled >= 0),
+    completeness        jsonb NOT NULL DEFAULT '{"missing":[]}'::jsonb,
+    first_complete_at   timestamptz,                       -- aging starts here (M3 BR4)
+    held_seconds        bigint NOT NULL DEFAULT 0,          -- accumulated hold, excluded from aging
+    owner_id            uuid REFERENCES identity.user(id),
+    source_channel      text NOT NULL,                     -- immutable after creation (M3 BR2)
+    inbound_record_id   uuid REFERENCES inbound.inbound_record(id),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    created_by          uuid NOT NULL,
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    updated_by          uuid NOT NULL,
+    CONSTRAINT positions_filled_within_requested CHECK (positions_filled <= positions_requested)
 );
-
-CREATE TABLE clients.contract_version (
-  id              uuid PRIMARY KEY,
-  contract_id     uuid NOT NULL REFERENCES clients.contract(id),
-  version_number  integer NOT NULL,
-  effective_from  date NOT NULL,
-  effective_to    date,                        -- NULL = still in force
-  terms           jsonb NOT NULL,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  created_by      uuid NOT NULL,
-  UNIQUE (contract_id, version_number)
-);
-CREATE INDEX idx_contract_version__lookup
-  ON clients.contract_version (contract_id, effective_from DESC);
 ```
 
-### 6.2 As-at lookup — **mandatory** for rates and contract terms
+| Rule | Detail |
+|---|---|
+| Primary key | `uuid` v7 named `id` — time-ordered, so it indexes like a serial without leaking a count |
+| Human reference | separate `reference` column, generated, unique, shown in the UI |
+| Table names | singular, snake_case |
+| Booleans | `is_`/`has_` prefix, `NOT NULL DEFAULT` always |
+| Enums | `text` + `CHECK`, or a FK to `settings.list_entry` when the client can edit the list. **Never** a Postgres `ENUM` type — the plan has nine configurable lists and altering an enum type is a lock. |
+| Money | `numeric(14,2)` + a `currency` column |
+| Timestamps | `timestamptz` in UTC; business dates as `date` |
+| JSONB | only for genuinely open shapes: raw inbound payload, parsed field bag, category attribute values, rank rationale, event payload. Every one has a Zod schema in code and a documented shape in its spec. |
+| Nullable | means "not known"; never overloaded to mean "not applicable" — use a discriminator column |
+| FKs | always declared, `ON DELETE RESTRICT` by default. Nothing cascades into audited data. |
+
+## 3. Append-only tables
+
+`audit.audit_entry`, `demand.status_transition`, `demand.allocation_record`,
+`matching.recruiter_override`, `events.platform_event`, `placement.retention_record`,
+`adapters.adapter_call`, `messaging.notification_log`.
 
 ```sql
-SELECT * FROM clients.contract_version
-WHERE contract_id = $1
-  AND effective_from <= $2                      -- the date the TRIGGER fired
-  AND (effective_to IS NULL OR effective_to > $2)
-ORDER BY version_number DESC
-LIMIT 1;
+REVOKE UPDATE, DELETE ON audit.audit_entry FROM app_audit, app_demand, app_billing /* … */;
 ```
 
-| Rule | |
-|---|---|
-| Never `WHERE effective_to IS NULL` to mean "current" when pricing something historic | |
-| The billing service resolves terms **as at the trigger date** and **freezes the resolved values onto the invoice** | `M9-I14` |
-| A rate card change today must not alter an invoice raised last month | |
-| Every temporal lookup is a repository method with an explicit `asAt` parameter — never a default of `now()` | |
+Enforced by grant, tested by a suite that asserts an `UPDATE` raises. `RetentionRecord` additionally
+snapshots the contract terms it read rather than referencing them, so a later contract amendment
+cannot change what an invoice was justified by (`M9-I13`).
 
-The frozen-onto-the-invoice part matters: even a correct as-at lookup can produce a different answer
-later if someone back-dates a version. Once an invoice is raised, its numbers are its own.
-
----
-
-## 7. Configurable values are rows, not enums
-
-Two different things, often confused:
-
-| | Postgres enum | `platform.list_entry` |
-|---|---|---|
-| Use for | State machines — states the code branches on | Business lists a user maintains |
-| Examples | `requisition_status`, `credential_status`, `invoice_status` | close reason, hold reason, rejection reason, leave type, category attributes |
-| Changing it | A migration and a release | A settings screen, no release |
-
-If a business user could plausibly want a new option on a Tuesday, it is a `list_entry`.
-Nine known lists in `02-03`.
-
----
-
-## 8. JSONB — where it is right, and where it is not
-
-**Use it for:**
-
-| Use | Table | Why |
-|---|---|---|
-| Raw inbound payload | `demand.inbound_record.raw_payload` | Shape varies by channel; kept forever for dispute traceability |
-| Category attribute values | `supply.candidate_attribute.values` | Fields differ per category and are configurable |
-| Contract terms | `clients.contract_version.terms` | Read as a unit, frozen onto invoices |
-| Adapter request/response | `platform.adapter_call` | Supplier-defined, unknowable in advance |
-| Event payload | `platform.event_store.payload` | By definition heterogeneous |
-| Rank rationale | `match.rank_entry.rationale` | Structured explanation, read whole |
-
-**Do not use it for:** anything you filter, sort, join or aggregate on regularly. Category *values*
-are jsonb; the category attribute *definitions* are proper tables, because M3, M4 and M6 all query
-them.
-
-Where you must query into jsonb, add a GIN index and say why in the migration comment.
-
----
-
-## 9. Indexing
-
-Add an index when you add the filter, in the same migration.
+## 4. Indexing
 
 | Pattern | Index |
 |---|---|
-| Every FK | btree on the FK column |
-| List screen default filter | composite, most selective first |
-| Free-text search | GIN + `pg_trgm` on the searched columns |
-| Time-ordered append-only reads | btree on `(entity_id, created_at DESC)` |
-| Partial where a status dominates | `WHERE status IN ('open','in_fulfilment')` |
-| jsonb containment | GIN |
+| Every FK | b-tree on the referencing column |
+| List screens | composite covering the default filter + sort, e.g. `(status, days_aged DESC) INCLUDE (client_id)` |
+| Data scope | every scoped table indexes its scope column (`location_id`, `client_id`) **first** in the composite |
+| Free-text search | `pg_trgm` GIN on candidate name, client name, requisition reference |
+| Structured candidate search (`M6-I1`) | GIN on `candidates.candidate.attributes` jsonb + b-tree on `(category, base, availability_confidence DESC)` |
+| Time-series marts | BRIN on `occurred_at` |
+| Uniqueness that matters | partial unique indexes: one active `SenderIdentity` per address, one open `Placement` per accepted `Offer`, one `Invoice` per `BillingTrigger` |
 
-Known hot paths, indexed from day one:
+`SELECT` without a bounded `LIMIT` or a scope predicate on a table expected to exceed 100k rows fails
+review. Volume for the migrated base is unknown (`OI-A-02`), so the assumption is that it is large.
 
-```sql
--- fulfilment board: the highest-traffic screen in the platform
-CREATE INDEX idx_requisition__board
-  ON demand.requisition (status, client_id, created_at DESC)
-  WHERE status IN ('open','in_fulfilment','partially_filled');
-
--- cadence: "who is stalest" runs across the whole Base B pool every few days
-CREATE INDEX idx_candidate__cadence
-  ON supply.candidate (base, availability_confidence ASC, last_contacted_at ASC)
-  WHERE is_active;
-
--- unmatched inbound must surface fast
-CREATE INDEX idx_inbound_record__unmatched
-  ON demand.inbound_record (received_at DESC)
-  WHERE status = 'unmatched';
-
--- verification pendency
-CREATE INDEX idx_verification_case__pending
-  ON supply.verification_case (queued_at ASC)
-  WHERE status IN ('queued','in_progress','awaiting_registry');
-```
-
----
-
-## 10. Migrations
-
-Plain SQL, forward-only, one concern each, owned by the module.
+## 5. Migrations
 
 ```
-packages/modules/requisitions/migrations/
-  20260901120000_create_requisition.sql
-  20260903090000_add_age_clock_paused_at.sql
+migrations/
+  0001_create_identity_schema.sql
+  0002_create_audit_schema.sql
+  …
+  0043_add_requisition_care_setting.sql
 ```
 
-| Rule | |
+| Rule | Why |
 |---|---|
-| Forward-only | No `down`. A mistake is fixed by a new migration. |
-| Idempotent where cheap | `IF NOT EXISTS` on creates |
-| **No destructive change in one step** | Add column → backfill → switch reads → stop writing old → drop, across releases |
-| Data backfills over ~10k rows are batched jobs, not migrations | A migration must not hold a lock for minutes |
-| Every migration runs in CI against an empty DB **and** a restored copy of the previous environment | |
-| Applied by the deployment pipeline, never by hand | |
-| `CONCURRENTLY` for indexes on tables with data | Outside a transaction |
+| Plain SQL, numbered, **forward-only**. No down migrations. | A down migration against append-only billing evidence is a data-loss tool. Roll forward with a new file. |
+| Applied by the in-repo runner inside a transaction, recorded in `public.schema_migration` | |
+| Additive first, destructive later: add nullable → backfill in a job → set `NOT NULL` → drop old in a later release | Zero-downtime, and the four-environment pipeline (`M1-I16`) requires it |
+| `CREATE INDEX CONCURRENTLY` outside a transaction, in its own file | An index build must not lock the fulfilment board |
+| Every migration is reversible **by data**, i.e. nothing drops a column containing candidate or billing data in the same release it stops being written | |
+| Seed data (roles, the nine settings lists, categories, care settings) is a migration, not a script | `M0-I5` requires categories to exist as data on day one |
 
----
+## 6. Transactions and isolation
 
-## 11. Constraints belong in the database
+- Default `READ COMMITTED`.
+- `SELECT … FOR UPDATE` before any state transition. Two recruiters holding the same requisition, two
+  syncs of the same offline check-in, two link submissions — all real (`M8-I14`, `M7-I18`).
+- `SERIALIZABLE` for the three places where a uniqueness rule spans rows: raising an invoice against a
+  trigger (`M9-I12` "cannot raise a second invoice for the same placement"), locking a payroll cycle,
+  and merging duplicate candidates.
+- Transactions are short. No provider call, no S3 call, no user wait inside one.
+- Advisory locks for singleton jobs: a migration batch "cannot be started twice concurrently"
+  (`M1-I2`); a cadence run must not overlap itself.
 
-The application is not the only writer — migrations, admin scripts and future services exist.
+## 7. Soft state, never deletion
 
-```sql
--- one billing trigger can only ever produce one invoice
-ALTER TABLE bill.invoice
-  ADD CONSTRAINT uq_invoice__billing_trigger_id UNIQUE (billing_trigger_id);
-
--- a requisition cannot be closed without a reason
-ALTER TABLE demand.requisition
-  ADD CONSTRAINT ck_requisition__close_reason
-  CHECK (status <> 'closed' OR close_reason_code IS NOT NULL);
-
--- a candidate's phone is unique per active record
-CREATE UNIQUE INDEX uq_candidate__phone
-  ON supply.candidate (phone_e164) WHERE is_active;
-
--- money is never negative on an invoice line
-ALTER TABLE bill.invoice_line
-  ADD CONSTRAINT ck_invoice_line__amount CHECK (amount >= 0);
-
--- a maker can never be the checker
-ALTER TABLE platform.approval_request
-  ADD CONSTRAINT ck_approval__maker_not_checker
-  CHECK (approved_by IS NULL OR approved_by <> raised_by);
-```
-
-That last one is the plan's requirement `M12-I6` — "enforced in the service not the screen". We
-enforce it in both, because a service is one code path and a constraint is every code path.
-
----
-
-## 12. Encryption
-
-| Data | Treatment |
+| Kind | Rule |
 |---|---|
-| Everything | RDS encryption at rest (KMS), TLS in transit |
-| Bank account, PAN, Aadhaar number, UAN | **Column-level encryption** via `pgcrypto`, key in Secrets Manager |
-| Passwords | `argon2id`. Never encrypted — hashed. |
-| OTPs | Hashed, 5-minute TTL, single use, in Redis |
-| Session tokens | Random 256-bit, stored hashed |
-| Link tokens | Random 256-bit, stored hashed; the plaintext exists only in the URL we sent |
+| Reference list entry | `deactivated_at` — stays readable on records that already used it (`M0-I5`) |
+| User | `deactivated_at` — cannot sign in, stays visible on their past records (`M0-I2`) |
+| Client, location, contract | status transition; open records are never orphaned (`M2-I2`, `M2-I3`) |
+| Candidate | **never deleted.** A losing duplicate is merged with lineage to both source ids (`M1-I12`, `M4-I21`) |
+| Document | superseded, previous version retained (`M0-I6`) |
+| Erasure request | handled by `02-12` as a defined policy, not an ad-hoc delete — and unresolved against the retained pool (`OI-HS-02`) and finance retention (`OI-HS-14`) |
 
-Encrypted columns are never indexed or searched. If you need to look someone up by PAN, store a
-salted hash in a separate column for lookup and keep the encrypted value for display.
+## 8. Reporting reads
 
----
+`03-12` reads `reporting.*` marts materialised from `events.platform_event`. It never queries
+operational tables (`M9-I17`). This keeps a leadership dashboard from competing with the fulfilment
+board, and it is what makes a report over an already-elapsed period possible at all.
 
-## 13. Connections
+## 9. Local and non-production data
 
-| | |
-|---|---|
-| Pool | `pg` pool, max 20 per `api` task, 10 per `worker` task |
-| Statement timeout | 30s API, 5min worker |
-| Idle-in-transaction timeout | 60s — kills a leaked transaction before it blocks a deploy |
-| Read replica | Added in M9 for reporting. Reporting queries route there explicitly; nothing else does. |
-| Long-running reports | Always on the replica, always with a timeout |
-
----
-
-## 14. Backup and recovery
-
-| | |
-|---|---|
-| Automated backups | Daily, 30-day retention |
-| PITR | Enabled, 7-day window |
-| Restore rehearsal | Once per environment before UAT, and again before go-live |
-| Migration cutover | A rollback point exists up to the agreed cutover commit (`M1-I9`) |
-
-**RPO and RTO are not stated anywhere (`OI-HS-12`)**, and neither is the backup retention period.
-Working assumption `AS-12`: RPO 15 min, RTO 4 hours, 30-day backup retention. This needs confirming —
-without targets there is no pass condition for a restore rehearsal, and backup retention may conflict
-with the DPDP erasure policy (`OI-HS-02`).
-
+- Local dev: Postgres 16 in Docker, `npm run db:reset` recreates from migrations plus the demo seed.
+- Integration tests: testcontainers, real Postgres, migrations applied, transaction rolled back per test.
+- **dev, qa and uat carry anonymised data only** (`M1-I16`). Production personal data never leaves
+  production, and the anonymiser is part of the pipeline rather than a manual step.

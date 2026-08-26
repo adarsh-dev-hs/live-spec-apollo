@@ -1,0 +1,116 @@
+---
+title: "04-00 Integration register"
+description: "Every outside system the platform touches. Half of them have no named supplier. Each unnamed supplier is an unpriced integration and a failure mode nobody can test against."
+---
+
+**Package** `integrations/*` · **Schema** varies · **Plan** all `EXT` items · **Effort** ~102pd across integrations · **Risk** High · **Build in** Phases 1–7
+
+Every outside system the platform touches. **Half of them have no named supplier.** Each unnamed
+supplier is an unpriced integration and a failure mode nobody can test against.
+
+## 1. The register
+
+| ID | System | Used for | Supplier status | Risk | Cost driver | Used by | Open item |
+|---|---|---|---|---|---|---|---|
+| `04-01` | WhatsApp Business Platform | Inbound text and voice notes; A1 follow-up; D10 delivery; offer delivery; A13 link delivery; trial check-ins; payslips | **Not named.** One registered number and template set shared across A1 and D10 — not two | High | Per conversation. Follow-up and cadence volume is a direct cost input | `03-02`, `02-09`, `03-06`, `03-08`, `02-14`, `03-09`, `03-17` | `OI-HS-05`, `OI-HS-07`, `X01` |
+| `04-02` | SMS (DLT-registered) | OTP, cadence fallback, alerts | Aggregator not named; **DLT registration is a regulator lead time** | Medium | Per segment | `02-01`, `02-09`, `03-06` | `X02` |
+| `04-03` | Email — Amazon SES | Requisition capture by email; follow-up; offer and link delivery; internal alerts | AWS SES. **Mailbox model undecided** — one address with sender routing, or per-client addresses | Medium | Low direct cost. Per-client addresses add operational setup for every new client | `02-08`, `02-09`, `03-02` | `OI-M3-13`, `X03` |
+| `04-04` | Outbound voice | Re-contact of the passive base; escalated trial check-ins | **Not named.** Scoped items are the integration and the response extraction schema, not the voice service | High | Per minute, plus AI inference for the conversational layer | `03-06`, `03-09` | `OI-A-09`, `X04` |
+| `04-05` | Speech-to-text | Transcription of WhatsApp voice notes to the requisition schema | **Not named.** May or may not be the same provider as `04-04`. Language coverage must be proven against **field-captured audio** | High | Per minute. Volume driven by how many clients use voice notes | `02-08`, `03-02` | `OI-M3-05`, `X25` |
+| `04-06` | AI parsing and intent classification | Separates demand from candidate-response intents; extracts fields; CV parsing; free-text and voice answer extraction | **Not named.** Threshold, fallback and retraining path to be agreed once across A1 and A14 | High | Inference per inbound. **Accuracy directly sets manual-entry queue load** | `02-08`, `03-02`, `03-05`, `03-06` | `OI-M3-06`, `OI-A-08` |
+| `04-07` | Client HRMS / ATS | Structured requisition payloads from client systems, bypassing parsing | **Number and identity of client systems not specified.** Each is a separate connector | High | Per-connector build effort, not consumption | `03-02` | `OI-M3-03`, `X27` |
+| `04-08` | Client spreadsheet formats | Per-client column mapping to the requisition schema | **Number of distinct formats not specified** | High | Per-format mapping and test data | `03-02` | `OI-M3-04`, `X28` |
+| `04-09` | Credential registries and aggregator | INC/NUID→NRTS, NMC and state medical councils, allied health councils, Pharmacy Council; Aadhaar via DigiLocker, PAN, EPFO, court checks | **Aggregator not selected** (IDfy / AuthBridge). Several registries have no API and resolve to document plus manual verification behind the same interface | High | Per-check pricing from the aggregator | `02-13`, `03-04` | `OI-A-01`, `OI-HS-06`, `X14`, `X15`, `X16` |
+| `04-10` | Document OCR | Credential and identity document extraction | **Not named.** Sits behind the `02-13` adapter interface | Medium | Per page | `03-04` | `OI-HS-07` |
+| `04-11` | Electronic signature | Offer signature and offer-to-contract mapping | **Not named** | Medium | Per envelope | `03-08` | `OI-HS-07`, `X26` |
+| `04-12` | Apple App Store and Google Play | Publishing the candidate app — **the only route by which shift attendance reaches the platform** | Accounts must be in **Apollo's name**; Apple requires a D-U-N-S number. First submission reviewed more slowly | High | Annual developer fees. No per-use cost | `03-05`, `03-10` | `OI-HS-08`, `X12`, `X13` |
+| `04-13` | Finance system | Destination for raised invoices, credit notes and open receivables | **Not named.** Part A instructs building the invoice object addressable by API or file export so the target attaches later | Medium | None until named | `03-11`, `03-20` | `OI-A-14` |
+| `04-14` | Payroll engine | Payroll inputs and outputs; we do not calculate pay | **Not chosen** — Hirecraft, PayBooks or another | High | Per associate per cycle | `03-17` | `X23` |
+| `04-15` | Legacy CPAL | Source system for the A10 migration | **Joint data profiling has not run.** Volume, quality and duplicate rate all unknown | High | None. Effort risk, not consumption risk | `03-13` | `OI-A-02`, `X20` |
+
+**Five of fifteen have a named supplier.** Three are estimate blockers on their own
+(`OI-HS-07` covering WhatsApp, OCR and e-signature; `OI-A-09` voice; `OI-M3-03`/`OI-M3-04` client
+systems and spreadsheet formats).
+
+## 2. Failure modes, and what happens
+
+Every integration must degrade to something a person can work with. **No provider failure is allowed to
+fail a candidate, lose a payload, or silently stop a business chain.**
+
+| System | Failure | Platform behaviour |
+|---|---|---|
+| `04-01` WhatsApp | Provider down | Sends queue and retry; **the inbound webhook Lambda still records the payload** |
+| `04-01` | Template not yet approved | **Send is refused, not attempted** — the template carries its approval state |
+| `04-01` | 24-hour conversation window closed | Handled explicitly rather than the reply being lost |
+| `04-02` SMS | DLT template rejected | Falls back to the next channel in the trigger's order |
+| `04-03` Email | SES in sandbox | Only verified addresses receive mail — **looks like a product failure, is a configuration one** (`X03`) |
+| `04-04` Voice | No answer | Retries per campaign policy within the call window and frequency caps |
+| `04-04` | Extraction below threshold | **Review queue, never a silent confidence reset** |
+| `04-05` STT | Transcription fails | Manual entry queue **with the audio retained and playable** |
+| `04-05` | Voice note over the accepted duration | Manual entry, **not rejected** |
+| `04-06` AI | Confidence below threshold | Manual entry queue; the rate is an operational load figure |
+| `04-06` | Provider outage | Inbound records still written; classification retried; nothing discarded |
+| `04-07` HRMS | Tenant unresolvable | Unmatched queue for manual selection |
+| `04-08` Spreadsheet | Row fails mapping | **Named row-level error; valid rows still produce requisitions** |
+| `04-09` Registry | No API for that council | **Document plus manual verification behind the same interface** |
+| `04-09` | Aggregator outage | Manual fallback — **never fails the candidate**; surfaces as awaiting-registry pendency |
+| `04-10` OCR | Extraction fails | Manual entry with the document retained |
+| `04-11` E-sign | Provider down | Offer stays `sent`; signature status updates without polling delay when it returns |
+| `04-12` Stores | Review rejection | **Calendar risk no team size removes** — a placeholder build goes through review early |
+| `04-13` Finance | Not named | Generic API and file export; **a re-export does not duplicate in the target** |
+| `04-14` Payroll | Person rejected by the engine | Reported with the engine's reason, correctable and resendable |
+| `04-15` CPAL | Record will not map | Exception queue; corrected or rejected **with a reason, never lost** |
+
+## 3. Cost instrumentation
+
+Apollo has asked for consumption volumes. Part B asks for message and API volumes **per requisition**
+across WhatsApp, email and transcription so running costs can be modelled. Every provider job records
+its cost units attributed to a cause (`01-06` §4), and `03-06` projects volume before a cadence is
+enabled.
+
+The answer runs both ways: **Apollo needs a cost figure from Hiresense, and Hiresense needs Apollo's
+expected base size and contact frequency to produce one** (`OI-HS-05`).
+
+| Metered | Unit | Set by |
+|---|---|---|
+| WhatsApp | conversation | Cadence configuration, follow-up rate, link and offer delivery |
+| SMS | segment | OTP volume, channel fallback |
+| Voice | minute + inference | Base B size × cadence × no-answer retries |
+| Speech-to-text | minute | Share of clients using voice notes |
+| AI parsing | tokens | Inbound volume |
+| OCR | page | Candidate intake rate × documents per category |
+| Verification | check | Candidate intake rate × checks per category |
+| E-signature | envelope | Offer volume |
+| Payroll | associate per cycle | Base B working population |
+
+## 4. Rules every integration obeys
+
+1. **Behind an interface.** Half the suppliers are unnamed; each must be replaceable without a domain
+   change. Adapters live in `02-13` for registries and in `integrations/*` for everything else.
+2. **A stub adapter and a contract test ship with the integration**, so the consuming module is built
+   and tested before the supplier is named.
+3. **Never called inline.** Every provider call is a `provider`-class job (`02-10`), rate-limited to the
+   provider's ceiling rather than discovered through throttling.
+4. **In-region or not a candidate.** A provider that cannot process in `ap-south-1` fails `01-10`,
+   whatever it costs.
+5. **No real candidate data before the DPA is signed** (`X18`). Sandbox and synthetic data until then.
+6. **Cost units recorded on every call**, attributed to a cause.
+7. **Webhooks are Lambda-fronted, signature-verified and deduplicated** on provider message id
+   (`01-09`).
+8. **The failure path is tested**, not just the happy path — every integration has a test asserting the
+   manual fallback rather than a crash.
+
+## 5. When each is needed
+
+| Phase | Integrations |
+|---|---|
+| 1 | `04-09` (contract and sandbox), `04-15` (access for profiling) |
+| 2 | `04-09` (live), `04-10`, `04-12`, `04-06` (CV parsing) |
+| 3 | `04-01`, `04-02`, `04-03`, `04-05`, `04-06`, `04-07`, `04-08` |
+| 4 | `04-04` |
+| 5 | `04-11` |
+| 6 | `04-13` |
+| 7 | `04-14` |
+
+Procurement lead times mean `04-01`, `04-02`, `04-09`, `04-12` and the `X06` SSO decision **all start in
+week one**, regardless of the phase they are used in.

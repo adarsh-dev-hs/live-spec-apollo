@@ -1,0 +1,91 @@
+---
+title: "04-03 Email ingestion and sending"
+description: "Email is how many clients already send vacancies: a message, often with a spreadsheet attached, to someone at Apollo."
+---
+
+**Package** `@apollo/integration-email` · **Schema** `inbound`, `messaging` · **Plan** A1, D10 · **Effort** ~4.5pd · **Risk** Medium `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+Email is how many clients already send vacancies: a message, often with a spreadsheet attached, to
+someone at Apollo. This integration monitors the mailbox, writes down exactly what arrived including
+attachments, merges a reply on the same thread onto the same requisition, and sends outbound mail —
+follow-ups, offers, links and internal alerts.
+
+## 2. Scope
+
+**In scope:** SES inbound receipt via the `edge-email-inbound` Lambda; MIME parsing; attachment
+extraction into `02-04` and routing to the spreadsheet parser; thread correlation so a reply merges;
+outbound send through `02-09`; bounce and complaint handling.
+
+**Explicitly out of scope:** parsing the message body into requisition fields (`03-02`); the
+spreadsheet mapping itself (`04-08`); template authoring (`02-09`).
+
+**Explicitly not built:** an inbox UI; email as a candidate response channel (`OI-A-17`); calendar
+invitations for interviews.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I25` | A1 | Email inbound | L | 3.0 |
+
+Outbound email is one of the four channels inside `M5-I8`.
+
+## 4. Dependencies
+
+**Must exist first:** `02-08`, `02-09`, `02-04`, `03-01` (sender identities).
+
+**Consumed by:** `03-02`, `02-09`, `02-14` (link delivery fallback), `03-08` (offer fallback).
+
+**External:** `X03` — **DNS records on the sending domain (SPF, DKIM, DMARC), SES production access
+(new accounts start sandboxed and only send to verified addresses), and the monitored mailbox or
+forwarding address.** Missing DNS records send platform email to spam, which **looks like a product
+failure rather than a configuration one**.
+
+## 5. Data model
+
+No tables. `inbound.inbound_record` carries the message id, `In-Reply-To` and `References` in
+`sender_raw` for thread correlation; the raw MIME goes to `02-04`.
+
+## 6. State machines
+
+As `02-08`'s `InboundRecord`. Email-specific: a message whose `In-Reply-To` matches an open
+`FollowUpThread` (`03-02`) **merges onto the existing requisition** rather than creating a second.
+
+## 7. API surface
+
+| Direction | Endpoint | Purpose |
+|---|---|---|
+| Inbound | SES → SNS → `edge-email-inbound` Lambda | Writes the record with raw MIME and attachments, enqueues |
+| Outbound | in-process `email.send()` via `02-09` | |
+
+## 8. Events and jobs
+
+`email.parse-mime` (extract attachments, route spreadsheets), `email.send`. Bounces and complaints
+arrive as SES notifications and suppress the address in `02-09`.
+
+## 9. Frontend
+
+**N/A** — mailbox configuration lives in `03-02`'s channel settings, which support **both the
+single-address and per-client-address models** pending `OI-M3-13`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | An email produces an `InboundRecord` with sender, timestamp and payload | `M3-I25` |
+| AC2 | Attachments are extracted and routed to the spreadsheet parser where applicable | `M3-I25` |
+| AC3 | **A client reply on the thread merges onto the same requisition** | `M3-I25`, `M3-I22` |
+| AC4 | **Both the single-address and per-client-address models are supported** | `M3-I25`, `OI-M3-13` |
+| AC5 | A bounce suppresses the address rather than retrying indefinitely | `M5-I9` |
+| AC6 | A redelivered SES notification does not create a second record | `M3-I18` |
+| AC7 | An inbound reply that is not a follow-up response routes to classification like any other channel | `02-08` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-13` | **One monitored address with sender routing, or an address per client?** | Both supported; a per-client address is another `SenderIdentity` row. **Per-client addresses shift operational setup onto Apollo for every new client**, which is the real cost of that answer. | `M3-I5`, `M3-I25` |
+| `X03` | DNS records, SES production access, and the monitored mailbox | Week three, but the SES production request is a written request with a review — start early | Phase 3 |
+| `OI-A-17` | Confirm email is outbound-only for candidates | Yes; client email inbound is in scope, candidate email inbound is not | `M5-D10` |

@@ -1,0 +1,188 @@
+---
+title: "02-07 List engine"
+description: "The shared table every Ops list screen uses. Around twenty screens in this plan are lists; building filtering, sorting, paging, column choice, saved views and export separately in…"
+---
+
+**Package** `@apollo/list-engine` · **Schema** `settings` (saved views) · **Plan** F08 · **Effort** ~9.5pd · **Risk** Low `SHARED` · **Build in** Phase 2
+
+## 1. Purpose
+
+The shared table every Ops list screen uses. Around twenty screens in this plan are lists; building
+filtering, sorting, paging, column choice, saved views and export separately in each is the same work
+twenty times. Listing those capabilities per screen also inflated the plan's estimate, which is why
+they appear once here and are inherited everywhere.
+
+First needed for the client, site and rate card lists in Phase 2 — the handful of lists in `02-01` do
+not justify the framework.
+
+## 2. Scope
+
+### In scope
+
+- Server-side filtering, sorting, cursor paging against the `01-04` list conventions
+- Column chooser and column ordering, per user per list
+- Saved views: belong to the user who made them, shareable with their team
+- Export of **exactly the rows currently filtered**, not the whole table
+- Row selection and bulk-action affordance, with partial-failure reporting
+- Virtualisation past 200 rows, and the empty, loading, error and no-permission states
+- The server-side query helper every list repository composes: scope predicate, filter, sort, cursor
+
+### Explicitly out of scope
+
+- The queries themselves. Each module writes its own SQL (`01-02`); this provides the composable
+  predicate builder and the response shape.
+- Charts and aggregates — `03-12`.
+- Client-side data grids with in-cell editing. Editing happens on the record, not the list.
+
+### Explicitly not built
+
+- Cross-module search. Global search is `02-06`.
+- Pivot tables, grouping, or user-defined calculated columns.
+- Scheduled exports emailed to a user. Export is on demand; the scheduled artefact in the plan is the
+  monthly pack (`M9-I10`).
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M2-I14` | F08 | Shared list component — filter, sort, page, export, saved views | XL | 5.0 |
+
+The lists that must use it, named in the plan: inbound queue, fulfilment board, verification queue,
+trial dashboard, timesheet list — plus client, contract, rate card, candidate, interview, offer, link
+log, invoice, placement, delivery log, migration exception and payroll blocked lists.
+
+## 4. Dependencies
+
+**Must exist first:** `02-01` (data scope on every list — `M0-I3`), `02-05` (`DataTable`),
+`02-03` (list definitions referenced by filters).
+
+**Consumed by:** `03-01`, `03-02`, `03-03`, `03-04`, `03-06`, `03-07`, `03-08`, `03-09`, `03-10`,
+`03-11`, `03-13`, `03-16`, `03-17`, `03-20`.
+
+**External:** none.
+
+## 5. Data model
+
+```sql
+CREATE TABLE settings.saved_view (
+    id          uuid PRIMARY KEY DEFAULT uuidv7(),
+    list_key    text NOT NULL,          -- 'fulfilment_board' | 'verification_queue' | …
+    name        text NOT NULL,
+    owner_id    uuid NOT NULL REFERENCES identity.user(id),
+    shared_with text NOT NULL DEFAULT 'private' CHECK (shared_with IN ('private','team')),
+    team_role   text REFERENCES identity.role(code),   -- when shared_with = 'team'
+    definition  jsonb NOT NULL,         -- { filter, sort, columns }
+    is_default  boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (list_key, owner_id, name)
+);
+
+CREATE TABLE settings.column_preference (
+    user_id  uuid NOT NULL REFERENCES identity.user(id),
+    list_key text NOT NULL,
+    columns  jsonb NOT NULL,            -- ordered array of column keys with widths
+    PRIMARY KEY (user_id, list_key)
+);
+
+CREATE TABLE settings.export_run (      -- exports are audited; they leave the platform
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    list_key text NOT NULL,
+    requested_by uuid NOT NULL REFERENCES identity.user(id),
+    filter jsonb NOT NULL,
+    row_count integer,
+    document_id uuid,                   -- files.document, delivered as an expiring link
+    status text NOT NULL DEFAULT 'queued'
+      CHECK (status IN ('queued','running','ready','failed')),
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz
+);
+```
+
+## 6. State machines
+
+### `ExportRun`
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | user exports | `queued` | The filter is snapshotted, so a later filter change cannot alter the file |
+| `queued` | worker picks up | `running` | |
+| `running` | file written to `02-04` | `ready` | Delivered as an expiring link; the run is audited |
+| `running` | failure | `failed` | Reason shown; retryable |
+
+Everything else in this component is stateless.
+
+## 7. API surface
+
+No routes of its own. It defines the **contract every list endpoint implements** (`01-04` §4) and
+provides the server helper:
+
+```ts
+const { rows, page } = await listEngine.query(tx, {
+  base: sql`FROM demand.requisition r JOIN clients.client c ON c.id = r.client_id`,
+  select: BOARD_COLUMNS,
+  scope: principal.scopeLocationIds,          // never optional, never caller-supplied
+  filter: parseFilter(req.query, BOARD_FILTERS),
+  sort: parseSort(req.query, BOARD_SORTS),
+  cursor: req.query.cursor, limit: req.query.limit,
+})
+```
+
+Plus saved-view and export routes shared by every list:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`/`POST`/`PATCH`/`DELETE` | `/v1/views` | Saved views for a `listKey` |
+| `PUT` | `/v1/column-preferences/:listKey` | Column choice and order |
+| `POST` | `/v1/exports` | Export the current filter; returns an `exportRunId` |
+| `GET` | `/v1/exports/:id` | Status and, when ready, the expiring download link |
+
+## 8. Events and jobs
+
+**Events emitted:** `settings.export.requested`, `settings.export.completed` — an export leaves the
+platform with personal data in it, so it is both audited and evented.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `list.export` | on demand | Streams the filtered rows to a file in `02-04`; never loads them all into memory |
+| `list.export-cleanup` | daily | Expires export files past their retention |
+
+## 9. Frontend
+
+| Component | Behaviour |
+|---|---|
+| `<ListView>` | The whole thing: toolbar, filters, table, paging, selection |
+| `<FilterBar>` | Typed filter controls generated from a list's filter definition; **filter state lives in the URL** |
+| `<ColumnChooser>` | Per-user column choice and order, persisted |
+| `<SavedViews>` | Save, rename, set default, share with a role |
+| `<ExportButton>` | Shows the row count that will be exported before confirming |
+| `<BulkActionBar>` | Appears on selection; reports **row-level** outcomes through `PartialFailureSummary` |
+
+Every list gets loading skeletons matching its column layout, a purposeful empty state written per list
+("No requisitions match these filters. Clear the owner filter to see the whole board."), and the
+no-permission state.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | The inbound queue, fulfilment board, verification queue, trial dashboard and timesheet list all use this component | `M2-I14` |
+| AC2 | A saved view belongs to the user who made it and can be shared with their team | `M2-I14` |
+| AC3 | Export returns **exactly the rows currently filtered**, not the whole table | `M2-I14` |
+| AC4 | Every list respects the signed-in user's data scope | `M2-I14` → `M0-I3` |
+| AC5 | Paging holds up at the volumes expected after the CPAL import | `M2-I14`, `OI-A-02` |
+| AC6 | Filter state is in the URL, so a filtered board is shareable and survives a module switch | `M1-I1` |
+| AC7 | A list past 200 rows virtualises and stays interactive | `01-03` §9 |
+| AC8 | A bulk action reports row-level outcomes and still applies the successful rows | `M1-I4` |
+| AC9 | An export is audited with who requested it, the filter used and the row count | `01-10` |
+| AC10 | A list endpoint added without the scope predicate fails the scope test suite | `01-08` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-02` | Migrated base volume is unknown, so paging and index strategy are unvalidated | Cursor paging everywhere, no offset, every list indexed on `(scope, default sort)`. Validated against a synthetic base of 250k candidates until the profiling runs. | `M4-I15` list performance |
+| `OI-M3-14` | No latency target for the fulfilment board or the unmatched queue | Working budget: first rows ≤ 1.5s warm. Recorded as a budget, not an agreed target. | Performance acceptance |
+| `OI-HS-01` | Team sharing of a saved view interacts with data scoping — a shared view could reference rows the recipient cannot see | A shared view shares the **filter**, never rows; the recipient's own scope still applies | `M2-I14` |

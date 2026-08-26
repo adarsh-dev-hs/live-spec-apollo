@@ -1,0 +1,109 @@
+---
+title: "04-14 Payroll engine"
+description: "The third-party engine that calculates pay. We send inputs and take results back; we do not calculate pay. Hirecraft and PayBooks are the candidate engines; neither is chosen."
+---
+
+**Package** `@apollo/integration-payroll` · **Schema** `payroll` · **Plan** D24 · **Effort** ~11.0pd · **Risk** High `EXT` · **Build in** Phase 7
+
+## 1. Purpose
+
+The third-party engine that calculates pay. **We send inputs and take results back; we do not calculate
+pay.** Hirecraft and PayBooks are the candidate engines; **neither is chosen.**
+
+It sits behind an interface so it can be swapped later — the same pattern as the registry adapters in
+`02-13`.
+
+## 2. Scope
+
+**In scope:** assembling and sending inputs for a locked cycle; receiving net pay, deductions and
+payslip documents; reporting anyone the engine rejected, with its reason, correctable and resendable;
+field mapping held as configuration; per-associate-per-cycle cost recording.
+
+**Explicitly out of scope:** the pay run workflow and settings (`03-17`); statutory report generation
+(`03-17`); onboarding completeness (`03-15`); payslip delivery (`02-09`).
+
+**Explicitly not built:** **a payroll calculator**; statutory filing; a bank payment file (unless
+confirmed as an addition); reversing a completed run inside the engine.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M13-I5` | D24 | Payroll engine integration | XXL | 8.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `03-17` (cycle, inputs and settings), `03-19` (the fuller timesheet), `03-16`
+(approved revisions, advances and holds), `03-15` (**payroll cannot run for an incomplete associate**),
+`02-12` (encrypted bank details).
+
+**Consumed by:** `03-17`. Once live, `03-10`'s manual export (`M8-I17`) is **retired**.
+
+**External:** `X23` — **choose the engine, sign the contract, obtain the input and output field
+specification, obtain sandbox credentials.** Last milestone, but **the contract and field specification
+are needed well before build.**
+
+## 5. Data model
+
+`payroll.input`, `payroll.output` and `payroll.blocked_associate` (`03-17`).
+
+```ts
+interface PayrollEngine {
+  submitCycle(i: { cycleRef: string; periodStart: string; periodEnd: string
+                   inputs: Array<Record<string, unknown>> })   // shaped by settings.field_mapping
+    : Promise<{ engineRunId: string; accepted: number; rejected: Array<{ ref: string; reason: string }> }>
+  getResults(engineRunId: string): Promise<{
+    state: 'processing' | 'complete' | 'failed'
+    results: Array<{ ref: string; gross: string; deductions: Record<string,string>
+                     net: string; payslipUrl?: string }>
+    costUnits: number
+  }>
+}
+```
+
+`field_mapping` is configuration (`03-17`, `M13-I2`), so **changing the engine changes a mapping, not
+the platform.**
+
+## 6. State machines
+
+Drives `payroll.cycle`: `inputs_locked → sent → results_received`. A rejected input goes to
+`payroll.input.rejected` **with the engine's reason, correctable and resendable** without re-locking the
+whole cycle.
+
+## 7. API surface
+
+| Direction | Endpoint | Purpose |
+|---|---|---|
+| Outbound | in-process `payroll.submitCycle()` | Called by `03-17` only |
+| Inbound | `POST /hooks/payroll/:provider` (via `edge-webhook`), or polled | Results, depending on what the engine offers |
+
+## 8. Events and jobs
+
+`payroll.send-to-engine` and `payroll.poll-results` on the `provider` class. Events flow through
+`03-17`.
+
+## 9. Frontend
+
+**N/A** — the pay run screen and the field mapping editor are `03-17`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Inputs are assembled from approved timesheets, approved salary revisions, advances and holds | `M13-I5` |
+| AC2 | The engine sits behind an interface **so it can be replaced without changing the platform** | `M13-I5` |
+| AC3 | **Every person sent is accounted for in the results, or reported as an exception** | `M13-I5` |
+| AC4 | **We do not build a payroll calculator** | `M13-I5` |
+| AC5 | A rejected input is shown with the engine's reason and can be corrected and resent | `M13-I1` |
+| AC6 | Input mapping changes when the engine changes, **without touching the platform** | `M13-I2` |
+| AC7 | Bank details are decrypted only at submission, and the decryption is audited | `01-10` |
+| AC8 | Per-associate-per-cycle cost is recorded | `OI-HS-05` |
+| AC9 | A cycle cannot be submitted while associates are blocked on incomplete onboarding | `M11-I5` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `X23` | **Which engine — Hirecraft, PayBooks or another?** Contract, field specification and sandbox credentials all outstanding | Stub behind the interface. **The field specification is needed well before build, not in month six.** | `M13-I5`, all of `M13` |
+| `OI-HS-62` **[raised here]** | Does the engine hold the statutory rates, or does the platform send them? | Assumed the engine calculates from its own configuration and the platform sends **inputs only**. If the platform must supply rates, `M13-I2`'s deduction-rate configuration becomes authoritative rather than informational — a materially different compliance position. | `M13-I2`, `M13-I5` |
+| `OI-HS-63` **[raised here]** | Who disburses? | Assumed Apollo, outside the platform. A bank payment file would be an addition. | `M13-I5` |

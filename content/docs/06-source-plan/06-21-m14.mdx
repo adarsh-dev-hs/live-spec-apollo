@@ -1,0 +1,140 @@
+---
+title: "06-21 M14 — Demand Prioritisation & Approval"
+description: "M3 records which recruiter was put on which vacancy, as decided on the morning call. This milestone makes the system do the deciding: work out which vacancies matter most based on how…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M14 · D14 (full) · Months 5–6*
+
+`Release 2` · `4 items` · `15 conditions` · `26.5pd` · `0 high risk` · `Ops/Admin`
+
+M3 records which recruiter was put on which vacancy, as decided on the morning call. This milestone makes the system do the deciding: work out which vacancies matter most based on how urgent, how valuable and how old they are, suggest which recruiter should take each one based on their current load and past success, and balance work across the team. It also adds an approval step so a vacancy can be checked before it goes live, which M3 deliberately does not have.
+
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> Release 1 comprises thirty-four deliverables: the eleven already scoped to Release 1, nine brought across from Release 2 (six in full, three as thin slices), and fourteen added at revision. Five deliverables defer to a later release and five are descoped from this SOW; those ten are recorded in the scope revision and are not listed here.
+>
+> The client specification carries no module section for these deliverables. Everything below is Hiresense analysis, not client text.
+
+### Built once, used elsewhere
+
+This changes M3 behaviour rather than adding new screens beside it. The fulfilment board and requisition record gain new fields and actions.
+
+### Records this milestone owns
+
+- PriorityScore — a score per vacancy and why it got that score.
+- AllocationSuggestion — a recommended recruiter, with the reasoning and whether it was accepted.
+- RecruiterCapacity — current load against the agreed norm of 15-16 vacancies.
+- ApprovalRequest — a vacancy waiting to be approved before it goes live.
+
+### How records move
+
+- Requisition gains: created → awaiting approval → approved → open. Or rejected back to the raiser.
+- AllocationSuggestion: generated → accepted or overridden, with a reason
+
+### Not in this milestone
+
+- Forcing an allocation. The system suggests; a person still decides.
+- Forecasting demand.
+
+### Needs to exist first
+
+- M3 for the requisition and allocation records. M9 for the performance data the suggestions are based on.
+
+### What breaks without it
+
+- M9 gains better data on how allocation decisions turn out.
+
+### Items — 4 to build · design 5.5pd, build 14.0pd, QA 7.0pd
+
+#### M14-I1 — Priority board
+
+`D14` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Low`
+
+**Who uses it: Fulfilment lead, Shalu.** The fulfilment board, ordered by what the system thinks matters most rather than by age alone.
+
+##### Screens to build
+
+1. **Priority board**
+  - Lists requisitions ordered by how important the platform scores them
+  - Shows why each scored as it did
+  - Overrides a priority by hand, with a reason
+
+##### Conditions it must satisfy
+
+- Each requisition shows why it scored where it did, not just a number
+- A manual override is recorded with a reason
+- The board can still be sorted the old way, so the change is not forced on day one
+- Priority factors are configurable
+
+Index **M14-I1** · Client ref **D14** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **-** · Linked items **M3-I12**
+
+#### M14-I2 — Suggested recruiter
+
+`D14` · `Screen` · `L · 3.0pd` · `AI Medium` · `Medium` · `MODEL` · `Low`
+
+**Who uses it: Fulfilment lead.** The system proposes which recruiter should take a vacancy. A person still decides.
+
+##### Screens to build
+
+1. **Suggested recruiter**
+  - Suggests which recruiter should take a requisition
+  - Shows how many requisitions that recruiter already holds
+  - Accepts the suggestion or picks someone else, with a reason
+
+##### Conditions it must satisfy
+
+- The system suggests; it never assigns on its own
+- Load is shown against the operating norm, which M3 records but does not enforce (M3 OI-M3-10)
+- Suggestions are based on M9 performance data
+
+Index **M14-I2** · Client ref **D14** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Low** · Open items **OI-M3-10** · Linked items **M3-I16, M9-I9**
+
+#### M14-I3 — Requisition approval
+
+`D14` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: BD, Fulfilment lead.** An approval step before a vacancy goes live. M3 deliberately has none, so this is new behaviour on an existing record.
+
+##### Screens to build
+
+1. **Requisition approval**
+  - Lists requisitions waiting to go live
+  - Approves or rejects one with a reason
+
+##### Conditions it must satisfy
+
+- A requisition gains a new state between created and open (M3 state table extension)
+- Approval rules are configurable by client, value or role
+- An urgent bypass is possible but always audited
+- Rejecting returns the requisition to whoever raised it with the reason
+
+Index **M14-I3** · Client ref **D14** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **-** · Linked items **M3-I27**
+
+#### M14-I4 — Priority and load engine
+
+`D14` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `MODEL` · `Low`
+
+**Who uses it: System.** Scoring vacancies and spreading work across the team.
+
+##### Screens to build
+
+1. **No screen**
+  - Scores requisitions on urgency, value and age
+  - Works out each recruiter's current load and suggests who should take the next one
+
+##### Conditions it must satisfy
+
+- Scoring inputs and weights are configurable
+- Load balancing accounts for vacancies already held, not just new ones
+- Suggestion outcomes feed back so the model can be tuned against evidence
+- The engine never writes an allocation directly
+
+Index **M14-I4** · Client ref **D14** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **-** · Linked items **M14-I2, M9-I17**

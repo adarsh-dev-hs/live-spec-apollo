@@ -1,0 +1,159 @@
+---
+title: "05-04 External dependencies"
+description: "Twenty-two things the platform needs from outside the delivery team. These are separate from the open decisions in 05-03: those are decisions about what to build, these are…"
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** `X01`–`X29` · **Effort** — · **Risk** High `EXT` · **Build in** Phase 0
+
+Twenty-two things the platform needs from outside the delivery team. These are **separate from the open
+decisions** in `05-03`: those are decisions about what to build, these are accounts, contracts,
+registrations and access that must exist before a build can start or a supplier can be called.
+
+**Almost all of them need someone at Apollo, not the delivery team.**
+
+## 1. Start these in week one
+
+Five, regardless of when their phase begins. The first four are **pure waiting on someone else's
+timetable and no amount of delivery capacity shortens them**. The fifth changes what gets built, so it
+is cheapest to answer before anything is built at all.
+
+| Ref | What | Why week one |
+|---|---|---|
+| `X01` | Meta business verification for WhatsApp | Provider review plus per-template approval, weeks, outside Apollo's control |
+| `X02` | DLT registration for SMS | Indian telecom regulator lead time |
+| `X14` | Verification aggregator contract | Weeks of contracting and customer onboarding before a single call can be made |
+| `X12`/`X13` | The two app store accounts | Apple needs a D-U-N-S number in Apollo's legal name, obtained from Dun & Bradstreet |
+| `X06` | Whether the console federates to Apollo's identity provider | **Changes what `02-01` builds.** Retrofitting after ninety users are live is worse than either option |
+
+## 2. The register
+
+### Access and identity
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X06` | Corporate single sign-on | Month 1 | Apollo IT | Decide: email and password, or federation | `02-01` | — |
+| `X07` | AWS account and billing ownership | Month 1 | Apollo IT | The account, the billing route (a reseller changes provisioning), and who may press release | `02-15` | `OI-HS-04`, `OI-HS-12` |
+| `X05` | DNS subdomain delegation | Month 2 | Apollo IT | Delegated subdomain for `console`, `links`, `portal`, `api` | `02-15`, `02-14` | — |
+| `X10` | Third-party billing ownership | Month 2 | Apollo | Whether metered supplier accounts sit with Apollo or Hiresense (recharged at cost either way) | every metered supplier | `OI-HS-05` |
+
+**`X05` matters more than it looks.** The A13 links are sent to hospitals by WhatsApp and email; they
+need a public address on an Apollo domain that **looks legitimate to the recipient**, settled before any
+link is ever issued.
+
+### Legal and security
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X18` | Data processing agreements | Month 1 | Apollo legal with Hiresense | A DPA per supplier processing personal data on Apollo's behalf | **any handling of candidate data** | `OI-HS-02` |
+
+Straightforward paperwork, but **it is a chain and each new supplier adds a link**. No supplier is
+called with real candidate data before its DPA is in place.
+
+### Data and systems
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X20` | Legacy ATS data access | Month 1 | Apollo | Access to CPAL for profiling | `03-13`, `04-15` | `OI-A-02`, `OI-A-03` |
+| `X22` | UAT participants and go-live window | Month 4 | Apollo operations | Named recruiters with **protected time**; agreed severity definitions and turnaround; the go-live window and parallel-run period | `05-05` | — |
+
+**`X20` is the single largest unpriced item in the six months.** Until profiling runs, none of the
+migration can be estimated.
+
+**`X22`:** recruiters testing while carrying fifteen to sixteen vacancies each **will not happen unless
+the time is protected in advance.**
+
+### App stores
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X12` | Google Play Console | Month 2 | Apollo | Account in Apollo's name, paperwork theirs to complete | `03-05` | `OI-HS-08` |
+| `X13` | Apple App Store Connect | Month 2 | Apollo | Organisation enrolment with a **D-U-N-S number in Apollo's legal name** | `03-05` | `OI-HS-08` |
+
+The candidate app is **the only route by which shift attendance reaches the platform**, so both sit
+directly on the contractual invoice chain. **Getting a placeholder build through review early removes
+this risk entirely.**
+
+### Verification
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X14` | Background verification aggregator | Month 2 | Apollo | Selection, contract, customer onboarding, **sandbox credentials** | all of `03-04` verification | `OI-HS-06`, `OI-A-01` |
+| `X15` | DigiLocker and Aadhaar access | Month 2 | Apollo | Regulated access; **the consent framework is not a technical detail** | `03-04` | `OI-A-01` |
+| `X16` | Council and registry access | Month 2 | Apollo with Hiresense | Which councils have an API, which do not, **and who does the manual checking** | `04-09`, `03-04` | `OI-A-01` |
+
+**Sandbox access is what unblocks the build**; production access can follow.
+
+### Messaging
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X01` | WhatsApp Business Platform | Month 3 | Apollo with Hiresense | BSP selection, Meta business verification, one registered number, **template approval per template** | `04-01`, `02-09`, `03-06` go-live | `OI-HS-05`, `OI-HS-07` |
+| `X02` | SMS — DLT registration | Month 3 | Apollo | Sender header and per-template registration with the regulator | `04-02`, OTP | — |
+| `X03` | Email sending domain | Month 3 | Apollo IT | **SPF, DKIM and DMARC records**; SES production access (new accounts start sandboxed); the monitored mailbox or forwarding address | `04-03`, `03-02` | `OI-M3-13` |
+| `X04` | Outbound voice and calling regulation | Month 3 | Apollo | Name the supplier; obtain a calling number with telecom KYC; confirm DND and TRAI scrubbing; confirm language coverage and per-minute pricing | `04-04`, `03-06` | `OI-A-09` |
+
+**Missing DNS records send platform email to spam, which looks like a product failure rather than a
+configuration one.**
+
+### Suppliers
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X25` | Speech-to-text supplier | Month 3 | Apollo | Name it; confirm the Indian languages clients actually send voice notes in; **decide whether it is the same supplier as outbound voice**; confirm pricing | `04-05`, `03-02` | `OI-M3-05` |
+| `X26` | Electronic signature supplier | Month 4 | Apollo | Name it; confirm validity for Indian employment offers; confirm per-envelope pricing | `04-11`, `03-08` | `OI-HS-07` |
+| `X23` | Payroll engine | Month 6 | Apollo | Choose (Hirecraft, PayBooks or another); sign; **obtain the input and output field specification**; obtain sandbox credentials | `04-14`, `03-17` | — |
+
+**Language coverage has to be proven against voice notes recorded in a hospital corridor, not studio
+samples.**
+
+**`X23`:** last milestone, but the contract and field specification are needed **well before build**.
+
+### Via Apollo's clients — the slowest track
+
+Two hops rather than one: Apollo asks their client, the client agrees, and only then can the work be
+sized.
+
+| Ref | What | Needed by | Who acts | Required from Apollo | Blocks | Open item |
+|---|---|---|---|---|---|---|
+| `X27` | Which client HR systems, and how many | Month 2 | Apollo BD, then their hospital clients | The list, and each client IT team's agreement | `04-07` | `OI-M3-03` |
+| `X28` | Client spreadsheet format samples | Month 2 | Apollo fulfilment, then their hospital clients | **Real files, not idealised ones** — the value of A1 is that it takes what clients already send | `04-08` | `OI-M3-04` |
+| `X29` | Client link recipients | Month 4 | Apollo BD, then their hospital clients | Decide recipient scope; collect the named person and contact details at each client; **confirm each client is content to answer the day-90 question by link** | `02-14`, `03-11` | `OI-A-12` |
+
+**`X29` is the one to watch.** The day-90 answer must be timestamped against an identified person for
+the invoice to be defensible in a billing query. **Without a recipient model there is no defensible
+trigger**, and the whole permanent billing chain rests on it.
+
+## 3. By the month first needed
+
+| Month | Dependencies |
+|---|---|
+| **1** | `X06` SSO · `X07` AWS account · `X18` DPAs · `X20` legacy data access |
+| **2** | `X05` DNS · `X10` billing ownership · `X12` Play Console · `X13` App Store Connect · `X14` aggregator · `X15` DigiLocker/Aadhaar · `X16` councils · `X27` client HR systems · `X28` spreadsheet samples |
+| **3** | `X01` WhatsApp · `X02` DLT · `X03` email domain · `X04` voice · `X25` speech-to-text |
+| **4** | `X22` UAT participants · `X26` e-signature · `X29` link recipients |
+| **6** | `X23` payroll engine |
+
+**Thirteen of twenty-two are needed by month two**, and procurement and registration lead times sit
+inside that.
+
+## 4. Tracks and their speed
+
+| Track | Items | Speed |
+|---|---|---|
+| Access and identity | 4 | Fast if Apollo IT is engaged |
+| Legal and security | 1 | A chain — each supplier adds a link |
+| Data and systems | 2 | Depends on Apollo operations' calendar |
+| App stores | 2 | Third-party issuance plus review |
+| Verification | 3 | Contracting, weeks |
+| Messaging | 4 | Regulator and provider review, weeks |
+| Supplier | 3 | Procurement |
+| **Via Apollo's clients** | 3 | **Two hops. The slowest track.** |
+
+## 5. How this is tracked
+
+Each dependency has a named actor at Apollo, a month it is first needed, and the components it blocks.
+It is reviewed **at every gate** (`00-05` §2), not at a monthly meeting — a dependency that slips is a
+schedule fact, and the gate is where schedule facts are surfaced with the people who can act on them.
+
+A dependency that has not moved by the month before it is needed is escalated as a **delivery risk with
+a named consequence**, in the terms of `05-01` §9: what stops, and what gets cut if it stays stuck.

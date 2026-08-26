@@ -1,0 +1,399 @@
+---
+title: "06-09 M2 — Client, Contract & Rate Card"
+description: "This holds the client side of the business: the hospital or home-healthcare company, its sites and departments, the rates agreed with it, and the signed contract. Two things here matter…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M2 · D1, D13, F08 · Months 2–3*
+
+`Release 1` · `14 items` · `64 conditions` · `81.0pd` · `6 high risk` · `Ops/Admin`
+
+This holds the client side of the business: the hospital or home-healthcare company, its sites and departments, the rates agreed with it, and the signed contract. Two things here matter more than they look. First, the list of email addresses and WhatsApp numbers belonging to each client — M3 uses it to work out who sent an incoming requisition. Second, the contract terms, because the billing engine in M9 reads them at the moment it decides to raise an invoice.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D1 | Client & contract management | Original R1 | M2 — Client, Contract & Rate Card |
+> | D13 | Contract creation & versioning | Moved from R2 | M2 — Client, Contract & Rate Card |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M2 — Client, Contract & Rate Card. Reproduced without alteration.*
+>
+> Holds the client entity with its locations and departments, rate cards by role, skill and location, and the contract record with versioning, renewal alerts and history. It supplies the contract terms the billing triggers read — the day-90 retention terms for permanent, and the timesheet approval terms for contractual — including the per-client windows after which retention is deemed confirmed and a timesheet deemed approved where a client does not respond.
+>
+> Deliverables: D1, D13
+>
+> Surfaces: Ops/Admin.
+>
+> **OPEN** — D1 user provisioning scope. D1 includes user provisioning with role-based access. D12 (client portal) is deferred and A13 operates without login or account provisioning, so there is no client-side login in Release 1. Confirm that D1 provisioning in Release 1 covers Apollo internal users only.
+>
+> **CLOSED** — Deemed-confirmation and deemed-approval windows. Both are configurable per client and held in D13: the day-90 retention deemed-confirmation window, and the timesheet deemed-approval window added with client timesheet approval. Estimate the configurability, not a fixed period. Both require a platform-level default so that a client onboarded without a configured window does not stall invoicing. Apollo has not yet supplied the default values.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 10** — Care setting as a dimension on the client, the site and the requisition. Homecare appears in the SOW only as a future portal user type. A homecare deployment has no department and no preceptor, and the client is the provider while the site is a patient residence that changes.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+The sender list built here is what M3 checks every incoming message against. The client contact record is the most likely place to hold the people who receive the tokenised links in M7. It also carries the shared list component every Ops screen reuses, first needed here for the client and rate card lists.
+
+### Records this milestone owns
+
+- Client, Location, Department — created here. Every other module reads them and none of them writes back.
+- ClientContact — the people at the client. Probably also where link recipients live (see open item OI-A-12).
+- SenderIdentity — an email address, WhatsApp number or HRMS account, mapped to one client. M3 looks up every inbound message here.
+- RateCard, RateCardLine — what we charge, by role, skill and location, with the dates each rate applies from.
+- Contract, ContractVersion — the signed agreement and its terms. M9 reads this when it raises an invoice.
+- ClientWindowConfig — three waiting periods per client: how long before we treat retention as confirmed, how long before we treat a timesheet as approved, and how long before we chase a missing requisition field.
+
+### How records move
+
+- Client: draft → active → suspended → closed
+- Contract: draft → active → renewed (creates a new version) → expired. Or terminated, with a reason.
+- RateCardVersion: draft → in effect → superseded. Old versions are never deleted, because an old requisition must still price against the rate that applied when it was raised.
+
+### Not in this milestone
+
+- Client login and self-service. That is the client portal, milestone M10.
+- Writing contracts from a template. In this milestone contracts are recorded, not drafted.
+- Credit limits and credit control. Billing stops at invoice raised.
+
+### Needs to exist first
+
+- M1 — logins, roles and a running environment.
+
+### What breaks without it
+
+- M3 cannot create a requisition without a client, and cannot identify an inbound sender without the sender list. M7 needs the contract to map an offer to. M9 cannot raise a permanent invoice at all without the contract terms — there is no fallback.
+
+### Items — 14 to build · design 16.5pd, build 45.0pd, QA 19.5pd
+
+#### M2-I1 — Client list
+
+`D1` · `Screen` · `M · 2.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: BD, Fulfilment lead, Finance.** The list of clients, showing enough that a user does not have to open each one.
+
+##### Screens to build
+
+1. **Client list**
+  - Lists every client with its status and when its contract ends
+  - Search by client name
+  - Opens a client, or starts a new one
+
+##### Conditions it must satisfy
+
+- A client with an expiring contract is visible from the list without drilling in
+- Filtering by status returns only matching clients
+- A finance user can read but not edit (M0-I3)
+- Active requisition count reflects M3 in real time
+- Empty state renders where no clients match
+
+Index **M2-I1** · Client ref **D1** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **0.5pd** · Total **3.5pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I14, M0-I3**
+
+#### M2-I2 — Client details
+
+`D1` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: BD.** Create and edit a client. Every requisition, offer and invoice hangs off this record.
+
+##### Screens to build
+
+1. **Client details**
+  - Takes the client's legal name, GST number and billing address
+  - Says whether the client uses permanent placement, shift staffing or both
+  - Says whether the client is a hospital or a home healthcare provider
+  - Saves the client, or closes it
+
+##### Conditions it must satisfy
+
+- A client cannot be created without the fields the invoice requires (GST, billing address)
+- Service line selection constrains which requisition types can be raised (M3)
+- Deactivating a client does not orphan open requisitions; it blocks new ones
+- Every field change is written to the audit trail
+
+Index **M2-I2** · Client ref **D1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I4**
+
+#### M2-I3 — Sites and departments
+
+`D1` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: BD, Fulfilment lead.** A client's hospitals and departments. A requisition must attach to one of these.
+
+##### Screens to build
+
+1. **Locations and departments**
+  - Lists the client's sites, and the departments inside each site
+  - Adds, edits or switches off a site or a department
+  - A home healthcare client has sites without departments
+
+##### Conditions it must satisfy
+
+- A location and department must belong to the client on the requisition (M3 V5)
+- A site-resident recruiter is attributable to a location, feeding the data-scoping rule (OI-HS-01)
+- Deactivating a location with open requisitions is blocked or warned
+- Bulk import produces row-level errors and loads valid rows (consistent with M3-I6 pattern)
+- Department is optional where the client does not use them
+
+Index **M2-I3** · Client ref **D1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M0-I2, M2-I14**
+
+#### M2-I4 — Client contacts
+
+`D1` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: BD, Fulfilment lead.** The people at the client. Probably also where the recipients of M7 links are held.
+
+##### Screens to build
+
+1. **Client contacts**
+  - Lists the people at the client with their email address and WhatsApp number
+  - Adds, edits or removes a contact
+  - Marks which contact receives which kind of link
+
+##### Conditions it must satisfy
+
+- A contact can be designated as the recipient for a named A13 link type
+- Recipient scope - per client, per location, per requisition or per placement - is unresolved (OI-A-12)
+- A day-90 acknowledgement is timestamped against an identified recipient for audit (M7-A13)
+- A contact is maintained without account provisioning, since there is no client login
+- Removing a contact does not orphan links already issued to them
+
+Index **M2-I4** · Client ref **D1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-12** · Linked items **M7-A13, M9-D8**
+
+#### M2-I5 — Rate card
+
+`D1` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: BD, Finance.** What Apollo charges, by role, skill and location, with the dates each rate applies from.
+
+##### Screens to build
+
+1. **Rate card**
+  - Lists the agreed rate for each combination of role, skill and location
+  - Adds or edits a rate line, with the date it applies from
+  - Holds the permanent placement fee as a percentage of salary
+  - Holds the standard rate each agreed rate is compared against
+
+##### Conditions it must satisfy
+
+- A requisition rate reference resolves against the client rate card (M3 BR3)
+- A requisition with no matching rate card line is flagged on the board and not blocked (M3 BR3)
+- The permanent placement fee of 5-6% of CTC is held as a rate card attribute, not hardcoded
+- A baseline rate is recorded so A11 can report agreed against baseline
+
+Index **M2-I5** · Client ref **D1** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Medium** · Open items **-** · Linked items **M3-D2, M9-A11**
+
+#### M2-I6 — Client senders
+
+`D1` · `Config` · `L · 3.0pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Platform administrator, BD.** The list of email addresses, WhatsApp numbers and HR system accounts belonging to each client. M3 checks every inbound message against this.
+
+##### Screens to build
+
+1. **Sender list**
+  - Lists the email addresses, WhatsApp numbers and HR system accounts belonging to each client
+  - Adds, edits or switches off an entry
+  - Blocks an entry already claimed by another client
+
+##### Conditions it must satisfy
+
+- An email address, WhatsApp number or HRMS tenant maps to exactly one client (M3 V1)
+- An identity claimed by two clients is blocked at entry rather than producing multi-match at ingestion
+- Linking an unmatched sender in M3 writes back here so the next send resolves automatically
+- Deactivating an identity stops resolution without deleting historic InboundRecords
+- An identity can bind to a location so requisitions default correctly
+
+Index **M2-I6** · Client ref **D1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I19, M3-I2**
+
+#### M2-I7 — Contract list
+
+`D13` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: BD, Finance, Fulfilment lead.** Contracts, and which ones are coming up for renewal.
+
+##### Screens to build
+
+1. **Contract list**
+  - Lists every contract with its client, value, end date and status
+  - Shows which contracts are inside their renewal window
+  - Opens a contract, or starts a new one
+
+##### Conditions it must satisfy
+
+- A contract inside its renewal window is visible without opening the record
+- Renewal alerts fire on the configured schedule (M3-I30)
+- An expired contract blocks new requisitions for that client but not open ones
+- A finance user can read all contracts; a recruiter sees only what their scope permits (OI-HS-01)
+
+Index **M2-I7** · Client ref **D13** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M3-I30, M2-I14**
+
+#### M2-I8 — Contract details
+
+`D13` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `XMOD` · `Low`
+
+**Who uses it: BD, Finance.** Create and edit a contract. M9 reads these terms at the moment it raises an invoice, so errors here become billing errors.
+
+##### Screens to build
+
+1. **Contract details**
+  - Takes the client, service lines, start date, end date and value
+  - Takes the placement fee percentage and the shift rates
+  - Takes the guarantee period
+  - Attaches the signed contract document
+  - Activates the contract
+
+##### Conditions it must satisfy
+
+- Contract terms are readable by the M9 billing trigger at the moment it fires (Part A stage 1)
+- The placement fee percentage is held per contract, not as a platform constant
+- The guarantee and replacement period is captured - if longer than 90 days, D25 debit and credit notes return to Release 1 (OI-A-13)
+- A contract cannot be activated without the terms the billing triggers require
+- The signed contract document is attached and retained (M0-I6)
+
+Index **M2-I8** · Client ref **D13** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Low** · Open items **OI-A-13** · Linked items **M9-D8, M0-I6**
+
+#### M2-I9 — Contract versions
+
+`D13` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: BD, Finance.** Renewals create a new version. An invoice must read the version that applied at the time, not today's.
+
+##### Screens to build
+
+1. **Contract versions**
+  - Lists every version of the contract with its dates and who changed it
+  - Opens a past version read-only
+
+##### Conditions it must satisfy
+
+- Renewing a contract creates a new version; the prior version remains retrievable
+- An invoice fired against a day-90 record reads the version in force at day 90, not today's
+- A terminated contract retains full history
+- Version comparison highlights changed commercial terms specifically
+
+Index **M2-I9** · Client ref **D13** · Band **L** · Design **1.0pd** · Build **3.0pd** · QA **1.5pd** · Total **5.5pd** · Confidence **Medium** · Open items **-** · Linked items **M9-D8**
+
+#### M2-I10 — Client waiting periods
+
+`D13` · `Config` · `L · 3.0pd` · `AI High` · `High` · `SPEC` · `Low`
+
+**Who uses it: BD, Finance, Platform administrator.** Three waiting periods per client, each with a platform-wide fallback so an unconfigured client never stalls invoicing.
+
+##### Screens to build
+
+1. **Client waiting periods**
+  - Sets how many days before retention counts as confirmed if the client does not reply
+  - Sets how many days before a timesheet counts as approved if the client does not reply
+  - Sets how many days before an incomplete requisition is escalated
+  - Falls back to the platform default where no client value is set
+
+##### Conditions it must satisfy
+
+- A client with no configured window falls back to the platform default and invoicing does not stall (Part A M2, CLOSED)
+- The deemed-confirmation window drives the M9 permanent billing trigger (M7-A13, M9-D8)
+- The deemed-approval window drives timesheet approval in M8
+- The follow-up window drives escalation in M3 (AS-01)
+- Changing a window does not retrospectively alter deadlines already running
+- Apollo has not yet supplied the default values (OI-A-05)
+
+Index **M2-I10** · Client ref **D13** · Band **L** · Design **1.0pd** · Build **3.0pd** · QA **1.5pd** · Total **5.5pd** · Confidence **Low** · Open items **OI-A-05** · Linked items **M8-D22, M9-D8, M3-I22**
+
+#### M2-I11 — Rate lookup
+
+`D1` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** Given a role, skill, location and date, return the right rate line from the right version.
+
+##### Screens to build
+
+1. **No screen**
+  - Given a role, skill, location and date, returns the rate that applied on that date
+  - Returns a no-match flag rather than an error when no rate line fits
+
+##### Conditions it must satisfy
+
+- Resolution at requisition creation uses the version effective on that date
+- Resolution at invoice time uses the version effective at the trigger event
+- A no-match returns a flag rather than an error, so the requisition is not blocked (M3 BR3)
+- Baseline and agreed rate are both retrievable for the variance report
+
+Index **M2-I11** · Client ref **D1** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M2-S06, M9-A11**
+
+#### M2-I12 — Contract terms lookup
+
+`D13` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Medium`
+
+**Who uses it: System.** Look up the contract terms that applied on a given date. M9 calls this at the moment a billing trigger fires.
+
+##### Screens to build
+
+1. **No screen**
+  - Given a client and a date, returns the contract terms that applied on that date
+  - Returns the platform default where the client has no value set
+
+##### Conditions it must satisfy
+
+- Terms resolve against the contract version in force at the trigger event date
+- A missing per-client window resolves to the platform default rather than returning null
+- D8 and A7 cannot fire without this service - no fallback exists (Part A dependency table)
+- Resolution is auditable: the invoice records which contract version it read
+
+Index **M2-I12** · Client ref **D13** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-A-05** · Linked items **M9-D8, M9-A7**
+
+#### M2-I13 — Contract renewal alert
+
+`D13` · `Service` · `M · 2.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: System.** Send an alert before a contract runs out.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends an alert to the client owner before a contract runs out
+
+##### Conditions it must satisfy
+
+- An alert fires on the configured schedule ahead of expiry
+- Renewing suppresses remaining alerts for that cycle
+- Alerts route to the named client owner
+- A lapsed contract with open placements raises a distinct escalation
+
+Index **M2-I13** · Client ref **D13** · Band **M** · Design **0.0pd** · Build **2.0pd** · QA **1.0pd** · Total **3.0pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I30**
+
+#### M2-I14 — Shared list component
+
+`F08` · `Service` · `XL · 5.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: System.** The shared table component every Ops screen uses. Around twenty screens in this plan are lists; building filtering and paging separately in each is the same work twenty times. First needed for the client, site and rate card lists. The handful of lists in M0 do not justify the framework.
+
+##### Screens to build
+
+1. **No screen**
+  - Provides the shared table used by every Ops list screen
+  - Provides filtering, sorting, paging and export on that table
+
+##### Conditions it must satisfy
+
+- The inbound queue, fulfilment board, verification queue, trial dashboard and timesheet list all use this component
+- A saved view belongs to the user who made it and can be shared with their team
+- Export returns exactly the rows currently filtered, not the whole table
+- Every list respects the signed-in user's data scope (M0-I3)
+- Paging holds up at the volumes expected after the CPAL import
+
+Index **M2-I14** · Client ref **F08** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **Medium** · Open items **OI-A-02** · Linked items **M0-I3**

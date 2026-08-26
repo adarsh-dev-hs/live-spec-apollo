@@ -1,21 +1,23 @@
 {
-  "name": "apollo-docs-site",
-  "version": "0.0.17",
+  "name": "apollo-gwd-docs-site",
+  "version": "0.0.18",
   "private": true,
   "scripts": {
+    "import:prd": "node scripts/import-requirement-doc.mjs",
     "sync": "node scripts/sync-docs.mjs",
     "predev": "node scripts/sync-docs.mjs",
     "dev": "next dev",
     "prebuild": "node scripts/sync-docs.mjs",
     "build": "next build",
     "start": "next start",
-    "types:check": "next typegen && tsc --noEmit"
+    "types:check": "next typegen && tsc --noEmit",
+    "lint": "eslint"
   },
   "dependencies": {
     "cnfast": "^0.1.0",
-    "fumadocs-core": "16.14.5",
-    "fumadocs-mdx": "15.3.0",
-    "fumadocs-ui": "npm:@fumadocs/base-ui@16.14.5",
+    "fumadocs-core": "16.15.0",
+    "fumadocs-mdx": "15.3.1",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@16.15.0",
     "lucide-react": "^1.31.0",
     "next": "16.3.0",
     "react": "^19.2.8",
@@ -27,6 +29,9 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.3.0",
+    "node-html-parser": "^9.0.1",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"

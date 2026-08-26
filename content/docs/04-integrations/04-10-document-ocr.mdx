@@ -1,0 +1,94 @@
+---
+title: "04-10 Document OCR"
+description: "Reads registration certificates and identity documents so the verification team is not retyping them."
+---
+
+**Package** `@apollo/integration-ocr` · **Schema** `candidates` · **Plan** D4 · **Effort** ~7.0pd · **Risk** Medium `EXT` · **Build in** Phase 2
+
+## 1. Purpose
+
+Reads registration certificates and identity documents so the verification team is not retyping them.
+Returns **per-field confidence**, not a single document-level score, so a verifier can see which values
+to check.
+
+Sits behind the `02-13` adapter interface, so it can be replaced without a domain change. **No provider
+is named.**
+
+## 2. Scope
+
+**In scope:** extraction from an uploaded document into typed fields with per-field confidence; failure
+routing to manual entry with the document retained; per-page cost recording.
+
+**Explicitly out of scope:** the document review screen (`03-04`, `M4-I14`); document storage and
+scanning (`02-04`); CV parsing, which is `04-06`; deciding what a verification outcome means (`03-04`).
+
+**Explicitly not built:** handwriting recognition beyond what the provider offers; document forgery
+detection; auto-accepting an extraction without review.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M4-I23` | D4 | Document text extraction | XL | 5.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-04` (the document, virus-scanned and `available`), `02-13` (the adapter
+boundary), `02-10`, `02-12` (consent and residency).
+
+**Consumed by:** `03-04` document review (`M4-I14`) and verification (`M4-I24`).
+
+**External:** provider **not named** (`OI-HS-07`).
+
+## 5. Data model
+
+`candidates.candidate_document.extracted` holds the machine output with per-field confidence;
+`corrected` holds the verifier's values. **Both are retained**, which is what makes accuracy measurable.
+
+```ts
+interface OcrProvider {
+  extract(i: { documentId: string; documentType: string }): Promise<{
+    fields: Record<string, { value: string; confidence: number }>
+    pages: number
+    costUnits: number
+  }>
+}
+```
+
+## 6. State machines
+
+Within `candidates.candidate_document`: `pending → accepted | rejected` by a verifier. Extraction itself
+is stateless; a failure routes to manual entry **with the document retained**.
+
+## 7. API surface
+
+In-process `ocr.extract()`, triggered by `files.document.available`. No public endpoint.
+
+## 8. Events and jobs
+
+`ocr.extract` on the `provider` queue class, per-page cost recorded.
+
+## 9. Frontend
+
+**N/A** — `03-04`'s document review shows the **source document beside the extracted values**, with
+low-confidence fields visually distinguished.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Extraction returns **per-field confidence, not a single document-level score** | `M4-I23` |
+| AC2 | A failure routes to manual entry **with the document retained** | `M4-I23` |
+| AC3 | Per-page cost is logged for consumption modelling | `M4-I23`, `OI-HS-05` |
+| AC4 | The provider sits behind the `02-13` adapter interface **so it can be replaced without domain change** | `M4-I23` |
+| AC5 | A correction retains the original machine value **for accuracy measurement** | `M4-I14` |
+| AC6 | Correction rates are logged so OCR quality is measurable | `M4-I14` |
+| AC7 | A quarantined document is never sent for extraction | `M0-I6` |
+| AC8 | No document leaves `ap-south-1` | `01-10` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-07` | **Who supplies document reading?** Not named in either client document | Stub behind the interface. **The integration cannot be sized against an unknown API.** Estimate blocker. | `M4-I23`, `X18` |
+| `OI-HS-57` **[raised here]** | Which document types must be read, and in which scripts? | Registration certificates and government ID, English and Devanagari. Regional-language certificates would need explicit provider support and are plausible across three categories and several state councils. | `M4-I23` |

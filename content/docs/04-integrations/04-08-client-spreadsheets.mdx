@@ -1,0 +1,97 @@
+---
+title: "04-08 Client spreadsheet formats"
+description: "Several clients send their vacancies as a spreadsheet in their own format — different column names, different order, sometimes several vacancies in one file."
+---
+
+**Package** `@apollo/integration-spreadsheets` · **Schema** `demand` · **Plan** A1 · **Effort** ~9.0pd (mapping screen) · **Risk** High `SPEC` · **Build in** Phase 3
+
+## 1. Purpose
+
+Several clients send their vacancies as a spreadsheet in their own format — different column names,
+different order, sometimes several vacancies in one file. One mapping screen is built; **each client
+format then needs its own mapping set up and its own sample file to test against.**
+
+The number of formats drives the effort, and **nobody has stated it.**
+
+## 2. Scope
+
+**In scope:** parsing XLSX and CSV; applying a per-client column mapping; producing **one requisition
+per requirement** in a multi-row file; **row-level error reporting with valid rows still loading**;
+retaining unmapped columns on the raw payload; sample-file preview.
+
+**Explicitly out of scope:** the mapping **screen** itself (`03-02`, `M3-I6`); completeness scoring
+(`03-02`); attachment extraction from email (`04-03`).
+
+**Explicitly not built:** automatic column inference; a format library shared across clients; writing
+spreadsheets back out.
+
+## 3. Plan traceability
+
+Effort sits in `M3-I6` (spreadsheet mapping, `03-02`) and `M3-I20` (parsers). This file specifies the
+parsing contract; the screen and configuration live in `03-02`.
+
+## 4. Dependencies
+
+**Must exist first:** `02-04` (the uploaded file), `03-02` (the mapping configuration), `02-08`.
+
+**Consumed by:** `03-02` parsers, and `04-03` when a spreadsheet arrives as an email attachment.
+
+**External:** `X28` — **client spreadsheet format samples. Real files, not idealised ones** — the value
+of A1 is that it takes what clients already send.
+
+## 5. Data model
+
+`demand.spreadsheet_mapping` (`03-02`) holds `column_map` and the `sample_document_id` it was proven
+against. `demand.parse_result` carries one row per requirement with `row_index`, `extracted`,
+`unmapped` and a per-row `outcome`.
+
+```ts
+interface SpreadsheetParser {
+  parse(i: { documentId: string; mappingId: string }): Promise<{
+    rows: Array<{ index: number; values: RequisitionDraft; unmapped: Record<string, unknown> }
+               | { index: number; error: string }>
+  }>
+}
+```
+
+## 6. State machines
+
+**N/A** — a parse produces per-row outcomes. Within `02-08`, a file yielding at least one valid row
+moves the record to `parsed`; a file where every row fails moves it to `unparseable` with the file
+retained.
+
+## 7. API surface
+
+In-process `spreadsheets.parse()`. The preview endpoint (`POST /v1/spreadsheet-mappings/:id/preview`)
+belongs to `03-02` and calls this.
+
+## 8. Events and jobs
+
+`demand.parse` on the `batch` class for large files. No provider cost — this is deterministic parsing,
+not inference.
+
+## 9. Frontend
+
+**N/A** — the mapping screen with its sample upload and preview is `03-02` (`M3-I6`), built on
+`02-05`'s `PartialFailureSummary` for row-level errors.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A new client format is mapped **without a deployment** | `M3-I6` |
+| AC2 | **Unmapped columns are retained on the raw payload rather than discarded** | `M3-I6` BR6 |
+| AC3 | A file with several requirements produces **one requisition per requirement** | `M3-I6` AC9 |
+| AC4 | Each produced requisition is **scored for completeness independently** | `M3-I6` |
+| AC5 | A row failing schema mapping returns a **named row-level error, and valid rows in the same file still produce requisitions** | `M3-I6` V4 |
+| AC6 | **A partial failure does not reject the whole file** | `M3-I6` |
+| AC7 | Uploading a sample shows what the mapping would produce **before it is saved** | `M3-I6` |
+| AC8 | The same requirement in a spreadsheet and on another channel produces objects differing only in source channel and raw payload | `M3-I20` AC1 |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-M3-04` | **How many different client spreadsheet layouts must we read?** | **The mapping screen is priceable; the per-client mapping work is not until the count is known.** Each format needs its own mapping and its own sample file to test against. **Estimate blocker.** | `M3-I6`, `M3-I20` |
+| `X28` | Real sample files from Apollo's clients | Two hops through Apollo fulfilment to their hospital clients. Idealised files would prove nothing. | `M3-I6` |
+| `OI-HS-56` **[raised here]** | Do any client files carry candidate data as well as vacancies? | Assumed not. If they do, the file is personal data on arrival and `02-12` applies to it before parsing — which changes the storage and retention path for every uploaded spreadsheet. | `M3-I6`, `02-12` |

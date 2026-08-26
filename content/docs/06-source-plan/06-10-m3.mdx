@@ -1,0 +1,864 @@
+---
+title: "06-10 M3 — Demand Intake & Allocation"
+description: "Clients tell Apollo about vacancies in whatever way suits them — an email, a spreadsheet, a WhatsApp message, a WhatsApp voice note, a feed from their own HR system, or just by telling a…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M3 · D2, A1, D14 (thin), F07, F14 · Months 3–4*
+
+`Release 1` · `32 items` · `186 conditions` · `208.0pd` · `15 high risk` · `Ops/Admin`
+
+Clients tell Apollo about vacancies in whatever way suits them — an email, a spreadsheet, a WhatsApp message, a WhatsApp voice note, a feed from their own HR system, or just by telling a recruiter who sits in their hospital. This module takes all of those and turns them into one standard requisition record. It checks whether the required fields are there, chases the client on the same channel they used if anything is missing, and then tracks the vacancy through its life: open, being worked on, paused, changed, partly filled, filled, closed. It also records who owns the vacancy and which recruiters were put on it during the daily morning call.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D2 | Demand management | Original R1 | M3 — Demand Intake & Allocation |
+> | D14 | Prioritisation & allocation | Thin slice from R2 | M3 — Demand Intake & Allocation |
+> | A1 | Multi-channel demand ingestion | New addition | M3 — Demand Intake & Allocation |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M3 — Demand Intake & Allocation. Reproduced without alteration.*
+>
+> Captures a requisition from any channel the client already uses and normalises it to a single structured requisition object carrying candidate category, with source retained, completeness scored against required fields and follow-up routed back through the originating channel; it also holds shift templates, live fulfilment status and aging, and the demand lifecycle of hold, revise and close. It attaches an owner to the requisition and records the recruiter allocation that the daily morning call already makes.
+>
+> Deliverables: D2, A1, D14 (thin slice)
+>
+> Surfaces: Ops/Admin. Email, client-format spreadsheets, WhatsApp text and voice notes and client HRMS/ATS are ingestion paths rather than rendered surfaces; verbal capture by a site-resident recruiter is entered through Ops/Admin.
+>
+> **OPEN** — A1 channel count in Release 1. A1 names six ingestion channels including the client portal. D12 is deferred, so five are available in Release 1. Confirm the portal channel is specified but not built, rather than dropped from A1.
+>
+> **OPEN** — A9 requisition-side fields. A9 now carries a per-category attribute set on both the requisition and the candidate record, so requisition granularity differs by category. The requisition-side fields are not explicitly scoped into D2. Ownership of that half of A9 needs assigning between M3 and M4.
+>
+> Scope boundary: the prioritisation engine and the requisition approval workflow remain in the later release. What sits in Release 1 is an owner field and capture of an allocation made outside the system — a record, not an assignment engine. The inbound parsing pipeline is built here under A1 and consumed by A14 in M5.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 6** — Category on the requisition under D2, together with the requisition-side half of the A9 attribute set. Ownership of that half is currently unassigned between M3 and M4.
+>
+> **Item 13c** — An inbound path by which a learner becomes a candidate in the supply base.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+The message-receiving pipeline built here — receive, queue, work out who sent it, parse it, decide what kind of message it is, handle failures, retry — is built once in this module. M5 reuses the same pipeline for candidate replies. So it must be built to accept a second kind of message from the start, not just requisitions. It also carries two pieces of foundation work first needed here: the message-sending plumbing the follow-up chase runs on, and the event recording the M9 reports read later.
+
+### Records this milestone owns
+
+- InboundRecord — one row per incoming message or file. Keeps the channel, the sender, the time, and the original raw content. Kept forever, even after the requisition is created, so a disputed vacancy can be traced back to what the client actually sent.
+- Requisition — the main record. Client, site, role, how many positions, candidate category, the category-specific fields, the rate to use, how complete it is, which fields are missing, who owns it, its status and its age.
+- RequisitionVersion — written every time the requisition is changed, recording what changed, when, and who did it.
+- ShiftDemandLine — contract staffing only. One row per shift, generated from a shift pattern.
+- AllocationRecord — which recruiters were put on this vacancy, when, and by whom. Rows are only ever added, never changed.
+- StatusTransition — every status change with a timestamp. M9 cannot report where candidates drop out without this.
+
+### How records move
+
+- InboundRecord: received → identified (we know the client) or unmatched (we do not). Then parsed, or unparseable. Then consumed once a requisition is made from it.
+- Requisition: incomplete or complete → awaiting client (we are chasing missing fields) → complete → open → in fulfilment → partially filled → filled
+- Requisition: in fulfilment ↔ on hold. Putting it on hold stops the age counter; releasing it restarts from where it stopped, not from zero.
+- Requisition: any state → closed. A reason from the configured list is required.
+
+### Not in this milestone
+
+- Working out which vacancies matter most, and any approval step before a vacancy goes live. That is milestone M14.
+- The system suggesting or balancing which recruiter gets which vacancy. Here we only record the decision made on the morning call.
+- Enforcing a cap on how many vacancies a recruiter holds. The 15-16 norm is not enforced.
+- The client portal as a way of sending vacancies in. Listed as a channel so it can be switched on later, but not built here.
+- Automatically merging duplicate requisitions. We show a suspected duplicate and let a person decide.
+
+### Needs to exist first
+
+- M1 for logins and environment. M2 for the client, sites and rate card. M4 for the definition of the category-specific fields.
+
+### What breaks without it
+
+- M6 ranks against the requisition — no requisition, no ranking, and both business flows stop at step one. M7 offers and client links quote the requisition. M8 counts placements against it. M9 needs the owner and allocation to report by recruiter. M5 reuses the message pipeline built here.
+
+### Items — 32 to build · design 27.0pd, build 127.0pd, QA 54.0pd
+
+#### M3-I1 — Inbound list
+
+`A1` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `SHARED` · `High`
+
+**Who uses it: Recruiter, Fulfilment lead.** Single view of every inbound message or file across all live channels, in whatever state it has reached.
+
+##### Screens to build
+
+1. **Inbound list**
+  - Lists every message and file received, with the channel, who sent it, when it arrived and what state it reached
+  - Filters by channel and by state
+  - Opens one record
+
+##### Conditions it must satisfy
+
+- New inbound appears with correct channel, sender and receipt timestamp (Step 1)
+- Filtering on state=unmatched returns only unmatched records
+- InboundRecord is still retrievable after the requisition is created (entity note: retained as audit trail)
+- Sorting by age surfaces the oldest first
+- A record whose requisition has been created shows state consumed
+- User without the ingestion permission cannot open the queue (M0-I3)
+- Empty state renders when no inbound records match the filter
+- Queue surfacing latency meets the agreed target - target not yet set (OI-M3-14)
+
+Index **M3-I1** · Client ref **A1** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **High** · Open items **OI-M3-14** · Linked items **M0-I3, M2-I14**
+
+#### M3-I2 — Unmatched senders
+
+`A1` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `High`
+
+**Who uses it: Recruiter, BD.** Holds inbounds whose sender resolves to zero clients or to more than one, so that no payload is ever discarded.
+
+##### Screens to build
+
+1. **Unmatched senders**
+  - Lists messages whose sender does not match exactly one client
+  - Shows the original message alongside
+  - Links the sender to a client, which sends the message back for parsing
+  - Passes the message to business development where no client fits
+
+##### Conditions it must satisfy
+
+- A send from an unknown address queues with payload intact and is not discarded (AC3)
+- A sender matching more than one client routes here for manual selection, not auto-picked (V1)
+- Linking to a client moves the record unmatched to identified and re-enters parsing
+- Escalating to BD raises a notification and the record stays unmatched
+- No requisition can be created from an unmatched record until a client is linked (E1, BR1)
+- Payload is preserved on every path including escalation
+- Link action is recorded with acting user and timestamp
+
+Index **M3-I2** · Client ref **A1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **High** · Open items **OI-M3-14** · Linked items **M2-D1, M0-I4**
+
+#### M3-I3 — Manual entry queue
+
+`A1` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `MODEL` · `Medium`
+
+**Who uses it: Recruiter.** Recovery path for payloads the parser could not read, so that a parse failure never loses a requirement.
+
+##### Screens to build
+
+1. **Manual entry queue**
+  - Lists messages the parser could not read
+  - Shows the original text, file or audio, and plays the audio
+  - Opens a requisition form already filled with the sender, channel and time received
+  - Creates the requisition from that form
+
+##### Conditions it must satisfy
+
+- Parse failure routes here with the raw payload attached (AC6)
+- Voice note transcription failure retains playable audio (E3)
+- Intent confidence below threshold routes here (state transition identified to unparseable)
+- Converting produces a requisition without re-keying sender, channel or receipt timestamp (AC6)
+- A voice note beyond the accepted duration routes here rather than being rejected (V3)
+- Converted record moves unparseable to parsed to consumed
+- Discard requires a reason and is permissioned
+
+Index **M3-I3** · Client ref **A1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **OI-M3-05, OI-M3-06** · Linked items **M3-I20, M3-I21, M0-I6**
+
+#### M3-I4 — Suspected duplicates
+
+`A1` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Recruiter, Fulfilment lead.** Surfaces the same requirement arriving on two channels for a human decision, because the dedupe rule is not yet set.
+
+##### Screens to build
+
+1. **Suspected duplicates**
+  - Lists pairs of requisitions that look like the same requirement arriving twice
+  - Shows the two side by side with the differing fields marked
+  - Marks them as the same requirement, which merges the second onto the first
+  - Marks them as different, which keeps both
+
+##### Conditions it must satisfy
+
+- Same requirement sent by email and WhatsApp surfaces as a suspected duplicate rather than auto-merging (E5)
+- Marking as the same requirement merges onto the first requisition and records the second inbound as merged
+- Marking as different produces a second requisition
+- No automatic merge occurs anywhere while OI-M3-02 is open
+- Decision is attributed and timestamped
+- Match-key logic is configurable so the confirmed rule drops in without a rebuild
+
+Index **M3-I4** · Client ref **A1** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.0pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-M3-02** · Linked items **M3-I19, M0-I4**
+
+#### M3-I5 — Channel settings
+
+`A1` · `Config` · `M · 2.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Platform administrator.** Enables, disables and configures each ingestion channel, including the portal channel that is enumerated but not built.
+
+##### Screens to build
+
+1. **Channels**
+  - Lists the six channels: email, client spreadsheet, WhatsApp text, WhatsApp voice note, client HR system, client portal
+  - Switches a channel on or off
+  - Shows the client portal as listed but not available
+  - Holds the mailbox, WhatsApp number and HR system settings for each channel
+
+##### Conditions it must satisfy
+
+- Portal channel is visible in the enumeration but cannot be enabled (AS-05, alternate flows)
+- Disabling a channel stops new ingestion without deleting historical records
+- Email configuration supports both models pending the decision (OI-M3-13)
+- WhatsApp configuration shows one registered number, not two, and warns if a second is attempted
+- Only the platform administrator role can change channel configuration (M0-I3)
+
+Index **M3-I5** · Client ref **A1** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **0.5pd** · Total **3.5pd** · Confidence **Medium** · Open items **OI-M3-13, OI-A-06** · Linked items **M0-I5, M5-D10**
+
+#### M3-I6 — Spreadsheet mapping
+
+`A1` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator, Recruiter.** Maps each client's own spreadsheet layout onto the requisition schema without a code change.
+
+##### Screens to build
+
+1. **Spreadsheet mapping**
+  - Lists the spreadsheet formats set up for each client
+  - Maps each column in the client's file to a field on the requisition
+  - Uploads a sample file and shows what it would produce
+  - Saves the mapping so that client's files load without code changes
+
+##### Conditions it must satisfy
+
+- A new client format is mapped without a deployment
+- Unmapped columns are retained on the raw payload rather than discarded (BR6)
+- A file with several requirements produces one requisition per requirement (AC9)
+- Each produced requisition is scored for completeness independently (alternate flow)
+- A row failing schema mapping returns a named row-level error and valid rows in the same file still produce requisitions (V4)
+- A partial failure does not reject the whole file (alternate flow)
+
+Index **M3-I6** · Client ref **A1** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Low** · Open items **OI-M3-04** · Linked items **M3-I20, M0-I5**
+
+#### M3-I7 — Required fields
+
+`A1` · `Config` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Defines what complete means, per candidate category, which drives completeness scoring and the follow-up chase.
+
+##### Screens to build
+
+1. **Required fields**
+  - Lists the fields required for a requisition, per candidate category
+  - Ticks a field as required or not required
+  - Saves the set, which is what completeness is scored against
+
+##### Conditions it must satisfy
+
+- A different required set per category yields a different completeness score for the same payload (AC4)
+- Each missing field is named individually rather than returned as an aggregate score alone (AC4)
+- Changing the set re-scores new and revised requisitions but does not retrospectively re-score historic ones
+- A category with no configured set blocks publish rather than passing silently
+- Candidate category cannot be inferred is treated as a named missing field, not a default (V2)
+
+Index **M3-I7** · Client ref **A1** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **Low** · Open items **OI-M3-07, OI-M3-01** · Linked items **M0-I5, M4-A9**
+
+#### M3-I8 — Follow-up settings
+
+`A1` · `Config` · `M · 2.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Sets what the chase message says, how long the client has, and who it escalates to.
+
+##### Screens to build
+
+1. **Follow-up settings**
+  - Holds the message sent to a client when fields are missing, per channel
+  - Holds how many days to wait before escalating to the requisition owner
+
+##### Conditions it must satisfy
+
+- The follow-up is issued on the channel the requisition arrived on (AC5)
+- A client reply on that channel merges onto the same requisition rather than creating a second (AC5)
+- A one-way channel falls back to the client contact (BR3, AS-02)
+- Window expiry escalates to the requisition owner and does not deem a value (E4, AS-01)
+- Platform default applies where the client has no configured window
+- A requisition at awaiting client past the window stays visible on the board and does not enter matching (E4)
+
+Index **M3-I8** · Client ref **A1** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **OI-M3-08** · Linked items **M0-I5, M3-I30**
+
+#### M3-I9 — Requisition form
+
+`D2` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Recruiter (incl. site-resident), BD.** The manual creation path and the entry point for verbal capture, which is not an edge case with fifteen site-resident recruiters.
+
+##### Screens to build
+
+1. **New or edit requisition**
+  - Takes client, site, department, service line and candidate category
+  - Takes the care setting - hospital or home healthcare
+  - Takes role, number of positions and the rate to use
+  - Shows the extra fields for the chosen candidate category
+  - Takes start date and shift pattern for shift work, or target join date for permanent
+  - Shows which required fields are still missing
+  - Saves the requisition and gives it an identifier
+
+##### Conditions it must satisfy
+
+- A requisition created with client, location, department, service line, category, role, positions and rate reference is assigned a unique identifier (D2 AC1)
+- Selecting a category swaps the attribute field set (A9, AS-04)
+- Number of positions must be an integer greater than zero (V1)
+- Candidate category is restricted to nurse, doctor or allied health (V2)
+- Contractual requires start date and shift pattern (V3)
+- Permanent target join date is optional (V3)
+- Location and department must belong to the client on the requisition (V5)
+- A rate reference with no matching rate card line is flagged but does not block (BR3)
+- A requisition cannot be created without a client record (BR1)
+- Verbal capture records source as verbal with the capturing recruiter (BR4)
+- Changing category after creation is blocked pending OI-M3-09
+- Completeness scoring at verbal entry is identical to the parsed path (alternate flow)
+
+Index **M3-I9** · Client ref **D2** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **Medium** · Open items **OI-M3-01, OI-M3-09** · Linked items **M2-D1, M4-A9, M0-I5**
+
+#### M3-I10 — Requisition record
+
+`D2` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `High`
+
+**Who uses it: Recruiter, Fulfilment lead, Finance (read).** The single record view for a requisition, carrying its source evidence so a disputed requirement can be traced to what the client actually sent.
+
+##### Screens to build
+
+1. **Requisition**
+  - Shows the requisition with its status, age and how many positions are filled and open
+  - Shows which channel it arrived on and the original message it came from
+  - Opens its version history, its allocation and its activity trail
+  - Offers hold, revise, close, set owner and allocate
+
+##### Conditions it must satisfy
+
+- Source channel and original payload remain retrievable after creation and after revision (A1 AC2)
+- Source channel is immutable after creation (BR2)
+- Elapsed time in each state is retrievable for a requisition that has passed through open, in fulfilment and partially filled (AC7)
+- Days aged excludes held days (AC6)
+- The audit timeline shows every status transition with acting user or system
+- A finance user can read but cannot edit (M0-I3)
+- The originating inbound record opens from the source panel
+
+Index **M3-I10** · Client ref **D2** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **High** · Open items **-** · Linked items **M0-I4, M0-I6, M2-I14**
+
+#### M3-I11 — Requisition versions
+
+`D2` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Shows what changed on a requisition, when, and who changed it - required because revision is a versioning event, not an edit.
+
+##### Screens to build
+
+1. **Version history**
+  - Lists every version of the requisition with when it changed and who changed it
+  - Opens a past version and marks the fields that changed
+
+##### Conditions it must satisfy
+
+- Revising creates a new version and every prior version is retrievable with its timestamp and user (AC2)
+- Revision re-scores completeness against the revised field set (state transition)
+- An inbound revision arriving on a channel updates the existing requisition as a new version rather than creating a second requisition (alternate flow)
+- The matching rule for channel revisions is configurable pending OI-M3-02
+- Version history is read-only
+
+Index **M3-I11** · Client ref **D2** · Band **L** · Design **1.0pd** · Build **3.0pd** · QA **1.0pd** · Total **5.0pd** · Confidence **Medium** · Open items **OI-M3-02** · Linked items **M3-I27, M0-I4**
+
+#### M3-I12 — Fulfilment board
+
+`D2` · `Screen` · `XL · 5.0pd` · `AI Medium` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Fulfilment lead, Recruiter, Shalu (VP Fulfilment).** The operational heart of M3 - live demand, aging and fill in one view. Highest-traffic screen in the module.
+
+##### Screens to build
+
+1. **Fulfilment board**
+  - Lists live requisitions with client, site, role, category, positions requested, filled and open, days open, owner and allocated recruiters
+  - Filters by client, category, owner, status and by having no recruiter allocated
+  - Marks a requisition whose rate did not match the rate card
+  - Opens a requisition
+
+##### Conditions it must satisfy
+
+- The board shows positions requested, filled, open and days aged excluding held days per requisition (AC6)
+- Filtering for requisitions with no recruiter allocated returns exactly those (D14 AC4)
+- A requisition whose rate reference found no rate card line is flagged (BR3)
+- Requisitions at awaiting client are visible but excluded from matching (E4)
+- Aging is measured from the first time the requisition reached complete, not from inbound receipt (BR4)
+- Placement confirmations from M8 decrement positions open (Step 10)
+- Board load time meets the agreed target - target not yet set (OI-M3-14)
+- A recruiter sees the correct row set under the agreed data-scoping rule (OI-HS-01)
+
+Index **M3-I12** · Client ref **D2** · Band **XL** · Design **3.0pd** · Build **5.0pd** · QA **2.0pd** · Total **10.0pd** · Confidence **Medium** · Open items **OI-M3-10, OI-M3-14, OI-HS-01** · Linked items **M0-I3, M2-I14, M8-D7**
+
+#### M3-I13 — Shift templates
+
+`D2` · `Screen` · `L · 3.0pd` · `AI High` · `Low` · `SPEC` · `High`
+
+**Who uses it: Fulfilment lead, Platform administrator.** Defines repeating shift patterns so a contractual requisition expands into demand lines without manual entry per shift.
+
+##### Screens to build
+
+1. **Shift templates**
+  - Lists the saved shift patterns
+  - Creates a pattern from days of the week, times and positions per shift
+  - Applies a pattern to a shift requisition, which creates one demand line per shift
+
+##### Conditions it must satisfy
+
+- Applying a template to a contractual requisition generates one demand line per shift across the defined period, and the count matches the pattern (AC5)
+- Editing a template does not retroactively change already-generated lines
+- A permanent requisition cannot have a shift template applied
+- A deactivated template stays readable on requisitions that used it
+
+Index **M3-I13** · Client ref **D2** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.0pd** · Total **5.5pd** · Confidence **High** · Open items **-** · Linked items **M3-I27**
+
+#### M3-I14 — Shift demand lines
+
+`D2` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Per-shift view of contractual demand, consumed downstream by M6 for shift-level ranking and by M8 for attendance.
+
+##### Screens to build
+
+1. **Shift demand lines**
+  - Lists each shift on the requisition with its date, times, positions and how many are filled
+  - Holds the visit address per shift for home healthcare, where the workplace changes between shifts
+  - Cancels or holds a single line
+
+##### Conditions it must satisfy
+
+- Demand lines are readable by M6 for shift-level ranking (4c persistence note)
+- Fill decrements per line, not only at requisition level
+- A cancelled line does not appear in ranking
+- Holding a line does not hold the parent requisition
+
+Index **M3-I14** · Client ref **D2** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **-** · Linked items **M6-D18, M8-D22**
+
+#### M3-I15 — Hold, revise and close
+
+`D2` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** The three lifecycle actions, each with distinct rules about the aging clock and mandatory reasons.
+
+##### Screens to build
+
+1. **Hold, revise and close**
+  - Puts a requisition on hold, which stops the age counter
+  - Releases the hold, which restarts the counter where it stopped
+  - Opens the requisition for revision, which creates a new version
+  - Closes the requisition, requiring a reason from the configured list
+
+##### Conditions it must satisfy
+
+- Placing a requisition on hold stops the aging clock (AC3)
+- Releasing the hold resumes aging from the held value, not from zero (AC3)
+- Closing without a reason is rejected and the requisition remains in its prior state (AC4)
+- Close is available from any state (state transitions table)
+- A requisition reaching filled does not close automatically - pending confirmation (BR5, OI-M3-12)
+- Hold reason is optional; close reason is mandatory (V4)
+- Every action writes a timestamped StatusTransition (AC7)
+
+Index **M3-I15** · Client ref **D2** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **OI-M3-11, OI-M3-12** · Linked items **M3-I27, M0-I5**
+
+#### M3-I16 — Owner and allocation
+
+`D14` · `Screen` · `L · 3.0pd` · `AI High` · `Low` · `XMOD` · `High`
+
+**Who uses it: Fulfilment lead.** Records the decision made on the daily morning call. A record, not an assignment engine.
+
+##### Screens to build
+
+1. **Owner and allocation**
+  - Sets the requisition owner from the list of active Apollo users
+  - Allocates one or more recruiters to the requisition
+  - Shows every past allocation with when it was made and who recorded it
+  - Removes an allocation, keeping the history
+
+##### Conditions it must satisfy
+
+- An owner can be assigned from the internal user list and is retrievable on the requisition and in reporting (AC1)
+- One or more recruiters can be allocated, each timestamped and attributed to the user who recorded it (AC2)
+- Reallocating preserves prior allocations - a requisition reallocated twice returns all three in sequence (AC3)
+- Owner must be an active Apollo internal user (V1)
+- An allocated user must hold a recruiter role in RBAC (V2)
+- A requisition cannot move to in fulfilment without an owner set (V3)
+- Removing an allocation preserves the historical record (BR3)
+- No suggestion, computation or optimisation of allocation occurs anywhere (BR1) - negative test
+- Allocation is exposed to D28 grouped by recruiter for any date range (AC5)
+
+Index **M3-I16** · Client ref **D14** · Band **L** · Design **1.0pd** · Build **3.0pd** · QA **1.5pd** · Total **5.5pd** · Confidence **High** · Open items **OI-M3-10** · Linked items **M0-I2, M0-I3, M9-D28**
+
+#### M3-I17 — Reclassify a message
+
+`A1` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `SHARED` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Corrects a record classified as demand that is actually a candidate response, or the reverse, without re-ingestion.
+
+##### Screens to build
+
+1. **Reclassify**
+  - Shows what the platform decided the message was
+  - Changes it from a demand message to a candidate reply, or the other way
+  - Records who changed it and when
+
+##### Conditions it must satisfy
+
+- A demand record is reclassified to candidate response without re-ingestion (E6)
+- The reclassification is recorded with acting user, timestamp and original classification
+- A reclassified record routes to the A14 consumer on the shared stack
+- Reclassification in the reverse direction behaves identically
+- Confidence score is visible so recurring misclassification is measurable
+
+Index **M3-I17** · Client ref **A1** · Band **M** · Design **0.5pd** · Build **2.0pd** · QA **1.0pd** · Total **3.5pd** · Confidence **Medium** · Open items **OI-M3-06** · Linked items **M3-I21, M5-A14, M0-I4**
+
+#### M3-I18 — Inbound receiver
+
+`A1` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: System.** Receives on every channel, writes the InboundRecord and enqueues for parsing. Built once, consumed by A14.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives messages and files on every switched-on channel
+  - Writes each one down with its channel, sender, time received and original content
+  - Queues it for parsing and retries if that fails
+  - Accepts a second kind of message being registered against it without being rebuilt
+
+##### Conditions it must satisfy
+
+- Every channel writes an InboundRecord with channel, sender identity, receipt timestamp and payload (Step 1)
+- A redelivered message does not create a duplicate InboundRecord
+- Queue retry and dead-letter behaviour is observable
+- The stack accepts a second registered intent set without modification to the receiver, queue, sender resolution or retry (AC7)
+
+Index **M3-I18** · Client ref **A1** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Medium** · Open items **OI-M3-06** · Linked items **M0-I6, M3-I30, M1-I16**
+
+#### M3-I19 — Sender matching
+
+`A1` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** Matches an email address, WhatsApp number or HRMS tenant to exactly one client, location and department in M2.
+
+##### Screens to build
+
+1. **No screen**
+  - Matches the sender's email address, WhatsApp number or HR system account to one client
+  - Sends the message to the unmatched queue where it matches none or more than one
+
+##### Conditions it must satisfy
+
+- A sender resolving to exactly one client moves the record received to identified (Step 2)
+- Zero matches routes to unmatched (Step 2, V1)
+- More than one match routes to unmatched for manual selection, never auto-picked (V1)
+- A manual link resolves the record and feeds the resolver for subsequent sends from the same sender
+- No requisition is created before sender resolution on any channel (BR1)
+
+Index **M3-I19** · Client ref **A1** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M2-D1**
+
+#### M3-I20 — Parsers
+
+`A1` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `MODEL` · `Low`
+
+**Who uses it: System.** Selects the right parser by channel and content type and extracts fields to the requisition schema.
+
+##### Screens to build
+
+1. **No screen**
+  - Chooses the right parser for the channel and file type
+  - Pulls the fields out of the message into the requisition shape
+  - Produces one requisition per requirement in a spreadsheet, naming any row that failed
+  - Sends the message to the manual entry queue when it cannot read it
+
+##### Conditions it must satisfy
+
+- The same requirement submitted on all five live channels produces requisition objects differing only in source channel and raw payload (AC1)
+- An HRMS payload skips parsing and enters at completeness scoring (alternate flow)
+- A spreadsheet yields one requisition object per requirement with a per-row outcome (AC9)
+- Parser failure routes the record to unparseable with payload intact (E2)
+- Unmapped spreadsheet columns are retained on the raw payload (BR6)
+
+Index **M3-I20** · Client ref **A1** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-M3-04** · Linked items **M3-I6, M0-I5**
+
+#### M3-I21 — Message type detection
+
+`A1` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `MODEL` · `Low`
+
+**Who uses it: System.** Separates demand intents from candidate-response intents on the shared stack, with a confidence threshold and fallback.
+
+##### Screens to build
+
+1. **No screen**
+  - Decides whether a message is a demand or a candidate reply
+  - Sends it to the manual entry queue when it is not confident enough
+  - Lets that decision be corrected later without receiving the message again
+
+##### Conditions it must satisfy
+
+- A demand intent above threshold moves identified to parsed (Step 3)
+- Confidence below threshold moves identified to unparseable (state transitions)
+- A candidate response is not classified as demand and vice versa (E6)
+- A misrouted item is re-routable to the other intent set without re-ingestion, and the reclassification is recorded (E6)
+- The threshold is configurable and shared across A1 and A14 (BR5, AS-03)
+
+Index **M3-I21** · Client ref **A1** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-M3-06** · Linked items **M5-A14, M0-I5**
+
+#### M3-I22 — Completeness scoring and chase
+
+`A1` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: System.** Scores the parsed object against the required-field set for its category and chases what is missing on the originating channel.
+
+##### Screens to build
+
+1. **No screen**
+  - Scores the requisition against the required fields for its candidate category
+  - Names each missing field individually
+  - Sends the follow-up message on the channel the requisition arrived on
+  - Merges the client's reply onto the same requisition
+  - Escalates to the requisition owner when the waiting period runs out
+
+##### Conditions it must satisfy
+
+- Completeness is scored against the required-field set for the candidate category on the requisition (AC4)
+- Each missing field is named individually rather than returned as an aggregate (AC4)
+- A follow-up is issued on the channel the requisition arrived on (AC5)
+- A client reply on that channel merges onto the same requisition (AC5)
+- A one-way channel falls back to the client contact (BR3, AS-02)
+- Window expiry escalates to the owner rather than deeming a value (E4, AS-01)
+- Verbal capture is scored identically at the point of entry (alternate flow)
+
+Index **M3-I22** · Client ref **A1** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Medium** · Open items **OI-M3-07, OI-M3-08** · Linked items **M0-I5, M3-I30**
+
+#### M3-I23 — Voice note transcription
+
+`A1` · `Integration` · `XXL · 8.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Transcribes WhatsApp voice notes to the same requisition schema as WhatsApp text.
+
+##### Screens to build
+
+1. **No screen**
+  - Turns a WhatsApp voice note into text and parses it like WhatsApp text
+  - Keeps the audio playable against the message
+  - Sends it to the manual entry queue if it cannot be transcribed
+
+##### Conditions it must satisfy
+
+- A WhatsApp voice note is transcribed and parsed to the same requisition schema as WhatsApp text (AC8)
+- Audio is retained against the inbound record and remains playable (AC8, E3)
+- Transcription failure routes to manual entry with audio retained (E3)
+- A voice note beyond the accepted duration routes to manual entry rather than being rejected (V3)
+- Language coverage is proven against field-recorded audio, not studio samples
+
+Index **M3-I23** · Client ref **A1** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **OI-M3-05** · Linked items **M0-I6, M5-A5**
+
+#### M3-I24 — WhatsApp inbound and follow-up
+
+`A1` · `Integration` · `XL · 5.0pd` · `AI Low` · `High` · `EXT` · `Medium`
+
+**Who uses it: System.** Receives text and voice notes, and sends the missing-field follow-up. Shares one registered number with D10.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives WhatsApp text and voice notes
+  - Sends the follow-up message back on WhatsApp
+  - Uses the same registered WhatsApp number as the rest of the platform
+
+##### Conditions it must satisfy
+
+- Inbound text and voice notes are received and written to InboundRecord
+- Follow-up is sent on the same number the requisition arrived on (AC5)
+- One registered number and template set is used across A1 and D10, not two (dependency note)
+- Conversation volume is logged so consumption cost is measurable (OI-HS-05)
+- Delivery failure is retried and surfaced in the delivery log (M3-I30)
+
+Index **M3-I24** · Client ref **A1** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-HS-05** · Linked items **M3-I30, M5-D10**
+
+#### M3-I25 — Email inbound
+
+`A1` · `Integration` · `L · 3.0pd` · `AI Medium` · `Medium` · `EXT` · `Medium`
+
+**Who uses it: System.** Monitors the mailbox or forwarding address and writes inbound records from email and attachments.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives email and its attachments
+  - Merges a reply on the same thread onto the same requisition
+
+##### Conditions it must satisfy
+
+- An email produces an InboundRecord with sender, timestamp and payload
+- Attachments are extracted and routed to the spreadsheet parser where applicable
+- A client reply on the thread merges onto the same requisition (AC5)
+- Both the single-address and per-client-address models are supported pending OI-M3-13
+
+Index **M3-I25** · Client ref **A1** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-M3-13** · Linked items **M3-I20, M3-I30**
+
+#### M3-I26 — Client HR system feed
+
+`A1` · `Integration` · `XXL · 8.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Accepts structured requisition payloads from client systems, bypassing parsing.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives structured requisitions pushed from a client's own HR system
+  - Skips parsing and goes straight to completeness scoring
+
+##### Conditions it must satisfy
+
+- An HRMS payload arrives structured, skips parsing and enters at completeness scoring (alternate flow)
+- Tenant identity resolves to exactly one client (V1)
+- A new client system is added as configuration where the payload shape is already supported
+- Request and error logs are retrievable per tenant
+
+Index **M3-I26** · Client ref **A1** · Band **XXL** · Design **0.0pd** · Build **8.0pd** · QA **3.0pd** · Total **11.0pd** · Confidence **Low** · Open items **OI-M3-03** · Linked items **M3-I26**
+
+#### M3-I27 — Requisition record and states
+
+`D2` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** The requisition object, its versioning, and the full state machine from incomplete through to closed.
+
+##### Screens to build
+
+1. **No screen**
+  - Holds the requisition record and every state it can be in
+  - Writes a new version each time it is revised
+  - Counts days open, not counting days on hold
+  - Decreases positions open as placements are confirmed
+
+##### Conditions it must satisfy
+
+- Every transition in the state table is reachable only from its defined predecessor state
+- Revision creates a new version and re-scores completeness (state transitions)
+- Hold stops and release resumes the aging clock from the held value (AC3)
+- Aging is measured from first reaching complete (BR4)
+- Close from any state requires a reason (AC4)
+- Placement confirmation from M8 decrements positions open, then partially filled, then filled (Step 10)
+- A drop-out in M8 returns the position to open
+- Auto-close on filled behaviour is configurable pending OI-M3-12
+
+Index **M3-I27** · Client ref **D2** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-M3-09, OI-M3-12** · Linked items **M2-I2, M8-D7**
+
+#### M3-I28 — Status change log
+
+`D2` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `DATA` · `High`
+
+**Who uses it: System.** Append-only transition record. D28 stage-level conversion loss cannot be computed retrospectively without it.
+
+##### Screens to build
+
+1. **No screen**
+  - Writes a row every time a requisition changes state, with the time and who did it
+  - Rows can be added but never changed or deleted
+
+##### Conditions it must satisfy
+
+- Every status transition writes a timestamped record (AC7)
+- Elapsed time in each state is retrievable for any requisition (AC7)
+- Records are append-only and cannot be edited or deleted
+- D28 can compute stage-level loss by client and by stage from transitions alone (5b)
+- Loss by recruiter additionally requires the D14 allocation (5b)
+
+Index **M3-I28** · Client ref **D2** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **High** · Open items **-** · Linked items **M0-I4, M3-I31, M9-D28**
+
+#### M3-I29 — Second message type registration
+
+`A1` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: System.** The registration contract that lets A14 consume the inbound stack without rebuilding it inside M5.
+
+##### Screens to build
+
+1. **No screen**
+  - Lets a second kind of message be registered against the inbound pipeline
+  - Routes those messages to whichever module registered for them
+
+##### Conditions it must satisfy
+
+- A second consumer registers an additional intent set and target schema without modification to the channel receiver, queue, sender identity resolution or retry handling (AC7)
+- Demonstrated by registering the A14 candidate-response intent set against the same stack (AC7)
+- A14 slipping does not block A1; A1 slipping does block A14 (5b)
+- The contract is covered by an automated test so a later change to A1 cannot silently break A14
+
+Index **M3-I29** · Client ref **A1** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **OI-M3-06** · Linked items **M5-A14**
+
+#### M3-I30 — Message sending
+
+`F07` · `Service` · `XL · 6.0pd` · `AI Medium` · `High` · `EXT` · `Medium`
+
+**Who uses it: System.** The plumbing underneath every message the platform sends. D10 covers templates and preferences; the queue, retries and delivery receipts underneath are assumed. First needed when A1 chases a client for missing requisition fields on the channel the requisition arrived on.
+
+##### Screens to build
+
+1. **No screen**
+  - Sends messages over WhatsApp, SMS, email and app push
+  - Retries a message that fails and gives up after a set number of tries
+  - Records whether each message arrived
+
+##### Conditions it must satisfy
+
+- A message that fails for a temporary reason is retried; one that fails permanently is not
+- Delivery receipts arriving later correct an optimistic 'sent' status
+- The same WhatsApp number is used for M3 follow-ups and M5 contact messages - one registration, not two
+- Message and conversation counts are logged so running cost can be measured (OI-HS-05)
+- An operator can see and re-queue messages that gave up
+
+Index **M3-I30** · Client ref **F07** · Band **XL** · Design **1.0pd** · Build **6.0pd** · QA **2.5pd** · Total **9.5pd** · Confidence **Medium** · Open items **OI-HS-05, OI-HS-07** · Linked items **M3-I26**
+
+#### M3-I31 — Event recording
+
+`F14` · `Service` · `XL · 7.0pd` · `AI Medium` · `High` · `DATA` · `Medium`
+
+**Who uses it: System.** Every module writes an event as things happen, and the reports in M9 read those events later. This is the one prerequisite that cannot be added afterwards. First needed at M3 build. Events must be written as work happens or the M9 reports cannot cover the earlier period.
+
+##### Screens to build
+
+1. **No screen**
+  - Writes an event every time something happens in any module
+  - Stores those events so the M9 reports can read them later
+
+##### Conditions it must satisfy
+
+- Every module writes events as work happens, not when a report is requested
+- M9 can report on a period that has already passed, because the events were written at the time
+- Stage-level drop-off needs M3 status transitions to have been recorded from day one
+- Reporting by recruiter needs the M3 allocation history to have been recorded from day one
+- If this is built after M3 rather than before it, the reports in M9 cannot be produced for the earlier period at all
+
+Index **M3-I31** · Client ref **F14** · Band **XL** · Design **0.5pd** · Build **7.0pd** · QA **2.5pd** · Total **10.0pd** · Confidence **Medium** · Open items **-** · Linked items **M2-I2**
+
+#### M3-I32 — Inbound learner records
+
+`A1` · `Service` · `L · 3.0pd` · `AI Low` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Receives learner and certification records from an outside system and routes them to the candidate record. Requested as the platform side of the Apollo LMS connection.
+
+##### Screens to build
+
+1. **No screen**
+  - Receives learner and certification records on the existing inbound path
+  - Matches the learner to a candidate, or sends it to the learner match queue
+  - Writes the certification onto the candidate record
+
+##### Conditions it must satisfy
+
+- Registers as a further message type on the inbound pipeline rather than a separate stack (M3-I29)
+- An unmatched learner is queued for a person to resolve, never discarded
+- Cannot be built or tested until the sending system exists and its payload is known
+- The LMS has no date; this item is conditional on one being given (OI-HS-15)
+
+Index **M3-I32** · Client ref **A1** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Low** · Open items **OI-HS-15** · Linked items **M3-I29, M4-I19**

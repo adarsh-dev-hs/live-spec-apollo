@@ -1,0 +1,729 @@
+---
+title: "06-11 M4 — Candidate Record & Credentials"
+description: "This holds everything about the healthcare professionals: nurses, doctors and allied health staff. There are two separate pools — one for permanent placements and one for shift work —…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M4 · D3, D4, D16, A2, A9, F13 · Months 2–4*
+
+`Release 1` · `27 items` · `139 conditions` · `184.5pd` · `10 high risk` · `Ops/Admin, Candidate App`
+
+This holds everything about the healthcare professionals: nurses, doctors and allied health staff. There are two separate pools — one for permanent placements and one for shift work — but both share the same set of credential records. The module covers checking who someone is and that their registration is real (using the adapter layer from M1), a work queue for the verification team, and the candidate mobile app. The app is where candidates sign up with their phone number, upload a CV, find jobs and shifts, apply, and check in at the start of a shift.
+
+> *Deliverables as listed by the client*
+>
+> *Apollo Platform Build Specification — Part A, section A1 Deliverable Inventory. Reproduced without alteration.*
+>
+> | ID | Name | Provenance | Module |
+> |---|---|---|---|
+> | D3 | Candidate mobile app | Original R1 | M4 — Candidate Record & Credentials |
+> | D4 | Candidate verification (KYC) | Original R1 | M4 — Candidate Record & Credentials |
+> | D16 | Verification — extended | Moved from R2 | M4 — Candidate Record & Credentials |
+> | A2 | Two supply bases | New addition | M4 — Candidate Record & Credentials |
+> | A9 | Specialty & acuity capture | New addition | M4 — Candidate Record & Credentials |
+>
+> *As stated by the client*
+>
+> *Apollo Platform Build Specification — Part A, System Overview, Release 1, version 2, section A2 Module Structure — M4 — Candidate Record & Credentials. Reproduced without alteration.*
+>
+> Holds the candidate as a record spanning two supply bases against a shared credential object carrying issuer, validity period and verification method, with document OCR, identity verification behind the M1 adapter layer, and a verification queue with pendency tracking. It covers three candidate categories — nurses, doctors and allied health — with A9 held as a per-category attribute set, and includes the candidate mobile app: self-registration with phone and OTP, resume upload and parsing, duplicate detection and merge, job and shift discovery, application and shift tracking, and shift check-in.
+>
+> Deliverables: D3, D4, D16, A2, A9
+>
+> Surfaces: Ops/Admin (candidate record, verification queue, pendency tracker) and Candidate App.
+>
+> **OPEN** — Clinical and communication rating field. D17 is descoped, but the candidate record retains a clinical and communication rating attribute. No producing system is specified, and whether D18 ranking weights that attribute is not stated. Until the production method is decided, the field is present and unpopulated.
+>
+> **CLOSED** — Candidate categories. Resolved. Release 1 covers nurses, doctors and allied health. Category is a field on the requisition and the candidate record; A9 becomes a per-category attribute set — specialty and acuity for nurses, specialty, case-mix and grade for doctors, discipline, equipment and technique competency for allied health. The D15 taxonomy is not revived as a deliverable; it is absorbed into A9. The credential model in D16 is unchanged, so additional registries resolve as adapters and configuration.
+>
+> D3 is a three-way shared build and a hard dependency. D3 sits in M4, but shift discovery, acceptance and check-in serve M8, and its response surface is one of the two A14 channels in M5. Because shift attendance is captured by app check-in with no alternative route, D3 is a hard dependency of the contractual invoice chain — no app, no attendance, no shift invoice. Sequence it against all three consumers.
+>
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 2** — Per-category attribute sets under A9: specialty and acuity for nurses; specialty, case-mix and grade for doctors; discipline, equipment and technique competency for allied health.
+>
+> **Item 13a** — Resolution of a learner identity against a candidate record, since the two register through different funnels.
+>
+> **Item 13b** — A certification and course-completion attribute on the candidate record that D18 can read.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+The mobile app is used by three modules. It sits here, but shift discovery and shift check-in are how M8 gets its attendance data, and the app is one of two ways candidates answer availability questions in M5. Because shift check-in is the only way attendance reaches the system, no app means no attendance, which means no timesheet and no shift invoice. Plan the app against all three, not just this module. It also carries the data protection work - consent, residency and retention - which is first needed the moment candidate personal data is captured.
+
+### Records this milestone owns
+
+- Candidate — the person. Holds their category, which pool they are in, and their availability confidence score (M5 writes it, M6 reads it).
+- Credential — a registration or qualification: who issued it, how long it is valid, and how it was checked. Shared across both pools.
+- CandidateDocument — CVs, ID scans, certificates. The text pulled out by OCR is attached to these.
+- VerificationCase — one check, with a green, amber or red result, and a note of how long it has been waiting.
+- CategoryAttributeSet — the extra fields that differ by category: specialty and acuity for nurses; specialty, case-mix and grade for doctors; discipline, equipment and technique for allied health.
+- Application, ShiftAcceptance — what the candidate has applied for or agreed to work.
+- DuplicateCandidate — two records that look like the same person, waiting for someone to decide.
+
+### How records move
+
+- Candidate: registered → profile complete → verification pending → verified, partly verified, or failed
+- Credential: claimed → submitted → being checked → verified (green), flagged (amber) or rejected (red) → expired
+- VerificationCase: queued → in progress → resolved, waiting on an outside registry, or handed to a person to check manually
+- Application: applied → shortlisted → interviewing → offered → joined. Or rejected, or withdrawn.
+
+### Not in this milestone
+
+- Bulk candidate loads from campuses or partners, walk-in registration and referral tagging. Removed from this contract; Apollo handles these by hand.
+- Face recognition, biometrics and cheating detection in assessments. Later release.
+- Blocking a shift check-in based on where the phone is. We record the location but do not act on it. Enforcing it is milestone M12.
+- Statutory joining forms such as PF and gratuity nomination. That is milestone M11.
+- Producing the clinical and communication rating. The field exists on the record but nothing fills it in — see open item OI-A-07.
+
+### Needs to exist first
+
+- M1 for the adapter layer — without it no identity or credential check can run. M1 also supplies the migrated candidate pool.
+
+### What breaks without it
+
+- M5 writes availability onto the candidate record. M6 ranks on credentials, category fields and availability, and cannot rank if any of the three is missing. M8 gets shift attendance from the app. M7 quotes the candidate on shortlists and offers.
+
+### Items — 27 to build · design 36.0pd, build 100.5pd, QA 48.0pd
+
+#### M4-I1 — App: sign up
+
+`D3` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: Candidate (nurse, doctor, allied health).** Sign-up in the app: phone number, one-time code, category, consent.
+
+##### Screens to build
+
+1. **Sign up**
+  - Takes a phone number and sends a one-time code
+  - Takes the code and creates the account
+  - Takes the candidate category: nurse, doctor or allied health
+  - Takes consent to hold their data and run verification checks
+
+##### Conditions it must satisfy
+
+- A candidate registers with phone and OTP and reaches a usable profile state
+- OTP resend is rate-limited and expiry is enforced
+- A phone number already registered routes to sign-in rather than creating a duplicate
+- DPDP consent is captured before any personal data is stored, and is retained as evidence (M4-I27)
+- Consent for verification checks is captured before any adapter call is made (M1-I15)
+- Category selection drives which attribute set the profile requests (A9)
+
+Index **M4-I1** · Client ref **D3** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **OI-HS-02** · Linked items **M4-I27, M4-I22**
+
+#### M4-I2 — App: build profile
+
+`D3` · `Screen` · `L · 3.0pd` · `AI Medium` · `Medium` · `MODEL` · `Medium`
+
+**Who uses it: Candidate.** Fill in the profile, either by uploading a CV and correcting what was read from it, or by typing it in.
+
+##### Screens to build
+
+1. **Build profile**
+  - Uploads a CV and shows the details read from it for the candidate to correct
+  - Takes the same details by hand where there is no CV
+  - Shows how much of the profile is still missing
+
+##### Conditions it must satisfy
+
+- A resume upload produces a parsed profile the candidate reviews and corrects rather than accepts blindly
+- A candidate without a resume can complete a profile by hand
+- Parse failure falls back to manual entry with the file retained (M0-I6)
+- Completeness is expressed against what ranking actually needs, not an arbitrary percentage
+- Uploaded documents are stored with residency and retention applied (M0-I6, M4-I27)
+
+Index **M4-I2** · Client ref **D3** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I20, M0-I6**
+
+#### M4-I3 — App: specialty details
+
+`A9` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SPEC` · `Medium`
+
+**Who uses it: Candidate.** The extra fields that differ by category. These are exactly what M6 ranks on.
+
+##### Screens to build
+
+1. **Specialty details**
+  - Shows the extra fields for the candidate's category
+  - Takes specialty and acuity for a nurse; specialty, case-mix and grade for a doctor; discipline, equipment and technique for allied health
+  - Saves part-way through so it can be finished later
+
+##### Conditions it must satisfy
+
+- Selecting nurse presents specialty and acuity; doctor presents specialty, case-mix and grade; allied health presents discipline, equipment and technique competency (Part A CLOSED item)
+- Attribute options come from configuration, not a hardcoded list (AS-04)
+- A candidate cannot submit an attribute outside the configured taxonomy without it being flagged for review
+- The captured set is exactly what M6 reads for the category weight set
+- Partial completion is saved and resumable
+
+Index **M4-I3** · Client ref **A9** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **OI-M3-01** · Linked items **M4-I26, M6-I7**
+
+#### M4-I4 — App: jobs
+
+`D3` · `Screen` · `L · 3.0pd` · `AI High` · `Low` · `XMOD` · `Medium`
+
+**Who uses it: Candidate (Base A).** Permanent jobs the candidate can browse and apply for.
+
+##### Screens to build
+
+1. **Jobs**
+  - Lists permanent jobs matching the candidate's category
+  - Filters by location and role
+  - Opens a job and applies to it
+
+##### Conditions it must satisfy
+
+- A candidate sees only jobs matching their category and verified credential state
+- Applying creates an Application record consumed by M6 and M7
+- An incomplete profile is prompted to complete rather than blocked without explanation
+- Client identity disclosure follows the per-client preference
+- Base A coverage cannot be assumed - the app is not the only route into the funnel (Part A A6)
+
+Index **M4-I4** · Client ref **D3** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **-** · Linked items **M6-D5**
+
+#### M4-I5 — App: shifts
+
+`D3` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Candidate (Base B).** Shifts the candidate can browse and accept. This is the reason shift workers open the app regularly.
+
+##### Screens to build
+
+1. **Shifts**
+  - Lists shifts with their date, times, location and rate
+  - Accepts or declines a shift
+  - Blocks accepting a shift that clashes with one already accepted
+  - Lists the shifts already accepted
+
+##### Conditions it must satisfy
+
+- Accepting a shift assigns it to a named candidate with a timestamped confirmation (Part A contractual stage 7)
+- A shift conflicting with an already-accepted shift is blocked or warned
+- A shift already filled is removed from the list without an error state
+- Confirmation is captured on either the app or WhatsApp and reconciles to one record (A14)
+- Shift discovery respects the travel radius held on the availability record (A3)
+
+Index **M4-I5** · Client ref **D3** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I14, M5-A14**
+
+#### M4-I6 — App: my applications
+
+`D3` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Candidate.** Where a candidate sees what is happening with their applications and shifts.
+
+##### Screens to build
+
+1. **My applications**
+  - Lists the jobs applied for and tracks the stage each has reached
+  - Confirms an interview time offered by Apollo
+  - Opens an offer and accepts it
+
+##### Conditions it must satisfy
+
+- Application stage reflects the M7 selection state without exposing internal rejection reasons
+- An interview slot proposed in M7 surfaces here for confirmation
+- An offer delivered over WhatsApp is also visible and actionable here (D20)
+- Trial check-in prompts at day 0, 7, 30, 60 and 90 appear here as one of the A6 channels
+- A rejected application shows a state without an internal reason code
+
+Index **M4-I6** · Client ref **D3** · Band **L** · Design **2.0pd** · Build **3.0pd** · QA **1.5pd** · Total **6.5pd** · Confidence **Medium** · Open items **-** · Linked items **M7-D6, M7-D20, M8-A6**
+
+#### M4-I7 — App: shift check-in
+
+`D3` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `SHARED` · `Medium`
+
+**Who uses it: Candidate (Base B).** Check in and out of a shift. This is the only way attendance reaches the platform.
+
+##### Screens to build
+
+1. **Shift check-in**
+  - Marks the candidate as arrived at the shift and records where the phone was
+  - Marks the candidate as finished at the end of the shift
+  - Holds a check-in taken with no signal and sends it when the phone reconnects
+
+##### Conditions it must satisfy
+
+- A check-in records a location stamp without enforcing a boundary (Part A CLOSED item)
+- Geo-fencing is not enforced in Release 1, but the field exists so enforcement can be specified later
+- A check-in taken without connectivity syncs when the device reconnects, with the original timestamp preserved
+- A missed check-in raises an exception in M8 rather than silently recording absence
+- There is no alternative attendance route - this is a hard dependency of the contractual invoice chain (Part A coupling 7)
+- Attendance feeds the timesheet in M8 at shift granularity
+
+Index **M4-I7** · Client ref **D3** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.5pd** · Total **9.5pd** · Confidence **Medium** · Open items **-** · Linked items **M8-D22, M8-I14**
+
+#### M4-I8 — App: my documents
+
+`D3` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: Candidate.** Upload the documents behind each verification check.
+
+##### Screens to build
+
+1. **My documents**
+  - Lists the documents needed for the candidate's category and which have arrived
+  - Takes a photo or uploads a file for each
+  - Shows a rejected document with its reason so it can be sent again
+
+##### Conditions it must satisfy
+
+- The required document set differs by candidate category
+- A poor-quality capture is prompted for re-capture before it reaches the OCR queue
+- A rejected document can be re-uploaded without restarting verification
+- An expiring credential prompts re-upload ahead of expiry (M4-I25)
+- Documents are stored with virus scanning, residency and retention applied (M0-I6, M4-I27)
+
+Index **M4-I8** · Client ref **D3** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **OI-HS-02** · Linked items **M0-I6, M4-I27, M4-I23**
+
+#### M4-I9 — App: notification settings
+
+`D3` · `Screen` · `M · 2.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Candidate.** Which channels the candidate is willing to be contacted on. M5 must respect this on every send.
+
+##### Screens to build
+
+1. **Notification settings**
+  - Lists the messages the candidate has been sent
+  - Turns off contact on a channel
+
+##### Conditions it must satisfy
+
+- An opt-out is respected by the cadence engine on the next selection, not the next cycle (D29)
+- Channel preference is honoured where the candidate has expressed one
+- A candidate who opts out of all channels is still reachable for statutory or contractual messages, which are distinguished
+- The per-user notification log matches what the candidate sees (D10)
+
+Index **M4-I9** · Client ref **D3** · Band **M** · Design **1.0pd** · Build **2.0pd** · QA **1.0pd** · Total **4.0pd** · Confidence **Medium** · Open items **-** · Linked items **M5-D10, M5-D29**
+
+#### M4-I10 — App: am I available
+
+`D3` · `Screen` · `L · 3.0pd` · `AI Medium` · `High` · `SHARED` · `Low`
+
+**Who uses it: Candidate.** Answer the availability question in the app. Same answer format as the WhatsApp version.
+
+##### Screens to build
+
+1. **Am I available**
+  - Asks the availability question set for the candidate's pool
+  - Takes notice period for the permanent pool, or time windows and travel distance for the shift pool
+  - Confirms the answer and shows when it was last confirmed
+
+##### Conditions it must satisfy
+
+- A response returns the same structured payload as the WhatsApp interactive template (A14)
+- Confirming resets availability confidence in A3 and updates the last-confirmed timestamp
+- Base A expresses availability as a notice period; Base B as time windows within a travel radius (Part A stages 7 and 3)
+- The question set is configurable per segment, not hardcoded
+- A response through the app and a response through WhatsApp reconcile to one record
+
+Index **M4-I10** · Client ref **D3** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-A-08** · Linked items **M5-A14, M5-A3**
+
+#### M4-I11 — Verification queue
+
+`D16` · `Screen` · `L · 4.0pd` · `AI High` · `Medium` · `SHARED` · `Medium`
+
+**Who uses it: Verification and quality team.** The verification team's work queue.
+
+##### Screens to build
+
+1. **Verification queue**
+  - Lists candidates with checks outstanding, naming each outstanding check
+  - Shows how long each has been waiting
+  - Filters by check type and by candidate category
+  - Opens a candidate
+2. **Pendency view**
+  - Groups the queue by whether it waits on the candidate, the registry or a reviewer
+  - Shows how long each has been waiting
+
+##### Conditions it must satisfy
+
+- A candidate with outstanding checks appears with each check named, not as an aggregate status
+- Pendency is tracked and visible, so a stalled external check is distinguishable from an unstarted one
+- The queue can be ordered by live requisition demand so verification follows fulfilment need
+- A verifier sees only their assigned scope where scoping applies (OI-HS-01)
+- Queue age drives an escalation once the agreed threshold is set - threshold not yet stated
+- Pendency is attributable to a cause, not shown as a single backlog number
+- A registry outage surfaces as a spike in awaiting-registry pendency (M1-S09)
+- Candidates blocked from ranking by pendency are listed so fulfilment can react
+- Escalation routes to the responsible party - candidate, verifier or platform administrator
+
+Index **M4-I11** · Client ref **D16** · Band **L** · Design **1.5pd** · Build **4.0pd** · QA **2.0pd** · Total **7.5pd** · Confidence **Medium** · Open items **OI-HS-01** · Linked items **M2-I14, M4-I24**
+
+#### M4-I12 — Verification detail
+
+`D4` · `Screen` · `XL · 5.0pd` · `AI Medium` · `High` · `EXT` · `Low`
+
+**Who uses it: Verification and quality team.** One candidate's checks, each showing green, amber or red, with the evidence behind it.
+
+##### Screens to build
+
+1. **Verification detail**
+  - Lists every check run for the candidate with a green, amber or red result
+  - Shows the answer the registry gave and when
+  - Shows the source document beside the values read from it
+  - Overrides a result, requiring a reason
+  - Runs a check again
+
+##### Conditions it must satisfy
+
+- Each check returns green, amber or red on the common schema regardless of which registry answered (M1-I13)
+- A manual override requires a reason and is written to the audit trail (M0-I4)
+- The overall state is derived from the check set by a stated rule, not by a verifier's judgement alone
+- A red outcome does not delete the candidate; they move to the retained pool (M4-I19)
+
+Index **M4-I12** · Client ref **D4** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.5pd** · Total **9.5pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M1-I13, M1-I15, M0-I4**
+
+#### M4-I13 — Credentials
+
+`D16` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Verification team, Recruiter.** A candidate's registrations and qualifications: who issued them, when they expire, how they were checked.
+
+##### Screens to build
+
+1. **Credentials**
+  - Lists the candidate's registrations and qualifications with who issued each and when it expires
+  - Adds a credential by hand where the registry has no API
+  - Marks credentials that have expired or are about to
+
+##### Conditions it must satisfy
+
+- A credential carries issuer, validity period and verification method (Part A M4)
+- The credential object is shared across both supply bases, not duplicated per base (A2)
+- A credential from a registry with no API is entered manually and carries a manual verification method
+- An expiring credential is flagged ahead of expiry and prompts re-upload in the app
+- An expired credential affects ranking eligibility in M6, and the rule is explicit
+
+Index **M4-I13** · Client ref **D16** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M6-I7, M4-I8**
+
+#### M4-I14 — Document review
+
+`D4` · `Screen` · `L · 3.0pd` · `AI Medium` · `Medium` · `MODEL` · `Medium`
+
+**Who uses it: Verification team.** Check what the OCR read against the actual document, and correct it.
+
+##### Screens to build
+
+1. **Document review**
+  - Shows the uploaded document beside the values read out of it
+  - Corrects a value that was read wrongly
+  - Accepts the document, or rejects it with a reason that goes back to the candidate
+
+##### Conditions it must satisfy
+
+- Extracted fields are shown against the source document, not in isolation
+- Low-confidence extractions are visually distinguished
+- A correction retains the original machine value for accuracy measurement
+- Rejecting a document routes back to the candidate for re-upload with a reason
+- Correction rates are logged so OCR quality is measurable
+
+Index **M4-I14** · Client ref **D4** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I23, M0-I6**
+
+#### M4-I15 — Candidate list
+
+`A2` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `SHARED` · `Medium`
+
+**Who uses it: Recruiter, Verification team.** Search and filter the candidate pool.
+
+##### Screens to build
+
+1. **Candidate list**
+  - Lists candidates with their category, pool, location and verification state
+  - Filters by category, pool, specialty, credential state and availability
+  - Opens a candidate
+
+##### Conditions it must satisfy
+
+- Filtering by supply base returns only that base - Base B is a separate base, not a status flag (Part A contractual)
+- Availability confidence and last-confirmed timestamp are filterable (Part A stage 7)
+- Retained pool candidates are excluded by default and included on an explicit toggle
+- A recruiter sees the row set their data scope permits (OI-HS-01)
+- List performance holds at migrated base volume - volume unknown (OI-A-02)
+
+Index **M4-I15** · Client ref **A2** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Medium** · Open items **OI-HS-01, OI-A-02** · Linked items **M2-I14, M4-I17**
+
+#### M4-I16 — Candidate record
+
+`A2` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Verification team.** Everything about one candidate on one page.
+
+##### Screens to build
+
+1. **Candidate record**
+  - Shows the profile, category fields, pool and verification state on one page
+  - Opens the candidate's credentials, documents, applications and placements
+  - Shows when they last confirmed they were available
+  - Shows the activity trail
+
+##### Conditions it must satisfy
+
+- Availability confidence and last-confirmed timestamp are visible on the record (Part A stage 7)
+- The clinical and communication rating field is present and unpopulated, with no producing system (OI-A-07)
+- Engagement history shows every contact attempt and response across all channels (D10 log)
+- The record spans both supply bases against one shared credential object (A2)
+- Every field change is attributable through the audit timeline
+
+Index **M4-I16** · Client ref **A2** · Band **XL** · Design **2.5pd** · Build **5.0pd** · QA **2.0pd** · Total **9.5pd** · Confidence **Medium** · Open items **OI-A-07** · Linked items **M0-I4, M4-I17**
+
+#### M4-I17 — Pool assignment
+
+`A2` · `Screen` · `L · 4.5pd` · `AI High` · `High` · `XMOD` · `Medium`
+
+**Who uses it: Recruiter, Fulfilment lead.** Which pool a candidate belongs to. This drives how often M5 contacts them and how M6 ranks them.
+
+##### Screens to build
+
+1. **Pool assignment**
+  - Sets whether the candidate is in the permanent pool, the shift pool or both
+  - Shows the fields that differ by pool
+  - Records a change of pool with the date
+
+##### Conditions it must satisfy
+
+- Base assignment drives cadence in M5 and weight set in M6 (Part A contractual preamble)
+- Base B is modelled as a separate supply base, not a status flag on the permanent base
+- A candidate serving both bases is handled explicitly rather than by duplication
+- Transferring base retains history and does not reset availability confidence silently
+- Without A2 there is no base discriminator and contractual supply cannot be modelled (Part A dependency table)
+- The record holds one shared set of credentials across both pools rather than duplicating them
+- The availability score written by M5 lives on this record and is read by M6
+
+Index **M4-I17** · Client ref **A2** · Band **L** · Design **1.5pd** · Build **4.5pd** · QA **2.0pd** · Total **8.0pd** · Confidence **Medium** · Open items **-** · Linked items **M5-A3, M6-I8**
+
+#### M4-I18 — Category fields
+
+`A9` · `Config` · `L · 3.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Set up the extra fields for each candidate category. M3 and M6 both read this.
+
+##### Screens to build
+
+1. **Category fields**
+  - Lists the extra fields held for each candidate category
+  - Adds, renames or removes a field or one of its options
+  - Saves the set, which is used by the app, by Ops and by ranking
+
+##### Conditions it must satisfy
+
+- Each category carries its own attribute set (Part A CLOSED item)
+- The D15 taxonomy is absorbed here and not revived as a separate deliverable
+- Whether M3 or M4 owns the requisition-side field definition is unresolved (OI-M3-01)
+- M3 consumes the set as external configuration to stay unblocked either way (AS-04)
+- The set is versioned; changing it does not retrospectively alter existing records
+- M6 reads the same taxonomy for weight set selection
+
+Index **M4-I18** · Client ref **A9** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-M3-01** · Linked items **M3-I7, M6-I8**
+
+#### M4-I19 — Certification records
+
+`D16` · `Screen` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Low`
+
+**Who uses it: Verification team, Recruiter.** Holds course and certification records against a candidate so ranking can read them. Requested as the platform side of the Apollo LMS connection; the LMS itself stays outside scope.
+
+##### Screens to build
+
+1. **Certifications**
+  - Lists the courses and certifications held against a candidate, with the date each was completed
+  - Adds or edits a record by hand
+  - Shows which were received from an outside system rather than entered here
+2. **Learner match**
+  - Lists learner records received from outside that do not yet match a candidate
+  - Links one to an existing candidate, or creates a candidate from it
+
+##### Conditions it must satisfy
+
+- A certification record can be added by hand without any outside system being connected
+- M6 can read certifications as a ranking input (M6-I7)
+- A learner arriving from outside is matched to an existing candidate rather than creating a duplicate
+- Nothing here requires the LMS to exist; the LMS remains outside scope and has no date
+- If no outside system is ever connected, the field is populated by hand rather than left empty
+
+Index **M4-I19** · Client ref **D16** · Band **L** · Design **1.5pd** · Build **3.0pd** · QA **1.5pd** · Total **6.0pd** · Confidence **Low** · Open items **OI-HS-15** · Linked items **M4-I21, M6-I7**
+
+#### M4-I20 — CV reading
+
+`D3` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `MODEL` · `Low`
+
+**Who uses it: System.** Read a CV and fill in profile fields, with a confidence score so the candidate can correct what it got wrong.
+
+##### Screens to build
+
+1. **No screen**
+  - Reads an uploaded CV and fills in the profile fields
+  - Marks fields it was unsure about so the candidate checks them
+  - Falls back to manual entry when it cannot read the file
+
+##### Conditions it must satisfy
+
+- A parsed resume produces a profile the candidate reviews and corrects
+- Low-confidence fields are visually distinguished in the review step
+- Parse failure retains the file and routes to manual entry (consistent with the M3 manual-entry pattern)
+- The parser handles the formats actually received, evidenced against a real sample set
+
+Index **M4-I20** · Client ref **D3** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Low** · Open items **-** · Linked items **M0-I6**
+
+#### M4-I21 — Duplicate candidates
+
+`D3` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: System.** Spot the same person appearing twice and merge the records. Neither record is deleted.
+
+##### Screens to build
+
+1. **No screen**
+  - Finds candidates who look like the same person
+  - Merges them into one record, keeping a link back to both originals
+
+##### Conditions it must satisfy
+
+- A candidate registering with a phone number already in the base is detected before a second record is created
+- A merge retains lineage to both source records; neither is deleted
+- Duplicates between the migrated base and app registrations are detected (OI-A-03)
+- Whether the migrated CPAL base resolves through this mechanism or a one-time migration process is unresolved (OI-A-03)
+
+Index **M4-I21** · Client ref **D3** · Band **XL** · Design **1.0pd** · Build **5.0pd** · QA **2.5pd** · Total **8.5pd** · Confidence **Low** · Open items **OI-A-03** · Linked items **M1-I12, M0-I4**
+
+#### M4-I22 — Candidate sign-in
+
+`D3` · `Service` · `L · 3.0pd` · `AI Medium` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: System.** Phone-and-code login for candidates. Completely separate from Apollo staff logins.
+
+##### Screens to build
+
+1. **No screen**
+  - Signs candidates in with a phone number and a one-time code
+  - Limits how often a code can be requested for one number
+
+##### Conditions it must satisfy
+
+- OTP delivery works over both SMS and WhatsApp with a fallback
+- Rate limiting prevents OTP flooding of a number
+- A candidate changing their number recovers their account without creating a duplicate
+- Candidate identity is entirely separate from the Apollo internal user model (AS-06)
+- Sessions expire and refresh without forcing frequent re-authentication on a low-engagement base
+
+Index **M4-I22** · Client ref **D3** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I1, M3-I30**
+
+#### M4-I23 — Document text extraction
+
+`D4` · `Integration` · `XL · 5.0pd` · `AI Low` · `Medium` · `EXT` · `Low`
+
+**Who uses it: System.** Pull text out of uploaded documents, with a confidence score per field.
+
+##### Screens to build
+
+1. **No screen**
+  - Reads the text out of uploaded certificates and identity documents
+  - Marks how confident it was about each field
+
+##### Conditions it must satisfy
+
+- Extraction returns per-field confidence, not a single document-level score
+- A failure routes to manual entry with the document retained
+- Per-page cost is logged for consumption modelling
+- The provider sits behind the M1 adapter interface so it can be replaced without domain change
+- Provider is not yet named
+
+Index **M4-I23** · Client ref **D4** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.0pd** · Total **7.0pd** · Confidence **Low** · Open items **-** · Linked items **M1-I13, M0-I6**
+
+#### M4-I24 — Verification checks
+
+`D4` · `Service` · `XL · 5.0pd` · `AI Medium` · `High` · `EXT` · `Low`
+
+**Who uses it: System.** Work out which checks this candidate needs and run them through the M1 adapters.
+
+##### Screens to build
+
+1. **No screen**
+  - Works out which checks the candidate needs for their category
+  - Runs them through the M1 registry interfaces
+  - Checks consent has been given before running any of them
+
+##### Conditions it must satisfy
+
+- The check set differs by candidate category and comes from configuration
+- Checks dispatch through the M1 adapter interface, never directly to a registry
+- Consent is verified before any check is dispatched (M4-I27)
+- An adapter failure routes to manual fallback rather than failing the candidate
+- The aggregation rule from check outcomes to overall state is explicit and configurable
+
+Index **M4-I24** · Client ref **D4** · Band **XL** · Design **0.0pd** · Build **5.0pd** · QA **2.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-A-01** · Linked items **M1-I13, M1-I15, M4-I27**
+
+#### M4-I25 — Credential expiry
+
+`D16` · `Service` · `L · 3.0pd` · `AI High` · `Medium` · `XMOD` · `Medium`
+
+**Who uses it: System.** Track when credentials expire and warn before they do.
+
+##### Screens to build
+
+1. **No screen**
+  - Tracks when each credential expires
+  - Warns the candidate before a credential runs out
+  - Marks an expired credential so ranking can see it
+
+##### Conditions it must satisfy
+
+- An expiring credential triggers a candidate reminder ahead of expiry (M3-I30)
+- An expired credential is visible to M6 as a ranking input, with an explicit rule
+- Re-verification on renewal reuses the existing credential record rather than creating a second
+- Bulk expiry across the base is reportable so verification can plan
+
+Index **M4-I25** · Client ref **D16** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Medium** · Open items **-** · Linked items **M6-I7, M3-I30**
+
+#### M4-I26 — Category field definitions
+
+`A9` · `Service` · `L · 3.0pd` · `AI Medium` · `High` · `XMOD` · `Low`
+
+**Who uses it: System.** Serve the category field definitions to the app, to Ops, to M3 and to M6, so they cannot drift apart.
+
+##### Screens to build
+
+1. **No screen**
+  - Serves the category field definitions to the app, to Ops, to M3 and to M6
+  - Keeps one definition so the requisition side and the candidate side cannot drift apart
+
+##### Conditions it must satisfy
+
+- One schema serves the requisition side and the candidate side, so they cannot drift
+- M3 consumes it as configuration pending the ownership decision (AS-04, OI-M3-01)
+- M6 reads the same schema to select the correct weight set
+- A schema version change does not invalidate records captured under a prior version
+
+Index **M4-I26** · Client ref **A9** · Band **L** · Design **0.0pd** · Build **3.0pd** · QA **1.5pd** · Total **4.5pd** · Confidence **Low** · Open items **OI-M3-01** · Linked items **M3-I7, M6-I8**
+
+#### M4-I27 — Data protection
+
+`F13` · `Service` · `XL · 5.0pd` · `AI Low` · `High` · `COMP` · `Low`
+
+**Who uses it: System.** Handling personal and health-related data about candidates in a way that meets Indian data protection law. First needed when candidate personal data is captured and consent is required before a verification check runs.
+
+##### Screens to build
+
+1. **No screen**
+  - Records what each candidate consented to and when
+  - Keeps all personal data in the Mumbai region
+  - Applies the retention period to each kind of record
+
+##### Conditions it must satisfy
+
+- Consent is captured before personal data is stored, and before any verification check is run
+- Consent evidence is retrievable later if challenged
+- No personal data leaves the Mumbai region, including in backups
+- A retention period is defined per data type and actually applied
+- How an erasure request works against records held indefinitely is not yet resolved (OI-HS-02)
+- How this squares with keeping billing records for years is not yet resolved (OI-HS-14)
+
+Index **M4-I27** · Client ref **F13** · Band **XL** · Design **1.5pd** · Build **5.0pd** · QA **2.5pd** · Total **9.0pd** · Confidence **Low** · Open items **OI-HS-02, OI-HS-14** · Linked items **M0-I6**

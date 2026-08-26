@@ -1,0 +1,270 @@
+---
+title: "02-09 Outbound messaging"
+description: "Everything the platform sends and the plumbing under it: templates per channel and purpose, triggers binding an event to a message, one sending path across WhatsApp, SMS, email and…"
+---
+
+**Package** `@apollo/messaging` · **Schema** `messaging` · **Plan** F07, D10 · **Effort** ~42.0pd · **Risk** High `EXT` · **Build in** Phase 3
+
+## 1. Purpose
+
+Everything the platform sends and the plumbing under it: templates per channel and purpose, triggers
+binding an event to a message, one sending path across WhatsApp, SMS, email and app push, retry,
+delivery receipts, opt-out and preference handling, and a log per message and per candidate. D10 covers
+templates and preferences; the queue, retries and delivery receipts underneath are assumed by the
+client's list and named as F07.
+
+First needed when A1 chases a client for missing requisition fields on the channel the requisition
+arrived on — which is why it lands in Phase 3 with the inbound pipeline rather than in Phase 4 with the
+cadence engine that later drives most of its volume.
+
+## 2. Scope
+
+### In scope
+
+- Message templates per channel and purpose, with variables resolved from candidate, requisition,
+  placement or invoice records (`M5-I1`)
+- **WhatsApp provider approval state** on a template; an unapproved template cannot be sent
+- Triggers: which event sends which message, on which channel, to whom, with a fallback order
+  (`M5-I2`)
+- The sender: one path across WhatsApp, SMS, email and app push, each provider behind an interface
+  (`M5-I8`, `M3-I30`)
+- Retry, suppression and asynchronous receipt reconciliation (`M5-I9`)
+- Delivery log with cost attribution, and per-candidate contact history (`M5-I3`, `M5-I4`)
+- Contact preferences and opt-out, honoured **at selection**, not at send
+- One registered WhatsApp number and template set shared with A1 follow-up — one registration, not two
+
+### Explicitly out of scope
+
+- **Who to contact and how often.** The cadence engine, segments and availability decay are `03-06`.
+  This component sends what it is told to send.
+- Inbound message handling — `02-08`.
+- Voice calls — the campaign and provider live in `03-06`/`04-04`. Voice is not a template channel.
+- The candidate-facing notification settings screen — `03-05` (`M4-I9`), reading this component's
+  preference store.
+
+### Explicitly not built
+
+- Campaign performance reporting beyond the send log. That reporting sits in `03-12`.
+- Guided multi-step conversations over WhatsApp. WhatsApp sends messages and fixed-button templates;
+  anything guided happens in the app (plan convention).
+- Structured inbound handling for SMS and email replies (`OI-A-17`).
+- A staff-facing in-app notification centre.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M3-I30` | F07 | Message sending — queue, retry, delivery receipts | XL | 6.0 |
+| `M5-I1` | D10 | Message templates, with WhatsApp approval state | L | 3.0 |
+| `M5-I2` | D10 | Triggers — event → audience → channel order → template | L | 3.0 |
+| `M5-I3` | D10 | Delivery log with cost attribution | L | 3.0 |
+| `M5-I4` | D10 | Contact history on the candidate record | M | 2.0 |
+| `M5-I8` | D10 | Message sender across four channels | XL | 5.0 |
+| `M5-I9` | D10 | Retry, suppression and receipts | L | 3.0 |
+
+## 4. Dependencies
+
+**Must exist first:** `02-03` (templates reference lists; send windows), `02-10` (queues), `02-04`
+(attachments — offer documents, payslips), `03-01` (client contacts as recipients).
+
+**Consumed by:** `03-02` follow-up chase, `03-06` cadence delivery, `03-08` offer delivery, `03-09`
+trial check-ins, `02-14` link delivery, `03-15` document chasing, `03-17` payslips, `03-20` dunning,
+`03-01` renewal alerts, `02-01` OTP.
+
+**External:** `04-01` WhatsApp BSP (unnamed, `OI-HS-07`), `04-02` SMS with DLT registration (`X02`),
+`04-03` SES (`X03`), Expo push. **WhatsApp template approval takes weeks and gates cadence go-live**
+(`X01`).
+
+## 5. Data model
+
+```sql
+CREATE TABLE messaging.template (
+    id          uuid PRIMARY KEY DEFAULT uuidv7(),
+    code        text NOT NULL,            -- 'requisition_followup' | 'availability_check' | 'offer_delivery' …
+    channel     text NOT NULL CHECK (channel IN ('whatsapp','sms','email','push')),
+    purpose     text NOT NULL,            -- 'operational' | 'statutory' | 'contractual' | 'cadence'
+    locale      text NOT NULL DEFAULT 'en-IN',
+    subject     text,                     -- email only
+    body        text NOT NULL,            -- {{candidate.firstName}}, {{requisition.reference}} …
+    variables   jsonb NOT NULL,           -- declared variable names, validated at save
+    provider_template_name text,          -- WhatsApp only
+    approval_state text NOT NULL DEFAULT 'not_required'
+      CHECK (approval_state IN ('not_required','draft','submitted','approved','rejected')),
+    approval_submitted_at timestamptz, approval_decided_at timestamptz, approval_note text,
+    is_active   boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL,
+    UNIQUE (code, channel, locale)
+);
+
+CREATE TABLE messaging.trigger (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    code        text NOT NULL UNIQUE,
+    event_name  text NOT NULL,            -- a 02-11 event name
+    audience    text NOT NULL,            -- 'candidate' | 'client_contact' | 'requisition_owner' | 'user'
+    channel_order text[] NOT NULL,        -- ['whatsapp','sms','email'] — fallback order
+    template_code text NOT NULL,
+    purpose     text NOT NULL,
+    is_enabled  boolean NOT NULL DEFAULT true,   -- disabling stops sending without deleting history
+    created_at timestamptz NOT NULL DEFAULT now(), created_by uuid NOT NULL
+);
+
+CREATE TABLE messaging.message (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    template_id uuid REFERENCES messaging.template(id),
+    trigger_id  uuid REFERENCES messaging.trigger(id),
+    cadence_rule_id uuid,                 -- engagement.cadence_rule — why this send happened (M5-I4)
+    cause       text NOT NULL,            -- 'demand.followup' | 'engagement.cadence' | 'selection.offer'
+                                          -- | 'placement.checkin' | 'billing.dunning' | 'auth.otp'
+    channel     text NOT NULL,
+    purpose     text NOT NULL,
+    recipient_type text NOT NULL CHECK (recipient_type IN ('candidate','client_contact','user')),
+    recipient_id uuid NOT NULL,
+    recipient_address text NOT NULL,      -- phone or email, as sent
+    subject_type text, subject_id uuid,   -- the record this is about
+    rendered_body text NOT NULL,
+    status      text NOT NULL DEFAULT 'queued' CHECK (status IN
+                  ('queued','sent','delivered','read','failed','given_up','suppressed')),
+    provider    text, provider_message_id text, provider_error text,
+    attempts    integer NOT NULL DEFAULT 0,
+    queued_at   timestamptz NOT NULL DEFAULT now(),
+    sent_at timestamptz, delivered_at timestamptz, failed_at timestamptz,
+    cost_units  numeric(12,4),            -- conversations, segments, minutes
+    cost_currency text,
+    correlation_id text NOT NULL
+);
+CREATE INDEX ON messaging.message (recipient_type, recipient_id, queued_at DESC);
+CREATE INDEX ON messaging.message (status, queued_at);
+CREATE INDEX ON messaging.message (cause, queued_at);      -- cost attribution (OI-HS-05)
+REVOKE UPDATE (rendered_body, recipient_address) ON messaging.message FROM PUBLIC;
+
+CREATE TABLE messaging.contact_preference (
+    recipient_type text NOT NULL, recipient_id uuid NOT NULL,
+    channel text NOT NULL,
+    is_allowed boolean NOT NULL DEFAULT true,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (recipient_type, recipient_id, channel)
+);
+
+CREATE TABLE messaging.opt_out (
+    recipient_type text NOT NULL, recipient_id uuid NOT NULL,
+    scope text NOT NULL CHECK (scope IN ('all','cadence','marketing')),   -- statutory always sendable
+    reason text, opted_out_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (recipient_type, recipient_id, scope)
+);
+
+CREATE TABLE messaging.suppression (      -- permanent failures: invalid number, hard bounce
+    address text PRIMARY KEY,
+    channel text NOT NULL, reason text NOT NULL,
+    suppressed_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+## 6. State machines
+
+### `Message` (`M3-I30`, `M5-I9`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | enqueued | `queued` | Opt-out, suppression and send window already checked at **selection** |
+| `queued` | provider accepted | `sent` | Optimistic |
+| `sent` | provider receipt | `delivered` | **Receipt backfill corrects an optimistic `sent`** |
+| `delivered` | read receipt (WhatsApp) | `read` | |
+| `queued`/`sent` | transient failure | `queued` (attempts+1) | Exponential backoff, capped |
+| `queued`/`sent` | permanent failure | `failed` → `given_up` | **No retry**; address suppressed and flagged on the record |
+| `queued` | attempts exhausted | `given_up` | Dead-lettered, **visible and re-queueable by an operator** |
+| — | recipient opted out of this purpose | `suppressed` | Recorded, not silently dropped |
+
+### `Template` approval (`M5-I1`)
+
+`draft → submitted → approved | rejected`. An **unapproved WhatsApp template cannot be sent** —
+enforced in the sender, not just the UI. The lead time is displayed on the template because it gates
+cadence go-live (`X01`).
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST`/`PATCH` | `/v1/messaging/templates` | `template:manage` | Template CRUD, variable validation, preview |
+| `POST` | `/v1/messaging/templates/:id/submit-approval` | `template:manage` | Submit to the BSP |
+| `POST` | `/v1/messaging/templates/:id/test-send` | `template:manage` | **To a nominated internal recipient, never a candidate** |
+| `GET`/`POST`/`PATCH` | `/v1/messaging/triggers` | `template:manage` | Trigger CRUD, enable/disable |
+| `GET` | `/v1/messaging/messages?channel=&status=&from=&to=` | `message:read` | Delivery log |
+| `GET` | `/v1/messaging/messages?recipientType=&recipientId=` | `message:read` | Contact history |
+| `POST` | `/v1/messaging/messages/:id/requeue` | `message:manage` | Re-queue a given-up message |
+| `GET`/`PUT` | `/v1/messaging/preferences` | candidate, or `message:manage` | Channel preferences |
+| `POST` | `/v1/messaging/opt-out` | candidate | Opt out of a scope |
+| `POST` | `/hooks/messaging/:provider/receipt` | `edge-webhook` | Delivery receipt reconciliation |
+
+In-process: `messaging.send({ templateCode, recipient, variables, cause, purpose, subject })`. Every
+caller in the platform uses this; nobody calls a provider directly.
+
+## 8. Events and jobs
+
+**Events emitted:** `messaging.message.queued` · `.sent` · `.delivered` · `.failed` · `.given_up` ·
+`messaging.template.approved` · `messaging.opt_out.recorded`.
+
+**Events subscribed:** every event bound to an enabled `Trigger`.
+
+**Jobs**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `messaging.send` | on demand, `interactive` class | Resolves channel by preference then fallback order, renders, calls the provider |
+| `messaging.retry-and-receipts` | every minute | Retries transient failures; reconciles late receipts |
+| `messaging.reap-given-up` | hourly | Surfaces dead letters to the operator UI |
+
+Rate limits per provider are respected **rather than discovered through throttling** (`M5-I8`), and
+every send records its cost units attributed to its `cause` (`OI-HS-05`).
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Message templates — by channel and purpose, with approval state and lead time | `/admin/templates` | `M5-I1` |
+| Template editor — body with placeholders, variable validation, preview, test send | `/admin/templates/:id` | `M5-I1` |
+| Triggers — event, audience, channel order, template, on/off | `/admin/triggers` | `M5-I2` |
+| Delivery log — every send, status, cost, filters, failures | `/messaging/delivery-log` | `M5-I3` |
+| Contact history — embedded panel on the candidate record | inside `/candidates/:id` | `M5-I4` |
+
+The delivery log separates **A1 follow-up from D10 cadence cost on the shared WhatsApp number**
+(`M5-I3`), which is only possible because every message carries its `cause`.
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A message that fails for a temporary reason is retried; one that fails permanently is not | `M3-I30`, `M5-I9` |
+| AC2 | Delivery receipts arriving later correct an optimistic `sent` status | `M3-I30`, `M5-I9` |
+| AC3 | The **same WhatsApp number** is used for M3 follow-ups and M5 contact messages — one registration, not two | `M3-I30`, `M3-I24`, `M5-I1` |
+| AC4 | Message and conversation counts are logged so running cost can be measured | `M3-I30`, `OI-HS-05` |
+| AC5 | An operator can see and re-queue messages that gave up | `M3-I30` |
+| AC6 | A template exists per channel and purpose, with variables resolved from the candidate or requisition record | `M5-I1` |
+| AC7 | WhatsApp templates carry the provider approval state, and **an unapproved template cannot be sent** | `M5-I1` |
+| AC8 | Template approval lead time is visible, since it gates cadence go-live | `M5-I1` |
+| AC9 | A trigger binds an event, an audience, a channel order and a template | `M5-I2` |
+| AC10 | Channel fallback fires where the primary channel is opted out or fails | `M5-I2` |
+| AC11 | A disabled trigger stops sending without deleting its history | `M5-I2` |
+| AC12 | A test send reaches a nominated internal recipient **without touching candidates** | `M5-I2` |
+| AC13 | Statutory and contractual messages are distinguished from marketing so opt-out applies correctly | `M5-I2`, `M4-I9` |
+| AC14 | Every send is logged with delivery status reconciled against the provider receipt | `M5-I3` |
+| AC15 | Cost attribution distinguishes A1 follow-up from D10 cadence on the shared number | `M5-I3` |
+| AC16 | The log matches the per-user view a candidate sees in the app | `M5-I3`, `M4-I9` |
+| AC17 | Every contact attempt across all channels appears in one chronological view on the candidate record | `M5-I4` |
+| AC18 | Each send is attributable to the cadence rule that caused it, so over-contact is diagnosable | `M5-I4` |
+| AC19 | Responses are shown against the send that prompted them | `M5-I4` |
+| AC20 | Opt-out state is visible before a manual send is attempted | `M5-I4` |
+| AC21 | A send resolves channel by preference, then fallback order, then fails visibly | `M5-I8` |
+| AC22 | Provider rate limits are respected rather than discovered through throttling | `M5-I8` |
+| AC23 | Provider replacement requires no change above the abstraction | `M5-I8` |
+| AC24 | An invalid number is suppressed and flagged on the candidate record rather than retried indefinitely | `M5-I9` |
+| AC25 | Retry volume is included in the per-conversation cost model | `M5-I9`, `OI-HS-05` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-HS-05` | How many messages will the platform send per month? Runs both ways — Apollo needs a cost figure, Hiresense needs base size and contact frequency | Every send records cost units attributed to its cause; `03-06` shows a **projected volume and cost preview before a cadence is enabled**. The model is built; the inputs are Apollo's. | Estimate blocker |
+| `OI-HS-07` | Who supplies WhatsApp? Template approval takes weeks and is outside our control | Provider behind one interface; templates authored and submitted as soon as the BSP is named. **This is a calendar dependency, not an estimate problem** (`X01`). | `M5-I1`, `M3-I24`, Phase 4 go-live |
+| `OI-A-17` | Confirm email and SMS are outbound-only | Yes. A reply on either is recorded by `02-08` and routed to manual entry. | `M5-A14` |
+| `OI-HS-25` **[raised here]** | Send window and frequency cap — are they platform-wide or per segment? | Held per segment in `03-06` with a platform-wide ceiling in `02-03`, so a misconfigured segment cannot contact a candidate at 2am | `M5-I5` |

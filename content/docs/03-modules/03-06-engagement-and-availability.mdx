@@ -1,0 +1,320 @@
+---
+title: "03-06 Engagement and availability"
+description: "Apollo needs to know which nurses are actually available right now. This module decides who to contact, how often, on which channel and with which question set, delivers through…"
+---
+
+**Package** `@apollo/engagement` · **Schema** `engagement` · **Plan** D29, A3, A4, A5, A14 · **Effort** ~74.0pd · **Risk** High `SPEC` / `EXT` · **Build in** Phase 4
+
+## 1. Purpose
+
+Apollo needs to know which nurses are actually available right now. This module decides **who** to
+contact, **how often**, on **which channel** and with **which question set**, delivers through
+`02-09`, captures the answer on one structured schema whichever channel it arrived on, writes it back
+to the candidate record and **resets a freshness score** that otherwise decays. If nobody hears from a
+candidate the score falls and `03-07` ranks them lower.
+
+Part A is explicit that A3, A4, A5 and A14 form a **closed loop and none of the four is independently
+operable** — build any three and none does anything useful. They are estimated and sequenced as one
+unit.
+
+## 2. Scope
+
+### In scope
+
+- Segments and contact schedules: **six segments** (three categories × two bases), each with its own
+  cadence, channel, question set and staleness threshold
+- Send windows and frequency caps, with a projected volume and cost preview before enabling
+- Voice campaigns: segment, question set, call window, retry policy
+- The review queue for free-text replies the platform was not confident about, and the call log
+- Availability confidence: decay on six schedules, reset on a confirmed response
+- Cadence selection: who to contact next, applying opt-outs and send windows **at selection**
+- Candidate response capture across WhatsApp, app and voice, on one schema
+- Registration of the candidate-response intent set against `02-08`
+- Write-back to the M4-owned availability field, reconciling a response arriving on two channels
+
+### Explicitly out of scope
+
+- Templates, the sender, retry, receipts, delivery log and preferences — `02-09`.
+- The receive/resolve/classify stack — `02-08`. This module **registers** against it.
+- The app's availability screen — `03-05`. Same schema, different surface.
+- The voice provider integration itself — `04-04`.
+- Campaign performance reporting — `03-12`.
+
+### Explicitly not built
+
+- Handling replies to SMS and email. Both are outbound-only in Release 1 (`OI-A-17`).
+- Step-by-step guided conversations over WhatsApp. Templates and fixed buttons only; guided flows are
+  in the app.
+- The phone-call service itself. Apollo buys it; this builds the integration and answer extraction —
+  **and Apollo has not said from whom** (`OI-A-09`).
+- Automatic segment discovery or optimisation of cadence. Configured, not learned.
+
+## 3. Plan traceability
+
+| Item | Plan ref | What it is | Band | Build pd |
+|---|---|---|---|---|
+| `M5-I5` | D29 | Contact schedule and send window | XL | 6.0 |
+| `M5-I6` | A5 | Voice campaigns | L | 3.0 |
+| `M5-I7` | A14 | Replies to review, and the call log | L | 4.5 |
+| `M5-I10` | A3 | Freshness score — decay and reset | XL | 5.0 |
+| `M5-I11` | A4 | Who to contact next | XL | 5.0 |
+| `M5-I13` | A5 | Voice answer extraction | XL | 5.0 |
+| `M5-I14` | A14 | Candidate reply registration | L | 3.0 |
+| `M5-I16` | A14 | Write reply to candidate | L | 3.0 |
+
+`M5-I12` (voice provider) is `04-04`; `M5-I15` (WhatsApp reply handling) is `04-01`; `M5-I1`–`I4`,
+`I8`, `I9` are `02-09`.
+
+## 4. Dependencies
+
+**Must exist first:** `03-04` (the candidate records and the field availability is written onto),
+`02-08` (**the pipeline the reply capture reuses — A1 must land before A14 can be integrated**),
+`02-09` (delivery), `02-03` (question sets and thresholds), `02-12` (consent — migrated candidates are
+excluded from cadence until their basis is confirmed).
+
+**Consumed by:** `03-07` **ranks on the freshness score**; `03-09` sends trial check-ins through this
+layer; `03-05` and `04-01` are the two response surfaces.
+
+**External:** `04-04` outbound voice (**provider unnamed**), `04-01` WhatsApp (**template approval is a
+calendar dependency that gates go-live**), `04-06` free-text parsing.
+
+## 5. Data model
+
+```sql
+CREATE TABLE engagement.segment (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    code text NOT NULL UNIQUE,               -- 'nurse_base_b' | 'doctor_base_a' | …  (six)
+    candidate_category text NOT NULL REFERENCES settings.list_entry(code),
+    base text NOT NULL CHECK (base IN ('base_a','base_b')),
+    name text NOT NULL,
+    talent_segment_id uuid,                  -- matching.talent_segment — defined once, shared (M6-I2)
+    is_enabled boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE engagement.cadence_rule (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    segment_id uuid NOT NULL REFERENCES engagement.segment(id),
+    interval_days numeric(4,1) NOT NULL,     -- Base B: 3–4 across the whole base. Configurable.
+    channel_order text[] NOT NULL,
+    question_set_code text NOT NULL,
+    staleness_threshold numeric(4,3) NOT NULL,   -- confidence below which a candidate is selected
+    reminder_schedule jsonb NOT NULL DEFAULT '[]'::jsonb,
+    decay_half_life_days numeric(5,1) NOT NULL,  -- per segment: six schedules, not two
+    is_enabled boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid NOT NULL
+);
+
+CREATE TABLE engagement.send_window (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    segment_id uuid REFERENCES engagement.segment(id),   -- null = platform-wide ceiling
+    earliest time NOT NULL, latest time NOT NULL,
+    timezone text NOT NULL DEFAULT 'Asia/Kolkata',
+    max_messages_per_candidate integer NOT NULL,
+    per_period_days integer NOT NULL
+);
+
+CREATE TABLE engagement.cadence_run (        -- auditable: which rule, which candidates, which date
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    cadence_rule_id uuid NOT NULL REFERENCES engagement.cadence_rule(id),
+    run_date date NOT NULL,
+    selected_count integer NOT NULL,
+    suppressed_optout integer NOT NULL DEFAULT 0,
+    suppressed_frequency integer NOT NULL DEFAULT 0,
+    suppressed_consent integer NOT NULL DEFAULT 0,
+    projected_cost_units numeric(12,4),
+    started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz,
+    UNIQUE (cadence_rule_id, run_date)
+);
+
+CREATE TABLE engagement.cadence_selection (
+    cadence_run_id uuid NOT NULL REFERENCES engagement.cadence_run(id),
+    candidate_id uuid NOT NULL,
+    confidence_at_selection numeric(4,3) NOT NULL,
+    message_id uuid,                         -- messaging.message
+    PRIMARY KEY (cadence_run_id, candidate_id)
+);
+
+CREATE TABLE engagement.availability_response (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    candidate_id uuid NOT NULL,
+    channel text NOT NULL CHECK (channel IN ('app','whatsapp','voice')),
+    inbound_record_id uuid,                  -- null for app (direct API)
+    voice_call_id uuid,
+    payload jsonb NOT NULL,                  -- ONE schema across all three channels
+    is_structured boolean NOT NULL,          -- template button / app form vs parsed free text
+    confidence numeric(4,3),
+    state text NOT NULL DEFAULT 'received' CHECK (state IN
+      ('received','understood','needs_review','confirmed','rejected')),
+    reviewed_by uuid, reviewed_at timestamptz, review_correction jsonb,
+    reconciled_with uuid REFERENCES engagement.availability_response(id),  -- two channels, one record
+    received_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON engagement.availability_response (candidate_id, received_at DESC);
+CREATE INDEX ON engagement.availability_response (state) WHERE state = 'needs_review';
+
+CREATE TABLE engagement.voice_campaign (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    segment_id uuid NOT NULL REFERENCES engagement.segment(id),
+    question_set_code text NOT NULL,
+    call_window_start time NOT NULL, call_window_end time NOT NULL,
+    max_retries integer NOT NULL DEFAULT 2,
+    languages text[] NOT NULL,               -- must match operating reality, not a default
+    is_enabled boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE engagement.voice_call (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    voice_campaign_id uuid REFERENCES engagement.voice_campaign(id),
+    candidate_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'queued' CHECK (state IN
+      ('queued','dialling','connected','completed','no_answer','failed')),
+    attempt integer NOT NULL DEFAULT 1,
+    duration_seconds integer,
+    recording_document_id uuid,              -- files.document, residency + retention applied
+    transcript text,
+    extraction jsonb, extraction_confidence numeric(4,3),
+    cost_units numeric(12,4),                -- per-minute plus AI inference (OI-HS-05)
+    provider_call_id text,
+    started_at timestamptz, ended_at timestamptz
+);
+```
+
+**`availability_confidence` and `availability_last_confirmed_at` are columns on
+`candidates.candidate`** (`03-04`), written **only** through this module's service. That ownership
+boundary is Part A coupling 3 and is deliberate.
+
+## 6. State machines
+
+### `AvailabilityConfidence` (`M5-I10`)
+
+```
+confirmed (1.0) ──decay on the segment's half-life──▶ decaying ──▶ stale (< threshold)
+      ▲                                                                    │
+      └───────── confirmed response resets to 1.0 ◀── selected by cadence ─┘
+```
+
+Six schedules, one per segment — not two. A response **below the confidence threshold does not silently
+reset confidence**; it goes to review first.
+
+### `AvailabilityResponse` (`M5-I7`, `M5-I16`)
+
+| From | Event | To | Rule |
+|---|---|---|---|
+| — | structured template button or app form | `understood` → `confirmed` | **Writes back without review** |
+| — | free text, confidence ≥ threshold | `understood` → `confirmed` | |
+| — | free text or voice, confidence &lt; threshold | `needs_review` | **Queued for a person; confidence is not reset** |
+| `needs_review` | reviewer accepts or corrects | `confirmed` | Resets confidence **identically to a structured response** |
+| `needs_review` | reviewer rejects | `rejected` | No write-back |
+| any | a second response on another channel | `confirmed`, `reconciled_with` set | **One record, not two resets** |
+
+### `VoiceCall` (`M5-I6`)
+
+`queued → dialling → connected → completed`, or `no_answer → retry` per the campaign policy, within
+the call window and without breaching frequency caps.
+
+## 7. API surface
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `GET`/`POST`/`PATCH` | `/v1/segments` | `cadence:manage` | The six segments |
+| `GET`/`PUT` | `/v1/cadence-rules/:segmentId` | `cadence:manage` | Interval, channel, question set, staleness, decay |
+| `GET` | `/v1/cadence-rules/:id/projection` | `cadence:manage` | **Projected contact volume and cost before enabling** |
+| `POST` | `/v1/cadence-rules/:id/enable` · `/disable` | `cadence:manage` | Disabling stops selection **without losing history** |
+| `GET`/`PUT` | `/v1/send-windows` | `cadence:manage` | Hours and frequency caps |
+| `GET` | `/v1/cadence-runs?ruleId=&from=` | `cadence:read` | Which rule selected which candidates, when |
+| `GET`/`POST`/`PATCH` | `/v1/voice-campaigns` | `cadence:manage` | Segment, questions, window, retries, languages |
+| `GET` | `/v1/voice-calls?campaignId=&state=` | `cadence:read` | Call log with duration, outcome, cost |
+| `GET` | `/v1/voice-calls/:id/recording` | `cadence:read` | Expiring link to the recording and transcript |
+| `GET` | `/v1/availability-responses?state=needs_review` | `response:review` | The review queue |
+| `POST` | `/v1/availability-responses/:id/review` | `response:review` | Accept, correct or reject |
+| `GET` | `/v1/candidates/:id/availability` | `candidate:read` | Value, last confirmed, and the payload shape for the base |
+
+## 8. Events and jobs
+
+**Events emitted:** `engagement.cadence.run_completed` · `engagement.candidate.selected` ·
+`engagement.availability.confirmed` · `.needs_review` · `engagement.confidence.decayed` ·
+`engagement.voice_call.completed`.
+
+**Events subscribed:** `inbound.record.classified` (`candidate_response`) → handle the reply;
+`candidates.candidate.base_changed` → re-evaluate segment membership;
+`messaging.opt_out.recorded` → exclude from the next selection.
+
+**Jobs**
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `engagement.decay` | daily | Applies the six decay schedules |
+| `engagement.cadence-run` | daily per enabled rule | Selects on confidence, applies opt-outs, consent basis, frequency caps and send windows **at selection**, records the run, enqueues sends |
+| `engagement.handle-response` | on inbound dispatch | Normalises WhatsApp, app and voice answers to one schema |
+| `engagement.voice-dial` | on campaign schedule | Places calls through `04-04` within the window |
+| `engagement.extract-voice-answer` | on call completion | Turns the spoken answer into the same shape; low confidence → review |
+| `engagement.write-back` | on confirmation | Resets confidence and the last-confirmed timestamp on the M4 record |
+
+## 9. Frontend
+
+| Screen | Route | Item |
+|---|---|---|
+| Contact schedules — one per segment; interval, channel, question set, staleness threshold, reminders, on/off; **volume and cost projection before enabling** | `/admin/cadence` | `M5-I5` |
+| Send window — permitted hours, messages per candidate per period | `/admin/cadence/windows` | `M5-I5` |
+| Voice campaigns — segment, questions, call window, retries, languages | `/admin/voice-campaigns` | `M5-I6` |
+| Replies to review — original message beside the platform's reading; accept, correct, reject | `/engagement/review` | `M5-I7` |
+| Call log — every call with duration and outcome; **plays the recording and shows the transcript** | `/engagement/calls` | `M5-I7` |
+| Cadence runs — which rule ran, how many selected, how many suppressed and why | `/engagement/runs` | `M5-I11` |
+
+## 10. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | Base B cadence of every three to four days across the whole base is **configurable, not hardcoded** | `M5-I5` |
+| AC2 | Base A runs on a longer cycle under the same mechanism | `M5-I5` |
+| AC3 | **The projected contact volume preview shows the cost implication before a cadence is enabled** | `M5-I5`, `OI-HS-05` |
+| AC4 | Selection is driven by the availability confidence threshold, not by a fixed list | `M5-I5`, `M5-I11` |
+| AC5 | Disabling a segment stops selection without losing history | `M5-I5` |
+| AC6 | Cadence, delivery, response and confidence reset form a **closed loop with no useful partial state** | `M5-I5`, Part A coupling 2 |
+| AC7 | Frequency capping prevents a candidate receiving multiple cadence sends in one window | `M5-I5` |
+| AC8 | **Three categories across two pools gives six segments**, each with its own cadence, question set and staleness threshold | `M5-I5` |
+| AC9 | A campaign binds a segment, a question set and a call window | `M5-I6` |
+| AC10 | The voice question set produces **the same structured response schema as A14** | `M5-I6`, `M5-I13` |
+| AC11 | Retry on no-answer follows the configured policy without breaching frequency caps | `M5-I6` |
+| AC12 | Language coverage matches the operating reality, not a default | `M5-I6` |
+| AC13 | A structured template response writes back **without review** | `M5-I7` |
+| AC14 | A free-text response below the confidence threshold **queues for review rather than resetting confidence** | `M5-I7`, `OI-A-08` |
+| AC15 | A reviewer sees the original message alongside the parsed interpretation | `M5-I7` |
+| AC16 | A candidate response misclassified as demand is re-routable **without re-ingestion** | `M5-I7`, `M3-I17` |
+| AC17 | Every call is logged with duration, outcome and cost | `M5-I7` |
+| AC18 | A transcript is retained and playable against the extracted response | `M5-I7` → `M0-I6` |
+| AC19 | A corrected response resets confidence **the same way a structured response does** | `M5-I7` |
+| AC20 | Per-minute cost plus AI inference cost is tracked for consumption modelling | `M5-I7`, `OI-HS-05` |
+| AC21 | Confidence decays on the configured schedule per base and resets on a confirmed response | `M5-I10` |
+| AC22 | Base A availability is a notice period; Base B is time windows within a travel radius | `M5-I10` |
+| AC23 | The value and its last-confirmed timestamp are **attributes of the candidate record, written here** | `M5-I10`, Part A coupling 3 |
+| AC24 | M6 can filter and weight on both the value and the recency | `M5-I10`, `M6-I7` |
+| AC25 | A response parsed from free text below the threshold **does not silently reset confidence** | `M5-I10`, `OI-A-08` |
+| AC26 | Field schema ownership between M4 and M5 is fixed before either writes | `M5-I10` |
+| AC27 | Selection is driven by confidence, and a **confirmed response removes a candidate from the next selection** | `M5-I11` |
+| AC28 | **Frequency caps and opt-outs are applied at selection, not at send** | `M5-I11` |
+| AC29 | A run is auditable: which rule selected which candidates on which date | `M5-I11` |
+| AC30 | Run volume is projectable ahead of execution for cost modelling | `M5-I11`, `OI-HS-05` |
+| AC31 | Voice responses are written back on the same structure as A14 | `M5-I13` |
+| AC32 | Extraction below the threshold routes to review rather than writing back | `M5-I13`, `OI-A-08` |
+| AC33 | A14 registers an additional intent set and target schema **without modification** to the M3 receiver, queue, sender resolution or retry | `M5-I14`, `M3-I29` |
+| AC34 | The registration is the acceptance test for `M3-I29` | `M5-I14` |
+| AC35 | A1 must land before A14 can be integrated; **A14 slipping does not block A1** | `M5-I14` |
+| AC36 | The threshold and fallback are agreed once across A1 and A14, **not tuned per consumer** | `M5-I14`, `AS-03` |
+| AC37 | An automated contract test prevents a later A1 change silently breaking A14 | `M5-I14` |
+| AC38 | A confirmed response resets confidence and updates the last-confirmed timestamp | `M5-I16` |
+| AC39 | A response arriving on **both app and WhatsApp reconciles to one record rather than resetting twice** | `M5-I16` |
+| AC40 | Write-back is to the M4-owned field, respecting the ownership boundary | `M5-I16` |
+
+## 11. Open questions
+
+| Ref | Question | Working assumption | Blocks |
+|---|---|---|---|
+| `OI-A-09` | **Which provider will make the automated phone calls?** Providers differ enormously in conversation handling, transcript shape and Indian language coverage | The integration and extraction are built against an interface with a stub adapter; the provider cannot be sized. Also affects M3: if the same provider does speech-to-text for inbound voice notes we build one integration, otherwise two. **Estimate blocker.** | `M5-I12`, `M5-I13`, `M5-I6`, `M5-I7`, `M3-I23` |
+| `OI-HS-05` | **How many messages per month?** Volume is set by the contact schedule, which is configuration nobody has settled | Every rule carries a projection; the model is built and the inputs are Apollo's. If Base B is larger than assumed, per-conversation cost could exceed the build cost of this module. **Estimate blocker.** | `M5-I5`, `M5-I3`, `M5-I8`, `M3-I24` |
+| `OI-A-08` | Free-text fallback — no accuracy threshold, confidence handling or human-review path is specified for parsed responses that then reset confidence | Below-threshold responses **never write back**; they queue for review. A misparsed response would otherwise reset confidence wrongly and the candidate drops out of cadence silently. | `M5-A14`, `M5-A3` |
+| `OI-M3-06` | Threshold shared across A1 and A14 | `AS-03` — one value in `02-03`, starting at 0.80 | `M5-I14` |
+| `OI-A-17` | Confirm SMS and email are outbound-only | Yes; a reply on either goes to manual entry | `M5-D10`, `M5-A14` |
+| `OI-HS-09` | A candidate in both bases needs two availability states against one credential record | Supported by `supply_base_membership`; **each base decays on its own schedule** | `M5-I10`, `M4-I17` |
+| `OI-M3-05` | Is the speech-to-text provider the same as the voice provider? | Unknown. One integration or two, and language coverage proven once or twice. | `M3-I23`, `M5-A5` |
+| — **[raised here]** | Migrated candidates have no established consent basis | Excluded from cadence selection until Apollo confirms (`02-12`). Suppressed counts appear on every run, so the size of the gap is visible rather than silent. | Cadence coverage of the migrated base |

@@ -1,362 +1,414 @@
+#!/usr/bin/env node
 /**
- * Sync `../docs/**\/*.md` into `content/docs` for Fumadocs.
+ * Mirror ../docs/**\/*.md into content/docs/**\/*.mdx.
  *
- * The markdown under /docs is the single source of truth and is never modified.
- * This script produces a Fumadocs-ready mirror: frontmatter (title/description),
- * meta.json navigation, resolved cross-links and MDX-safe escaping.
+ * ../docs is the single source of truth and is NEVER modified by this script.
+ * content/docs is generated, git-ignored, and wiped on every run.
  *
- * Run: node scripts/sync-docs.mjs   (wired to predev / prebuild)
+ * What it does, and why each step is needed, is documented in README.md.
  */
-import fs from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, '..');
-const SRC = path.resolve(ROOT, '..', 'docs');
-const OUT = path.join(ROOT, 'content', 'docs');
+const SOURCE = path.resolve(HERE, '../../docs');
+const TARGET = path.resolve(HERE, '../content/docs');
+const DOCS_ROUTE = '/docs';
+const DESC_MAX = 180;
 
-/** Sidebar section metadata, in navigation order. */
+/**
+ * Sidebar configuration. A folder listed here gets this title, icon and position.
+ * A folder in ../docs that is NOT listed here still syncs — it is appended at the
+ * end under a title derived from its own name. Adding docs must never require
+ * editing the site.
+ */
 const SECTIONS = [
-  {
-    dir: '00-foundation',
-    title: 'Foundation',
-    icon: 'Compass',
-    description: 'What the business does and how the system is shaped. Read once, first.',
-  },
-  {
-    dir: '01-standards',
-    title: 'Standards',
-    icon: 'Ruler',
-    description: 'House rules. Every component spec assumes these.',
-  },
-  {
-    dir: '02-platform',
-    title: 'Platform',
-    icon: 'Layers',
-    description: 'Shared components. Built once, depended on by two or more modules.',
-  },
-  {
-    dir: '03-modules',
-    title: 'Modules',
-    icon: 'Boxes',
-    description: 'The business modules, one spec per implementable unit.',
-  },
-  {
-    dir: '04-integrations',
-    title: 'Integrations',
-    icon: 'Cable',
-    description: 'Every external system the platform touches.',
-  },
-  {
-    dir: '05-delivery',
-    title: 'Delivery',
-    icon: 'Rocket',
-    description: 'Build order, playbook and the open decisions still blocking work.',
-  },
+  { dir: '00-foundation',   title: '00 Foundation',   icon: 'Compass' },
+  { dir: '01-standards',    title: '01 Standards',    icon: 'Ruler' },
+  { dir: '02-platform',     title: '02 Platform',     icon: 'Layers' },
+  { dir: '03-modules',      title: '03 Modules',      icon: 'Boxes' },
+  { dir: '04-integrations', title: '04 Integrations', icon: 'PlugZap' },
+  { dir: '05-delivery',     title: '05 Delivery',     icon: 'Rocket' },
+  { dir: '06-source-plan',  title: '06 Source plan',  icon: 'FileText' },
 ];
 
-// ---------------------------------------------------------------- utilities
+/* ------------------------------------------------------------------ *
+ * 1. Fence splitting — the basis of every text transformation below.
+ *    Nothing inside a fenced code block is ever touched.
+ * ------------------------------------------------------------------ */
 
-/** Split a document into alternating prose / fenced-code segments. */
-function splitFences(text) {
-  const segments = [];
-  const lines = text.split('\n');
-  let buffer = [];
-  let fence = null;
+/** Split into [{ fence: boolean, lines: string[] }] preserving order. */
+function splitFences(content) {
+  const out = [];
+  let current = { fence: false, lines: [] };
+  let fenceMarker = null;
 
-  const flush = (code) => {
-    segments.push({ code, text: buffer.join('\n') });
-    buffer = [];
-  };
-
-  for (const line of lines) {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/);
-    if (!fence && marker) {
-      flush(false);
-      fence = marker[1][0].repeat(3);
-      buffer.push(line);
-    } else if (fence && marker && marker[1].startsWith(fence)) {
-      buffer.push(line);
-      flush(true);
-      fence = null;
-    } else {
-      buffer.push(line);
+  for (const line of content.split('\n')) {
+    const open = line.match(/^\s*(`{3,}|~{3,})/);
+    if (!fenceMarker && open) {
+      if (current.lines.length) out.push(current);
+      fenceMarker = open[1][0].repeat(3);
+      current = { fence: true, lines: [line] };
+      continue;
     }
+    if (fenceMarker && open && open[1].startsWith(fenceMarker)) {
+      current.lines.push(line);
+      out.push(current);
+      current = { fence: false, lines: [] };
+      fenceMarker = null;
+      continue;
+    }
+    current.lines.push(line);
   }
-  flush(Boolean(fence));
-  return segments;
-}
-
-/** Apply `fn` to prose only, leaving fenced code and inline code untouched. */
-function mapProse(text, fn) {
-  return splitFences(text)
-    .map((segment) => {
-      if (segment.code) return segment.text;
-      // Preserve inline `code` spans within prose.
-      return segment.text
-        .split(/(`+[^`]*?`+)/g)
-        .map((part, i) => (i % 2 === 1 ? part : fn(part)))
-        .join('');
-    })
-    .join('\n');
+  if (current.lines.length) out.push(current);
+  return out;
 }
 
 /**
- * In GFM tables a `|` splits the cell even inside an inline code span, which
- * leaves the span unterminated and exposes its `<...>` to the MDX parser.
- * Escaping the pipe keeps the cell (and the code span) intact.
+ * Map a function over prose only. `fn(text)` is called for the runs of text
+ * between inline code spans; `spanFn(span, line)` for the spans themselves.
+ * Fenced blocks are passed through verbatim.
  */
-function escapeTablePipes(text) {
-  return splitFences(text)
-    .map((segment) => {
-      if (segment.code) return segment.text;
-      return segment.text
-        .split('\n')
+function mapProse(content, fn, spanFn = (s) => s) {
+  return splitFences(content)
+    .map((seg) => {
+      if (seg.fence) return seg.lines.join('\n');
+      return seg.lines
         .map((line) => {
-          if (!/^\s*\|/.test(line)) return line;
-          return line
-            .split(/(`+[^`]*?`+)/g)
-            .map((part, i) => (i % 2 === 1 ? part.replace(/(?<!\\)\|/g, '\\|') : part))
-            .join('');
+          let out = '';
+          let last = 0;
+          const re = /(`+)(.*?)\1/g;
+          let m;
+          while ((m = re.exec(line)) !== null) {
+            out += fn(line.slice(last, m.index));
+            out += spanFn(m[0], line);
+            last = m.index + m[0].length;
+          }
+          out += fn(line.slice(last));
+          return out;
         })
         .join('\n');
     })
     .join('\n');
 }
 
-/**
- * The docs use `<n>`, `<Requisition>`, `<void>` etc. as placeholder notation.
- * Un-escaped these are parsed as HTML/JSX and silently disappear.
- */
-function escapeMdx(text) {
-  return mapProse(text, (part) =>
-    part
-      .replace(/<(?!https?:\/\/|mailto:)/g, '&lt;')
-      .replace(/\{/g, '&#123;')
-      .replace(/\}/g, '&#125;'),
+/* ------------------------------------------------------------------ *
+ * 2. MDX escaping — this is where it breaks.
+ *    The docs use <n>, <entity> and {...} as notation. Unescaped, MDX
+ *    parses them as JSX/expressions and they silently vanish.
+ * ------------------------------------------------------------------ */
+
+// The one place the docs use real HTML rather than notation: collapsible task lists inside table
+// cells. Blanket `<` escaping would turn them into visible text, so these exact tags survive.
+const HTML_PASSTHROUGH = /<\/?(?:details|summary|ul|li)>/g;
+
+function escapeMdx(content) {
+  return mapProse(
+    content,
+    (prose) => {
+      const kept = [];
+      return prose
+        .replace(HTML_PASSTHROUGH, (t) => `\u0000${kept.push(t) - 1}\u0000`)
+        .replace(/</g, '&lt;')
+        .replace(/\{/g, '&#123;')
+        .replace(/\}/g, '&#125;')
+        .replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)]);
+    },
+    // In a GFM table, a `|` inside an inline code span splits the cell and leaves
+    // the span unterminated. Escape unescaped pipes inside spans on table rows.
+    (span, line) => (isTableRow(line) ? span.replace(/(?<!\\)\|/g, '\\|') : span),
   );
 }
 
-/** Map a docs-relative markdown path to its site URL. */
-function toUrl(relPath) {
-  let rel = relPath.replace(/\\/g, '/').replace(/\.md$/i, '').replace(/\/$/, '');
-  if (rel === 'README' || rel === '.' || rel === '') return '/docs';
-  rel = rel.replace(/\/README$/i, '');
-  return `/docs/${rel}`;
+function isTableRow(line) {
+  const t = line.trim();
+  return t.startsWith('|') && t.length > 1;
 }
 
-/** Rewrite relative links between source docs into site routes. */
-function rewriteLinks(text, fileRel) {
-  const dir = path.dirname(fileRel);
-  return mapProse(text, (part) =>
-    part.replace(/\]\(([^)]+)\)/g, (match, target) => {
-      const raw = target.trim();
-      if (/^(https?:|mailto:|#|\/)/i.test(raw)) return match;
-      const [linkPath, hash] = raw.split('#');
-      if (!linkPath) return match;
-      if (!/\.md$/i.test(linkPath) && !linkPath.endsWith('/')) return match;
-      const resolved = path.posix.normalize(path.posix.join(dir, linkPath));
-      return `](${toUrl(resolved)}${hash ? `#${hash}` : ''})`;
+/* ------------------------------------------------------------------ *
+ * 3. Cross-link rewriting
+ *    ](03-modules/03-01-clients.md#anchor) -> ](/docs/03-modules/03-01-clients#anchor)
+ *    Resolved relative to the containing file. README.md maps to /docs.
+ * ------------------------------------------------------------------ */
+
+function rewriteLinks(content, relFromDocsRoot) {
+  const dir = path.dirname(relFromDocsRoot);
+  return mapProse(content, (prose) =>
+    prose.replace(/\]\(([^)\s]+?)(#[^)\s]*)?\)/g, (whole, target, hash = '') => {
+      if (/^(?:[a-z]+:|\/\/|\/|#)/i.test(target)) return whole; // absolute, protocol, bare hash
+      if (!target.toLowerCase().endsWith('.md')) return whole;
+      const resolved = path.posix.normalize(path.posix.join(dir === '.' ? '' : dir, target));
+      const route = toRoute(resolved);
+      return `](${route}${hash})`;
     }),
   );
 }
 
-/** Strip markdown decoration down to plain text, for the description field. */
-function plainText(line) {
-  return line
+/** docs-relative markdown path -> site route */
+function toRoute(relPath) {
+  const noExt = relPath.replace(/\.md$/i, '');
+  if (noExt.toLowerCase() === 'readme') return DOCS_ROUTE;
+  const parts = noExt.split('/');
+  if (parts[parts.length - 1].toLowerCase() === 'readme') parts.pop();
+  return `${DOCS_ROUTE}/${parts.join('/')}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. Frontmatter derivation
+ * ------------------------------------------------------------------ */
+
+/**
+ * A source file may already carry frontmatter — `06-source-plan/` is machine-generated and states its
+ * own title and description. Take it as authoritative and strip it from the body, rather than
+ * deriving a second block and emitting both.
+ */
+function splitFrontmatter(raw) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
+  if (!m) return { meta: null, rest: raw };
+  const read = (key) => {
+    const line = new RegExp(`^${key}:\\s*(.+)$`, 'm').exec(m[1]);
+    if (!line) return null;
+    const v = line[1].trim();
+    try {
+      return v.startsWith('"') ? JSON.parse(v) : v.replace(/^'(.*)'$/, '$1');
+    } catch {
+      return v;
+    }
+  };
+  return { meta: { title: read('title'), description: read('description') }, rest: raw.slice(m[0].length) };
+}
+
+function extractTitle(content) {
+  const m = content.match(/^#\s+(.+?)\s*$/m);
+  return m ? stripInline(m[1]) : null;
+}
+
+function stripH1(content) {
+  return content.replace(/^#\s+.+?\s*$\n?/m, '').replace(/^\n+/, '');
+}
+
+/** Remove markdown emphasis, code ticks and links so a description reads as plain prose. */
+function stripInline(s) {
+  return s
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/\*\*([^*]*)\*\*/g, '$1')
-    .replace(/[*>]/g, '')
+    .replace(/\*([^*]*)\*/g, '$1')
+    .replace(/_([^_]*)_/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** Prefer the "Purpose" section's opening paragraph; else the first real prose. */
-function extractDescription(body) {
-  const lines = body.split('\n');
-  const candidates = [];
+const SKIP_LINE = (l) => {
+  const t = l.trim();
+  if (!t) return true;
+  if (t.startsWith('#')) return true;                       // headings
+  if (/^([-*_]\s*){3,}$/.test(t)) return true;              // thematic rules
+  if (t.startsWith('|')) return true;                       // tables
+  if (/^[-*+]\s/.test(t) || /^\d+[.)]\s/.test(t)) return true; // lists
+  if (t.startsWith('>')) return true;                       // quotes
+  if (/^\*\*[A-Za-z ]+\*\*\s*[`·]/.test(t)) return true;    // the bold metadata row
+  if (/^\*\*(Package|Schema|Plan|Effort|Risk|Build in)\*\*/.test(t)) return true;
+  if (/^</.test(t)) return true;                            // raw html/jsx
+  return false;
+};
 
-  const purposeAt = lines.findIndex((l) => /^#{2,3}\s+(\d+\.\s*)?Purpose\b/i.test(l));
-  if (purposeAt !== -1) candidates.push(lines.slice(purposeAt + 1));
-  candidates.push(lines);
+function extractDescription(content) {
+  const segs = splitFences(content).filter((s) => !s.fence);
+  const lines = segs.flatMap((s) => s.lines);
 
-  for (const scope of candidates) {
-    const paragraph = [];
-    let fence = false;
-    for (const line of scope) {
-      if (/^\s*(`{3,}|~{3,})/.test(line)) {
-        fence = !fence;
-        continue;
-      }
-      if (fence) continue;
-      const trimmed = line.trim();
-      if (!trimmed) {
-        if (paragraph.length) break;
-        continue;
-      }
-      // Skip separators, headings, tables, quotes, lists and bold metadata rows.
-      if (/^(-{3,}|={3,})$/.test(trimmed)) continue;
-      if (/^#/.test(trimmed)) {
-        if (paragraph.length) break;
-        continue;
-      }
-      if (/^[|>]/.test(trimmed) || /^[-*+]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
-        if (paragraph.length) break;
-        continue;
-      }
-      if (/^\*\*[^*]+\*\*\s/.test(trimmed) && trimmed.includes('·')) continue;
-      paragraph.push(trimmed);
-    }
-    const text = plainText(paragraph.join(' '));
-    if (text.length > 25) {
-      if (text.length <= 180) return text;
-      const cut = text.slice(0, 180);
-      const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf(' '));
-      return `${cut.slice(0, stop > 80 ? stop : 180).replace(/[,;:.\s]+$/, '')}…`;
-    }
+  // Prefer the opening paragraph of the `## Purpose` section (`## 1. Purpose` too).
+  const purposeIdx = lines.findIndex((l) => /^#{2,3}\s+(?:\d+\.\s*)?Purpose\s*$/i.test(l.trim()));
+  const pools = purposeIdx >= 0 ? [lines.slice(purposeIdx + 1), lines] : [lines];
+
+  for (const pool of pools) {
+    const para = firstParagraph(pool);
+    if (para) return truncate(stripInline(para));
   }
   return null;
 }
 
-function yamlString(value) {
-  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+function firstParagraph(lines) {
+  const buf = [];
+  for (const line of lines) {
+    if (buf.length === 0) {
+      if (SKIP_LINE(line)) continue;
+      buf.push(line.trim());
+    } else {
+      if (!line.trim() || SKIP_LINE(line)) break;
+      buf.push(line.trim());
+    }
+  }
+  return buf.length ? buf.join(' ') : null;
 }
 
-/** A landing page listing every document in a section. */
-function sectionIndex(section, entries) {
-  const cards = entries
-    .map((entry) => {
-      const body = entry.description ? `\n  ${escapeMdx(entry.description)}\n` : '';
-      return `  <Card title=${yamlString(entry.title)} href="/docs/${section.dir}/${entry.slug}">${body}  </Card>`;
-    })
-    .join('\n');
-
-  return [
-    '---',
-    `title: ${yamlString(section.title)}`,
-    section.description ? `description: ${yamlString(section.description)}` : null,
-    '---',
-    '',
-    `This section contains ${entries.length} document${entries.length === 1 ? '' : 's'}.`,
-    '',
-    '<Cards>',
-    cards,
-    '</Cards>',
-    '',
-  ]
-    .filter((line) => line !== null)
-    .join('\n');
+/** Truncate to ~DESC_MAX chars on a sentence boundary, else a word boundary. */
+function truncate(text) {
+  if (text.length <= DESC_MAX) return text;
+  const window = text.slice(0, DESC_MAX + 1);
+  const sentence = window.search(/[.!?](?:\s|$)(?![^.]*\d)/) >= 0 ? lastSentenceEnd(window) : -1;
+  if (sentence > DESC_MAX * 0.5) return text.slice(0, sentence + 1).trim();
+  const word = window.lastIndexOf(' ');
+  return `${text.slice(0, word > 0 ? word : DESC_MAX).trim()}…`;
 }
 
-// ------------------------------------------------------------------ convert
-
-function convert(absPath, fileRel) {
-  const source = fs.readFileSync(absPath, 'utf8');
-  const lines = source.split('\n');
-
-  const headingAt = lines.findIndex((l) => /^#\s+\S/.test(l));
-  const title =
-    headingAt === -1
-      ? path.basename(fileRel, '.md')
-      : plainText(lines[headingAt].replace(/^#\s+/, ''));
-
-  const body = (headingAt === -1 ? lines : lines.slice(headingAt + 1)).join('\n').replace(/^\s+/, '');
-  const description = extractDescription(body);
-
-  const frontmatter = [
-    '---',
-    `title: ${yamlString(title)}`,
-    description ? `description: ${yamlString(description)}` : null,
-    '---',
-    '',
-  ]
-    .filter((l) => l !== null)
-    .join('\n');
-
-  const processed = escapeMdx(escapeTablePipes(rewriteLinks(body, fileRel)));
-
-  return { title, description, content: `${frontmatter}\n${processed}\n` };
+function lastSentenceEnd(window) {
+  let idx = -1;
+  const re = /[.!?](\s|$)/g;
+  let m;
+  while ((m = re.exec(window)) !== null) idx = m.index;
+  return idx;
 }
 
-// --------------------------------------------------------------------- main
+const yaml = (v) => JSON.stringify(v ?? '');
 
-function main() {
-  // The source markdown lives outside this repo, so it is absent in CI and on
-  // fresh clones. `content/docs` is committed, so keep the existing mirror and
-  // let the build proceed instead of failing.
-  if (!fs.existsSync(SRC)) {
-    console.warn(`[sync-docs] source folder not found: ${SRC} — keeping existing content/docs`);
-    if (!fs.existsSync(OUT)) {
-      console.error('[sync-docs] no content/docs mirror to fall back on');
+/* ------------------------------------------------------------------ *
+ * 5. Walk, transform, write
+ * ------------------------------------------------------------------ */
+
+async function listMarkdown(dir, base = '') {
+  const entries = await fs.readdir(path.join(dir, base), { withFileTypes: true });
+  const files = [];
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = base ? `${base}/${e.name}` : e.name;
+    if (e.isDirectory()) files.push(...(await listMarkdown(dir, rel)));
+    else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) files.push(rel);
+  }
+  return files;
+}
+
+function sectionFor(dir) {
+  return (
+    SECTIONS.find((s) => s.dir === dir) ?? {
+      dir,
+      title: dir
+        .replace(/^\d+[-_]/, '')
+        .split(/[-_]/)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' '),
+      icon: 'Folder',
+      extra: true,
+    }
+  );
+}
+
+/** Does this path exist? Used to detect a missing ../docs before anything is wiped. */
+async function exists(target) {
+  try {
+    await fs.stat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function main() {
+  /* ../docs sits outside this repo, so it is absent from a fresh clone and from
+     CI. The committed content/docs mirror is what the site builds from there, so
+     bail out BEFORE the wipe rather than destroying the only copy. */
+  if (!(await exists(SOURCE))) {
+    if (!(await exists(TARGET))) {
+      console.error(`sync-docs: no source at ${SOURCE} and no content/docs mirror to build from`);
       process.exit(1);
     }
+    console.warn(`sync-docs: no source at ${SOURCE} — building from the committed content/docs mirror`);
     return;
   }
 
-  fs.rmSync(OUT, { recursive: true, force: true });
-  fs.mkdirSync(OUT, { recursive: true });
+  await fs.rm(TARGET, { recursive: true, force: true });
+  await fs.mkdir(TARGET, { recursive: true });
 
-  let count = 0;
+  const files = await listMarkdown(SOURCE);
+  if (!files.length) throw new Error(`No markdown found in ${SOURCE}`);
 
-  // Root README becomes the docs landing page.
-  const readme = path.join(SRC, 'README.md');
-  if (fs.existsSync(readme)) {
-    const { content } = convert(readme, 'README.md');
-    fs.writeFileSync(path.join(OUT, 'index.mdx'), content);
-    count++;
+  const byDir = new Map(); // dir -> [{ slug, title, description }]
+  let pageCount = 0;
+
+  for (const rel of files) {
+    const source = await fs.readFile(path.join(SOURCE, rel), 'utf8');
+    const { meta, rest: raw } = splitFrontmatter(source);
+    // The filename carries the document's index (`05-01`). Put it back on the title so the sidebar,
+    // breadcrumb and search results are as findable as the file tree is.
+    const index = /^(\d{2}-\d{2})-/.exec(path.basename(rel))?.[1] ?? null;
+    const bare = meta?.title ?? extractTitle(raw) ?? path.basename(rel, '.md');
+    const title = index ? `${index} ${bare}` : bare;
+    const description = meta?.description ?? extractDescription(raw);
+
+    let body = stripH1(raw);
+    body = rewriteLinks(body, rel);
+    body = escapeMdx(body);
+
+    const isRootReadme = rel.toLowerCase() === 'readme.md';
+    const outRel = isRootReadme ? 'index.mdx' : rel.replace(/\.md$/i, '.mdx');
+    const outPath = path.join(TARGET, outRel);
+    await fs.mkdir(path.dirname(outPath), { recursive: true });
+
+    const frontmatter =
+      `---\ntitle: ${yaml(title)}\n` +
+      (description ? `description: ${yaml(description)}\n` : '') +
+      `---\n\n`;
+    await fs.writeFile(outPath, frontmatter + body.trimEnd() + '\n', 'utf8');
+    pageCount++;
+
+    const dir = path.dirname(outRel);
+    if (dir !== '.') {
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push({ slug: path.basename(outRel, '.mdx'), title, description });
+    }
   }
 
-  const known = new Set(SECTIONS.map((s) => s.dir));
-  const extra = fs
-    .readdirSync(SRC, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !known.has(e.name))
-    .map((e) => ({ dir: e.name, title: e.name, icon: null, description: null }));
+  /* Section landing pages — a Cards grid, so folder links resolve and
+     sections are browsable rather than dead ends. */
+  for (const [dir, pages] of byDir) {
+    const section = sectionFor(dir);
+    const cards = pages
+      .map(
+        (p) =>
+          `  <Card title=${yaml(p.title)} href=${yaml(`${DOCS_ROUTE}/${dir}/${p.slug}`)}>\n` +
+          `    ${escapeMdx(p.description ?? '')}\n  </Card>`,
+      )
+      .join('\n');
 
-  for (const section of [...SECTIONS, ...extra]) {
-    const srcDir = path.join(SRC, section.dir);
-    if (!fs.existsSync(srcDir)) {
-      console.warn(`[sync-docs] skipping missing section: ${section.dir}`);
-      continue;
-    }
-    const outDir = path.join(OUT, section.dir);
-    fs.mkdirSync(outDir, { recursive: true });
+    const content =
+      `---\ntitle: ${yaml(section.title)}\n` +
+      `description: ${yaml(`${pages.length} document${pages.length === 1 ? '' : 's'} in ${section.title}.`)}\n` +
+      `---\n\n<Cards>\n${cards}\n</Cards>\n`;
+    await fs.writeFile(path.join(TARGET, dir, 'index.mdx'), content, 'utf8');
+    pageCount++;
 
-    const files = fs
-      .readdirSync(srcDir)
-      .filter((f) => f.toLowerCase().endsWith('.md'))
-      .sort();
-
-    const entries = [];
-    for (const file of files) {
-      const fileRel = path.posix.join(section.dir, file);
-      const { title, description, content } = convert(path.join(srcDir, file), fileRel);
-      const slug = file.replace(/\.md$/i, '');
-      fs.writeFileSync(path.join(outDir, `${slug}.mdx`), content);
-      entries.push({ slug, title, description });
-      count++;
-    }
-
-    // A landing page per section, so folder links resolve and the section is browsable.
-    fs.writeFileSync(path.join(outDir, 'index.mdx'), sectionIndex(section, entries));
-    count++;
-
-    const meta = { title: section.title, pages: ['index', ...entries.map((e) => e.slug)] };
-    if (section.icon) meta.icon = section.icon;
-    if (section.description) meta.description = section.description;
-    fs.writeFileSync(path.join(outDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+    await fs.writeFile(
+      path.join(TARGET, dir, 'meta.json'),
+      JSON.stringify(
+        {
+          title: section.title,
+          icon: section.icon,
+          pages: ['index', ...pages.map((p) => p.slug)],
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    );
   }
 
-  const rootMeta = {
-    title: 'Documentation',
-    root: true,
-    pages: ['index', ...SECTIONS.map((s) => s.dir), ...extra.map((s) => s.dir)],
-  };
-  fs.writeFileSync(path.join(OUT, 'meta.json'), `${JSON.stringify(rootMeta, null, 2)}\n`);
+  /* Root meta: configured sections in order, then anything else, appended. */
+  const known = SECTIONS.map((s) => s.dir).filter((d) => byDir.has(d));
+  const extra = [...byDir.keys()].filter((d) => !known.includes(d)).sort();
+  await fs.writeFile(
+    path.join(TARGET, 'meta.json'),
+    JSON.stringify({ root: true, title: 'Documentation', pages: ['index', ...known, ...extra] }, null, 2) + '\n',
+    'utf8',
+  );
 
-  console.log(`[sync-docs] wrote ${count} pages from ${path.relative(ROOT, SRC)} to content/docs`);
+  console.log(
+    `sync-docs: ${pageCount} pages from ${files.length} source files ` +
+      `across ${byDir.size} sections${extra.length ? ` (${extra.length} unconfigured: ${extra.join(', ')})` : ''}`,
+  );
 }
 
-main();
+main().catch((err) => {
+  console.error('sync-docs failed:', err);
+  process.exit(1);
+});

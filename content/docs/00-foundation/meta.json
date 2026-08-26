@@ -1,5 +1,6 @@
 {
-  "title": "Foundation",
+  "title": "00 Foundation",
+  "icon": "Compass",
   "pages": [
     "index",
     "00-01-product-context",
@@ -8,7 +9,5 @@
     "00-04-component-map",
     "00-05-delivery-roadmap",
     "00-06-glossary"
-  ],
-  "icon": "Compass",
-  "description": "What the business does and how the system is shaped. Read once, first."
+  ]
 }

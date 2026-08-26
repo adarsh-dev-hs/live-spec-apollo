@@ -1,0 +1,219 @@
+---
+title: "06-07 M0 — Platform Foundations"
+description: "Six things every other milestone needs from the first day: how people sign in, who they are, what they are allowed to do, a record of what they did, one place to hold the configurable…"
+---
+
+> **Client source document — reproduced, not rewritten.** This page is the Apollo delivery plan
+> (`Apollo_Delivery_Plan_6Month_v0.4.html`, v0.4) converted to markdown so it is searchable alongside the engineering
+> documentation. It is the *commercial* document; the engineering translation of it lives in
+> sections 00–05. Where the two disagree, this one wins.
+> [Open the original, with its tabs and styling →](/requirement-doc/)
+
+*M0 · F01–F06 · Months 1–2*
+
+`Foundations` · `6 items` · `32 conditions` · `48.0pd` · `1 high risk` · `All`
+
+Six things every other milestone needs from the first day: how people sign in, who they are, what they are allowed to do, a record of what they did, one place to hold the configurable lists and waiting periods, and somewhere for uploaded files to live. The client's deliverable list asks for role-based access but never says how anyone logs in, and asks for a requisition owner from the Apollo user list but never creates that list. The remaining foundation work - message sending, the shared list component, environments, the design system, data protection and event recording - is not built here. Each sits in the milestone that first needs it, so nothing is built months before anything uses it.
+
+> *Added by the client, 19 August 2026*
+>
+> *Apollo Knowledge Services, letter of 19 August 2026, responding to the Statement of Work dated 13 August. Reproduced without alteration.*
+>
+> **Item 1** — Category as a first-class dimension in the M0 data model and the M0 settings area, with all three category definitions held as configurable reference data rather than in code.
+>
+> **Item 14** — M0 delivered first and in full, with category and care setting established as dimensions within it.
+>
+> **Context** — M0 is right and we are not asking you to reduce it. Logins, roles, the audit trail, the core data model, data protection and event recording cannot be retrofitted - event recording least of all, since the reporting in M9 reads a history that has to have been captured from the first day.
+>
+> *No client text for this milestone*
+>
+> M0 is Hiresense-defined. These capabilities are assumed by the client specification but named nowhere in it, so there is nothing to quote. Everything in this milestone is Hiresense analysis.
+
+### Built once, used elsewhere
+
+Everything here is built once and read by every milestone. The audit service is written to by five of them. Roles and permissions govern every screen in the platform.
+
+### Records this milestone owns
+
+- User, Role, Permission - who can sign in and what they can reach. Every milestone reads these.
+- AuditEntry - who did what, when. Append-only, written to by M3, M6, M7, M8 and M9.
+- Setting, ListEntry - the configurable lists and waiting periods, with per-client overrides.
+- Document - every uploaded file, with its versions and retention rule.
+
+### How records move
+
+- User: invited → active → deactivated. A deactivated user cannot sign in but stays visible on their past records.
+- Document: uploaded → scanned → available. Or quarantined if the scan fails.
+
+### Not in this milestone
+
+- Candidate logins. Those are phone-and-code and are built in M4.
+- Client logins. Those come with the client portal in M10.
+- The design system, the shared list component, environments, data protection and event recording. All still required, but each is built in the milestone that first needs it rather than up front.
+
+### Needs to exist first
+
+- Nothing. This milestone goes first.
+
+### What breaks without it
+
+- Every other milestone. Without permissions no screen can restrict anything, and without the audit record the day-90 billing trigger cannot be defended.
+
+### Items — 6 to build · design 10.5pd, build 27.0pd, QA 10.5pd
+
+#### M0-I1 — Sign in
+
+`F01` · `Screen` · `XL · 5.0pd` · `AI High` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: All Apollo internal users.** How an Apollo user gets into the platform and stays in. D11 asks for role-based access but never says how anyone signs in.
+
+##### Screens to build
+
+1. **Sign in**
+  - Takes an email address and a password
+  - Signs the user in and opens the console
+2. **Forgot password**
+  - Takes an email address
+  - Sends a reset link to that address
+3. **Set new password**
+  - Opened from the reset link
+  - Takes a new password twice and saves it
+
+##### Conditions it must satisfy
+
+- A user signs in and reaches the console with the navigation their role permits
+- A session times out after the configured idle period and the user is returned to login
+- A password reset link works once and expires
+- Every login, failed login and lockout is written to the audit trail (M0-I4)
+- Candidate logins are completely separate from this - they use phone and code in M4
+
+Index **M0-I1** · Client ref **F01** · Band **XL** · Design **2.0pd** · Build **5.0pd** · QA **2.0pd** · Total **9.0pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I3, M0-I4**
+
+#### M0-I2 — Apollo users
+
+`F02` · `Screen` · `XL · 4.0pd` · `AI High` · `Low` · `SHARED` · `Medium`
+
+**Who uses it: Platform administrator, Fulfilment lead.** Creating and managing the Apollo staff who use the platform. M3 requires a requisition owner from 'the Apollo internal user list' - nothing else creates that list.
+
+##### Screens to build
+
+1. **User list**
+  - Lists every Apollo user with their role, site and whether they are active
+  - Search by name or email
+  - Opens a user, or starts a new one
+2. **Add or edit user**
+  - Takes name, email, role and site
+  - Saves the user
+  - Deactivates the user
+
+##### Conditions it must satisfy
+
+- A user can be created, assigned a role, and assigned to one or more sites
+- A deactivated user cannot sign in but stays visible on the records they created
+- A requisition owner can only be chosen from active users (M3 D14 V1)
+- A recruiter allocated to a requisition must hold a recruiter role (M3 D14 V2)
+- Site assignment is what lets the platform tell the 15 site-resident recruiters from the 7 floating ones
+- Bulk import reports row-level errors and still loads the valid rows
+
+Index **M0-I2** · Client ref **F02** · Band **XL** · Design **2.0pd** · Build **4.0pd** · QA **1.5pd** · Total **7.5pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I3**
+
+#### M0-I3 — Roles
+
+`F03` · `Screen` · `XXL · 4.0pd` · `AI Medium` · `High` · `SPEC` · `Low`
+
+**Who uses it: Platform administrator.** What each role can see and do. D11 says 'role-based access control' as a phrase - the actual permission model, and whether a recruiter sees only their own site, is not specified anywhere.
+
+##### Screens to build
+
+1. **Role list**
+  - Lists the roles and what each one can reach, which is how role-based access is set
+  - Read only - the permission set for each role is held in configuration, not edited on screen
+
+##### Conditions it must satisfy
+
+- Removing a permission takes effect on the user's next request, not their next login
+- A user with no role can sign in but reaches nothing, rather than seeing an error on every page
+- Whether a site-resident recruiter sees only their own site's data is not yet decided (OI-HS-01)
+- Every permission change is written to the audit trail
+- The role set covers Apollo internal users across every module, so no module builds its own access rules
+
+Index **M0-I3** · Client ref **F03** · Band **XXL** · Design **2.0pd** · Build **4.0pd** · QA **1.5pd** · Total **7.5pd** · Confidence **Low** · Open items **OI-HS-01** · Linked items **M0-I2, M0-I4**
+
+#### M0-I4 — Activity trail
+
+`F04` · `Service` · `XL · 3.0pd` · `AI Medium` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: System.** One place that records who did what and when. Several milestones need this - M3 status changes, M7 selection decisions, M7 link responses - and building it six times would be six different answers.
+
+##### Screens to build
+
+1. **Activity panel**
+  - Sits inside the requisition, candidate and placement screens
+  - Lists what changed, who changed it and when, newest first
+
+##### Conditions it must satisfy
+
+- Every status change, allocation, decision and configuration change is recorded with who did it
+- Records can be added but never edited or deleted, from any screen or any service
+- The same timeline component appears on the requisition, candidate and placement screens
+- An auditor can export everything touching one record for a given period
+- M3 needs this for status transitions, M7 for the selection trail, M9 for the billing trigger
+
+Index **M0-I4** · Client ref **F04** · Band **XL** · Design **1.0pd** · Build **3.0pd** · QA **1.0pd** · Total **5.0pd** · Confidence **Medium** · Open items **-** · Linked items **M3-I31**
+
+#### M0-I5 — Settings
+
+`F05` · `Config` · `XL · 6.0pd` · `AI High` · `Medium` · `SHARED` · `Medium`
+
+**Who uses it: Platform administrator.** One admin area for every configurable list and waiting period in the platform. There are at least nine of them; without a shared home they become nine separate screens.
+
+##### Screens to build
+
+1. **Settings list**
+  - Lists every configurable list and waiting period in the platform
+  - Opens one to edit
+2. **Reference data**
+  - Holds the three candidate categories - nurse, doctor, allied health - as data, not code
+  - Holds the care settings - hospital, home healthcare - as data, not code
+  - Adding a category or a setting later is a data change, not a build
+3. **Edit list**
+  - Adds, renames, reorders or switches off an entry in a list
+  - Saves the list
+4. **Edit waiting period**
+  - Sets the platform default number of days
+  - Sets a different number of days for one client
+
+##### Conditions it must satisfy
+
+- Close reasons, hold reasons, rejection reasons and category fields are all edited here, not in nine screens
+- A per-client value overrides the platform default; with no client value the default applies
+- A deactivated list entry stays readable on records that already used it
+- Changing a setting does not retrospectively alter records created under the old value
+- The nine known settings are: close reason, hold reason, rejection reason, required fields per category, contact schedule, retention confirmation window, timesheet approval window, follow-up window, and market configuration
+- Platform-level defaults live here, including the fallback windows an unconfigured client resolves to
+
+Index **M0-I5** · Client ref **F05** · Band **XL** · Design **2.5pd** · Build **6.0pd** · QA **2.5pd** · Total **11.0pd** · Confidence **Medium** · Open items **-** · Linked items **M0-I4**
+
+#### M0-I6 — File storage
+
+`F06` · `Service` · `XL · 5.0pd` · `AI Medium` · `Medium` · `COMP` · `Medium`
+
+**Who uses it: System.** Where every uploaded file lives: CVs, certificates, ID scans, WhatsApp voice notes, signed offers, invoices.
+
+##### Screens to build
+
+1. **No screen**
+  - Stores every file uploaded anywhere in the platform
+  - Scans each file for viruses before it becomes available
+  - Provides the upload control and file viewer other screens drop in
+  - Keeps all files in the Mumbai region
+
+##### Conditions it must satisfy
+
+- A file uploaded anywhere in the platform is stored, scanned and retrievable
+- Download links expire, so a shared link does not stay open indefinitely
+- Files never leave the Mumbai region, which is what makes the DPDP position hold (M4-I27)
+- A WhatsApp voice note is stored and stays playable from the M3 queue
+- Replacing a document keeps the previous version rather than overwriting it
+
+Index **M0-I6** · Client ref **F06** · Band **XL** · Design **1.0pd** · Build **5.0pd** · QA **2.0pd** · Total **8.0pd** · Confidence **Medium** · Open items **-** · Linked items **M4-I27**

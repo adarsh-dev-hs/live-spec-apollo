@@ -1,11 +1,12 @@
 {
-  "title": "Delivery",
+  "title": "05 Delivery",
+  "icon": "Rocket",
   "pages": [
     "index",
-    "05-01-build-order",
+    "05-01-build-sequence",
     "05-02-implementation-playbook",
-    "05-03-open-decisions"
-  ],
-  "icon": "Rocket",
-  "description": "Build order, playbook and the open decisions still blocking work."
+    "05-03-open-decisions",
+    "05-04-external-dependencies",
+    "05-05-documentation-uat-and-golive"
+  ]
 }
