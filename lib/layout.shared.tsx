@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, pocAppUrl } from './shared';
+import { appName, pocAppLoginUrl } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -19,7 +19,7 @@ export function baseOptions(): BaseLayoutProps {
       },
       {
         text: 'Live POC app',
-        url: pocAppUrl,
+        url: pocAppLoginUrl,
         external: true,
         description: 'The screens every specification links to',
       },
