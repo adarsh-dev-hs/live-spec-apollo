@@ -68,14 +68,18 @@ Undecided pieces are carried as explicit assumptions, not silent choices — see
    money reaches Apollo, and the actors. *Nothing else makes sense without it.*
 2. **[00-02 System architecture](/docs/00-foundation/00-02-system-architecture)** — the shape of the
    system and why it is that shape.
-3. **[00-04 Component map](/docs/00-foundation/00-04-component-map)** — what exists and what depends on
+3. **[07-00 The three-part release model](/docs/07-phases/07-00-release-model)** — what ships in Part 1,
+   what waits for Parts 2 and 3, and the rule that decides. *Read this before you decide how much of a
+   spec to build.*
+4. **[00-04 Component map](/docs/00-foundation/00-04-component-map)** — what exists and what depends on
    what.
-4. **[01-standards/](#5-directory-map)** — all ten. Read once, obeyed always.
-5. **[05-02 Implementation playbook](/docs/05-delivery/05-02-implementation-playbook)** — how to take one
+5. **[01-standards/](#5-directory-map)** — all ten. Read once, obeyed always.
+6. **[05-02 Implementation playbook](/docs/05-delivery/05-02-implementation-playbook)** — how to take one
    spec to a merged PR.
 
-Then read the one spec you are building. **One spec is one implementation session**: it contains
-everything needed for that component beyond the shared standards.
+Then read the one spec you are building, **and the release part that carries it** — a spec describes the
+finished component, and a part says which slice of it ships now. **One spec is one implementation
+session**: it contains everything needed for that component beyond the shared standards.
 
 ---
 
@@ -104,8 +108,13 @@ Every spec in `02-platform/` and `03-modules/` — and, adapted, in `04-integrat
 Each spec opens with a metadata line:
 
 ```
-**Package** `@apollo/name` · **Schema** `name` · **Plan** <refs> · **Effort** ~Npd · **Risk** <level> · **Build in** Phase N
+**Package** `@apollo/name` · **Schema** `name` · **Plan** <refs> · **Effort** ~Npd · **Risk** <level> · **Build in** Phase N · **Release** Part N
 ```
+
+**Build in** is the build phase ([05-01](/docs/05-delivery/05-01-build-sequence)) — what order the
+component is built in. **Release** is the part ([07-00](/docs/07-phases/07-00-release-model)) — which
+release it reaches a user in. A component built in one phase can be released across two or three parts,
+so `Release` names every part the spec is sliced across.
 
 ---
 
@@ -234,6 +243,22 @@ site at `/requirement-doc`.
 | [06-23](/docs/06-source-plan/06-23-open) | **Open items** — the 49 open items as the source raised them, before they were merged into [05-03](/docs/05-delivery/05-03-open-decisions) |
 | [06-24](/docs/06-source-plan/06-24-integ) | **Integrations** — the external systems the plan names, as it names them |
 | [06-25](/docs/06-source-plan/06-25-deps2) | **Dependencies** — the X01–X29 external dependencies with the months they are needed by |
+
+### `07-phases/` — what ships when, in three releases
+
+The whole platform classified into **three release parts**: one line of business straight through, then
+every thread open, then full depth. This is the answer to *how much of this spec do I build now*, and it
+is organised by capability in the client's own language rather than by component.
+
+| File | What it covers |
+|---|---|
+| [07-00](/docs/07-phases/07-00-release-model) | The classification rule, the three parts, the thin-slice matrix for all 35 specs, how parts sit against build phases, and the document format |
+| [07-01](/docs/07-phases/07-01-part-1-straight-through) | **Part 1 — Straight Through.** Ten scoped functionalities taking one client, one category and one line of business from sign-in to a permanent invoice |
+| [07-02](/docs/07-phases/07-02-part-2-all-threads-open) | **Part 2 — All Threads Open.** Eight functionalities: shift staffing, intake, engagement, three categories, home healthcare, the portal, onboarding |
+| [07-03](/docs/07-phases/07-03-part-3-full-depth) | **Part 3 — Full Depth.** Seven functionalities: intake at width, migration, reporting, the portal at width, workforce and collections, platform depth, go-live |
+| [07-04](/docs/07-phases/07-04-traceability) | All 208 items → part → functionality, the 21 split items, and what is deliberately absent from Part 1 |
+| [07-05](/docs/07-phases/07-05-feature-flags) | How the app ships Part 1 enabled with Parts 2 and 3 switchable: the flag register, the four gating levels, and the four things a flag must never gate |
+
 ---
 
 ## 6. Traceability scheme
@@ -252,6 +277,10 @@ Short, stable identifiers used everywhere.
 | `AS-<nn>` | A working assumption held until an open item closes. `01`–`06` from the plan; `07`–`24` adopted here | Verbatim / new | `AS-04` — M4 owns the attribute definition |
 | `X<nn>` | An external dependency: an account, contract, registration or access | Verbatim | `X29` — client link recipients |
 | `NN-KK` | A spec in these docs | New | `03-07` — matching and ranking |
+| `Part <n>` | A release part | New | `Part 2` — All Threads Open |
+| `F-P<n>-<k>` | One scoped functionality inside Part `n` | New | `F-P1-3` — vacancy management |
+| `SOW-<ref>` | A readability prefix on the client's own deliverable ids, used in the part files' scope tables. `SOW-D1` and `D1` are the same thing | New | `SOW-D1`, `SOW-A13`, `SOW-F14` |
+| `FLAG_*` / `P<n>_*` | A feature flag gating a part's functionality in the app | New | `P2_SHIFT_STAFFING` |
 
 **Rules.**
 
@@ -260,20 +289,22 @@ Short, stable identifiers used everywhere.
 - Every `AS-…` is listed in [05-03](/docs/05-delivery/05-03-open-decisions) §6 with every spec it applies
   to — assumptions are applied in more than one place by design, and they move together.
 - Every one of the plan's 208 items appears in exactly one component's §3, indexed in
-  [00-04](/docs/00-foundation/00-04-component-map) §6.
+  [00-04](/docs/00-foundation/00-04-component-map) §6, and in at least one release part, indexed in
+  [07-04](/docs/07-phases/07-04-traceability) §3. Both are true at once: one component, one or more parts.
+- Every `F-P<n>-<k>` names the specs it draws on and the slice of each it takes.
 - Anything present here but absent from the source is marked **[engineering addition]** with a
   justification.
 
 ---
 
-## 7. The seven things most likely to hurt
+## 7. The eight things most likely to hurt
 
 Pulled out of the specs because they decide the shape of the engagement.
 
 1. **`02-11` must be live before `03-03` writes its first requisition.** Build the event spine after M3
    and the M9 reports cannot cover the earlier period at all. Not recoverable.
-2. **There is no client login until Phase 6.** Every client interaction is a tokenised link (`02-14`),
-   and both invoice paths run through it.
+2. **There is no client login until Part 2, and no full portal until Part 3.** Every client interaction
+   in Part 1 is a tokenised link (`02-14`), and both invoice paths run through it.
 3. **There is no attendance route but the app.** No app, no attendance, no timesheet, no shift invoice.
 4. **Permanent billing has no fallback.** No contract terms at trigger time means it does not run.
 5. **Seven estimate blockers are open**, including one — `OI-A-13` — that changes scope rather than a
@@ -282,3 +313,6 @@ Pulled out of the specs because they decide the shape of the engagement.
    test against.
 7. **The back half is compressed.** Five of the ten build steps begin in months five and six, each
    needing the one before it, so they cannot be parallelised by adding people.
+8. **A spec is not one release.** Twenty-seven of the thirty-five specs are sliced across two or three
+   parts. Building a spec to completion when its part only asked for a slice is the most expensive
+   mistake available here — see [07-00 §5](/docs/07-phases/07-00-release-model#5-the-thin-slice-principle).

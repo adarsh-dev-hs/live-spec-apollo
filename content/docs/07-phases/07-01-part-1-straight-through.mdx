@@ -1,0 +1,1105 @@
+---
+title: "07-01 Part 1 — Straight Through"
+description: "One client, one category, one line of business, taken from a recruiter signing in to a permanent invoice raised against a day-90 confirmation. Ten scoped functionalities."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** F01–F14, D1, D2, D3, D4, D5, D6, D7, D8, D11, D13, D16, D18, D20, A2, A6, A7, A9, A12, A13 · **Risk** — · **Release** Part 1
+
+## 1. Purpose
+
+The first working version of the platform, carrying **one line of business straight through**. A
+recruiter signs in; a hospital is set up with its rate card and contract terms; a vacancy is entered in
+the console; a nurse signs up on her phone, uploads a CV and is checked against the nursing council;
+she is ranked, shortlisted and put in front of the hospital on a link with no password; an offer goes
+out; she joins; she is checked in on at day 0, 7, 30, 60 and 90; and the permanent invoice is raised
+once the hospital confirms at day 90 that she is still there.
+
+Everything in Part 1 sits on that sentence, plus the four things that
+[cannot be retrofitted](/docs/07-phases/07-00-release-model#3-the-classification-rule).
+
+## 2. Scope
+
+### SOW references covered
+
+`SOW-` is a readability prefix on the client's own deliverable identifiers — see
+[07-00 §9](/docs/07-phases/07-00-release-model#9-identifiers). Only the **slice** named in the last
+column is in Part 1.
+
+| SOW ref | What the plan calls it | Functionality | Slice in Part 1 |
+|---|---|---|---|
+| `SOW-F01` | Sign in, forgot password, set new password | F-P1-1 | Whole, Apollo staff realm only |
+| `SOW-F02` | Apollo users — list, add/edit, deactivate, bulk import | F-P1-1 | Whole |
+| `SOW-F03` | Roles — read-only list of what each role can reach | F-P1-1 | Whole |
+| `SOW-F04` | Activity trail service and panel | F-P1-1 | Whole |
+| `SOW-D11` | Console frame; deploy to Apollo's AWS account | F-P1-1, F-P1-10 | Whole |
+| `SOW-D1` | Client, sites, contacts, rate card, senders | F-P1-2 | All but sender identities |
+| `SOW-D13` | Contracts, versions, waiting periods, terms lookup | F-P1-2 | Whole |
+| `SOW-D2` | Requisition form, record, states, board, hold/revise/close | F-P1-3 | Permanent only — no shift templates or demand lines |
+| `SOW-D14` | Owner and allocation | F-P1-3 | Allocation only — prioritisation and approval are Part 3 |
+| `SOW-D3` | Candidate app and candidate sign-in | F-P1-4 | Sign-up, profile, jobs, availability |
+| `SOW-A9` | Category fields and specialty details | F-P1-4, F-P1-5 | The definition mechanism, with the nurse set populated |
+| `SOW-A2` | Candidate list and candidate record | F-P1-5 | Whole |
+| `SOW-D16` | Credentials, verification queue, expiry | F-P1-5 | Whole, one registry behind it |
+| `SOW-D4` | Verification detail and the verification checks service | F-P1-5 | All but document review against OCR |
+| `SOW-A12` | Market adapter layer and India registry adapters | F-P1-5 | The three interfaces, plus the nursing council |
+| `SOW-D18` | Ranking engine, inputs, weights, "why this rank" | F-P1-6 | One weight set: nurse × Base A |
+| `SOW-D5` | Candidate search, segments, build shortlist | F-P1-6 | Search and shortlist — segments are Part 2 |
+| `SOW-D6` | Interviews, feedback, selection decision | F-P1-7 | Whole |
+| `SOW-D20` | Offers | F-P1-7 | All but templates by state, role and skill |
+| `SOW-A13` | Client link mechanism, types, recipients, pages, log | F-P1-7, F-P1-8 | The mechanism, plus the shortlist and day-90 types |
+| `SOW-D7` | Confirm joining, placements, drop-out, privileging | F-P1-8 | All but privileging |
+| `SOW-A6` | Trial check-ins, questions, outcome, day-90 record | F-P1-8 | All but the trial dashboard at width |
+| `SOW-D8` | Permanent invoice, invoices list, terms at trigger | F-P1-9 | Whole — money owed is Part 2 |
+| `SOW-A7` | Billing evidence and the day-90 record store | F-P1-9 | Whole |
+| `SOW-F05` | Settings, reference data, waiting periods | F-P1-10 | Whole |
+| `SOW-F06` | File storage — store, scan, serve, version, retain | F-P1-10 | Whole |
+| `SOW-F07` | Message sending — queue, retry, delivery receipts | F-P1-10 | Transactional sends only |
+| `SOW-F08` | Shared list component | F-P1-10 | Filter, sort, page and the standard states |
+| `SOW-F10` | Four environments, pipeline, monitoring, backup, restore | F-P1-10 | Whole |
+| `SOW-F12` | Component library, tokens, standard states | F-P1-10 | Console and link surfaces |
+| `SOW-F13` | Consent, residency, retention | F-P1-10 | Consent at capture and residency |
+| `SOW-F14` | Event recording | F-P1-10 | **Whole — cannot be retrofitted** |
+| — | Job runtime **[engineering addition]** | F-P1-10 | Whole |
+
+### Explicitly out of scope
+
+- **Contractual shift staffing** in every form: shift templates, demand lines, shift acceptance,
+  check-in, attendance, timesheets and shift invoices. Part 2.
+- **Doctors and allied health.** The category mechanism is built; only the nurse set is populated.
+- **Home healthcare.** Care setting is reference data from day one; only `hospital` is populated.
+- **Every intake channel but the console.** No email, WhatsApp, spreadsheet, HRMS or portal intake.
+- **The client portal.** The only client surface is a tokenised link.
+- **Every report.** The activity trail on a record is not a report.
+- **Legacy migration**, engagement cadence, associate onboarding, workforce operations, payroll,
+  collections, prioritisation and timesheet extensions.
+
+### Explicitly not built
+
+- A second weight set, a second registry, a second link type beyond the two named, or a second
+  invoice type. Each is a Part 2 or Part 3 addition to the same tables.
+- Automatic CV reading. A CV is uploaded and stored in Part 1 and **read by a recruiter**; the parser
+  is Part 3.
+- Automatic document reading. Documents are reviewed by eye; OCR is Part 3.
+
+## 3. Scoped functionality
+
+Ten functionalities. `F-P1-10` is listed last but **built first** — it is the foundation the other nine
+stand on.
+
+Screen references resolve against the POC base URL (`NEXT_PUBLIC_POC_APP_URL`, default
+`http://localhost:5173`). A screen the spec requires but the POC does not render is marked **not in
+POC**; that is a gap in the POC, never in scope.
+
+---
+
+### F-P1-1 · Signing in and permissions
+
+*Apollo staff sign in, roles decide what each person can reach, and every change is recorded against
+who made it.*
+
+**Specs** [02-01](/docs/02-platform/02-01-identity-and-access) (staff realm) ·
+[02-02](/docs/02-platform/02-02-audit-trail) (whole) ·
+[02-06](/docs/02-platform/02-06-console-shell) (whole)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-F01` | `M0-I1` | Sign in, forgot password, set new password | XL |
+| `SOW-F02` | `M0-I2` | Apollo users — list, add/edit, deactivate, bulk import | XL |
+| `SOW-F03` | `M0-I3` | Roles — read-only list of what each role can reach | XXL |
+| `SOW-F04` | `M0-I4` | Activity trail service and panel | XL |
+| `SOW-D11` | `M1-I1` | Console frame — navigation, header, search, user menu, RBAC application | M |
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Sign in | `/login` | The only way into the console |
+| 2 | Forgot password | `/forgot-password` | Request a reset link |
+| 3 | Set new password | `/reset-password?token=` — **not in POC** | Consume the reset link |
+| 4 | User list | `/admin/users` | Every Apollo user, their roles and state |
+| 5 | Add / edit user | `/admin/users` · dialog | Create a user, set roles and sites |
+| 6 | Roles | `/admin/roles` | **Read-only.** What each role can reach |
+| 7 | Console frame | `/board` | Navigation, header, search, user menu — the frame every screen sits inside |
+| 8 | Activity trail | `/requisitions/:id` · tab **Activity** | The shared panel, three screens, one component |
+
+##### Screen 1 — Sign in · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `email` | string | Required. Apollo domain address |
+| `password` | string | Required. Never echoed, never logged |
+| `submit` | action | Rate-limited. **The failure message never distinguishes a wrong password from an unknown user** |
+
+##### Screens 4–5 — User · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `id` | string | System-issued |
+| `fullName` | string | Required |
+| `email` | string | Required, unique, the sign-in identifier |
+| `roles` | enum, many | `platform_admin` · `fulfilment_lead` · `recruiter` · `bd` · `verification` · `finance` · `leadership`. At least one |
+| `siteIds` | string, many | Empty means all sites |
+| `status` | enum | `invited` · `active` · `deactivated` |
+| `lastLoginAt` | timestamp | Read-only |
+| `isSiteResident` | boolean | A recruiter based at a client site rather than at Apollo |
+
+##### Screen 8 — Activity trail · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `entityType` | string | The record the line belongs to |
+| `entityId` | string | |
+| `action` | string | Machine name of what happened |
+| `actorLabel` | string | Rendered as a name; system actions read "Apollo platform" |
+| `actorType` | enum | `staff` · `candidate` · `client_user` · `link` · `system` |
+| `occurredAt` | timestamp | Newest first, grouped by day |
+| `summary` | string | Reads as a sentence — *"Priya Nair placed the requisition on hold"* |
+| `reason` | string, optional | Present wherever the action required a reason |
+
+**Append-only.** There is no edit and no delete, and the grant proving it is a test.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A named recruiter signs in with correct credentials | Lands on the first screen their roles can reach, not a fixed route |
+| 2 | Wrong password | Generic failure. No hint about whether the account exists |
+| 3 | Deactivated user signs in | Refused, with the same generic message. Any live session is ended |
+| 4 | Forgotten password requested for an unknown address | The same confirmation is shown as for a known one |
+| 5 | Recruiter opens the console | Navigation shows only the groups their permissions allow. Others are **not rendered at all** |
+| 6 | Recruiter types a URL for a screen they cannot reach | The no-permission screen, **not an error** |
+| 7 | Administrator adds a user with two roles and one site | User is `invited`; the invitation is recorded on the trail |
+| 8 | Administrator deactivates a user | Status becomes `deactivated`, sessions end, the record stays |
+| 9 | Anyone opens the roles screen | Read-only. There is no control that edits a role in Part 1 |
+| 10 | Session expires while a form is half-filled | The expiry dialog preserves unsaved form state |
+| 11 | Any action above completes | A line appears on the activity trail naming who, what and when |
+| 12 | Someone attempts to edit or delete a trail line | Refused at the database grant, not only in the application |
+
+#### Tested against
+
+- **Happy** — a `fulfilment_lead` signs in, opens the console, adds a `recruiter` with one site, and
+  both actions read back on the activity trail as sentences.
+- **All** — scenarios 1–12, plus: a user with every role sees every navigation group; a user with one
+  role sees exactly one; rate limiting triggers on repeated failures; the reset token is single-use and
+  expires; a system-caused action attributes to "Apollo platform" with the cause named; the trail's
+  loading, empty, error and no-permission states all render per
+  [01-03](/docs/01-standards/01-03-frontend-conventions) §3.
+
+---
+
+### F-P1-2 · Clients, contracts and rates
+
+*One hospital set up with its rate card and contract terms, so the invoice can be priced at the end.*
+
+**Specs** [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) (all but sender identities)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D1` | `M2-I1` · `M2-I2` · `M2-I3` · `M2-I4` · `M2-I5` · `M2-I11` | Client list, client details, sites and departments, contacts with link-recipient designation, rate card, rate lookup service | M–XL |
+| `SOW-D13` | `M2-I7` · `M2-I8` · `M2-I9` · `M2-I10` · `M2-I12` · `M2-I13` | Contract list, details, versions, client waiting periods, contract-terms lookup, renewal alert | M–XL |
+
+`M2-I6` (sender identities) is **Part 2** — nothing resolves an inbound sender until inbound exists.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Client list | `/clients` | Status and contract end date visible **without drilling in** |
+| 2 | Client details | `/clients/:id` · tab **Overview** | The client record |
+| 3 | Sites and departments | `/clients/:id` · tab **Sites & departments** | Where work happens |
+| 4 | Contacts and link recipients | `/clients/:id` · tab **Contacts & link recipients** | **Who receives which type of link** |
+| 5 | Rate card | `/clients/:id` · tab **Rate card** | What each role costs, and the placement fee |
+| 6 | Waiting periods | `/clients/:id` · tab **Waiting periods** | Per-client windows, against the platform default |
+| 7 | Contract list | `/contracts` | With the renewal window showing |
+| 8 | Contract details | `/contracts/:id` | The commercial terms billing reads |
+| 9 | Contract versions | `/contracts/:id` · versions panel | Read-only, changed terms highlighted |
+
+##### Screens 1–2 — Client · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `legalName` | string | Required. The name on the invoice |
+| `tradingName` | string | What the console shows |
+| `gstNumber` | string | Required for invoicing |
+| `billingAddress` | string | Required for invoicing |
+| `careSetting` | enum | `hospital` · `home_healthcare` — **only `hospital` is populated in Part 1** |
+| `serviceLines` | enum, many | `permanent` · `contractual` — **only `permanent` in Part 1** |
+| `status` | enum | `draft` · `active` · `suspended` · `closed` |
+| `ownerUserId` | string | The BD owner |
+
+##### Screen 4 — Client contact · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `fullName` · `roleTitle` | string | |
+| `email` · `whatsapp` | string | At least one required if the contact receives links |
+| `linkTypes` | enum, many | `shortlist_response` · `day_30_check_in` · `day_60_check_in` · `day_90_retention` · `timesheet_approval` — **only `shortlist_response` and `day_90_retention` are issuable in Part 1** |
+| `isActive` | boolean | |
+
+**A placement approaching day 90 with no `day_90_retention` recipient is flagged**, because the invoice
+cannot be triggered without one.
+
+##### Screen 5 — Rate card line · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `roleCode` | string | Required |
+| `skillCode` | string, optional | |
+| `locationId` | string, optional | Empty means every location |
+| `category` | enum | `nurse` · `doctor` · `allied_health` |
+| `agreedRate` | number | What the client pays |
+| `baselineRate` | number | The standard, so variance is measurable later |
+| `rateUnit` | enum | `per_shift` · `per_hour` · `per_placement_pct` — **`per_placement_pct` is the Part 1 path** |
+| `effectiveFrom` | date | Versioned by effective date |
+
+##### Screens 8–9 — Contract and contract version · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `reference` | string | |
+| `status` | enum | `draft` · `active` · `renewed` · `expired` · `terminated` |
+| `currentVersion` | integer | The version billing snapshots |
+| `startsOn` · `endsOn` | date | Renewal alert fires against `endsOn` |
+| `permanentFeePct` | number | **The number the permanent invoice is priced on** |
+| `guaranteePeriodDays` | integer | Open — see `OI-A-13` |
+| `paymentTermsDays` | integer | Drives ageing in a later part |
+| `signedDocument` | file | Attached, not drafted here |
+| `changedTerms` | string, many | On each version — what actually moved |
+
+##### Screen 6 — Waiting periods · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `retentionConfirmationDays` | integer, nullable | Null means use the platform default. **Drives deemed retention** |
+| `timesheetApprovalDays` | integer, nullable | Part 2 |
+| `requisitionFollowupDays` | integer, nullable | Part 2 |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A hospital is created with GST, billing address and one site | Status `draft`; it cannot yet be the subject of a requisition |
+| 2 | It is activated | Status `active`; the change is on the trail |
+| 3 | A rate card line is added for a staff-nurse role at 8.33% | Rate lookup returns it for that role and location |
+| 4 | A second line is added with a later `effectiveFrom` | Lookup by date returns the correct one; the earlier line is not edited |
+| 5 | A contract is activated with a fee percentage and a guarantee period | Terms lookup returns them, versioned |
+| 6 | A term is changed on an active contract | A **new version** is written; the previous version is unchanged and readable, changed terms highlighted |
+| 7 | A contact is designated the day-90 recipient | Their name is what the retention record will carry |
+| 8 | A client leaves the retention window empty | The platform default applies, and the screen shows the default beside the empty field |
+| 9 | A client overrides the retention window to 7 days | The override is used; **deadlines already running are not altered**, and the screen says so |
+| 10 | A contract passes into its renewal window | The renewal alert fires and the contract list shows it without drilling in |
+| 11 | A finance user opens the client | Reads everything, edits only what their permission allows |
+| 12 | Billing asks for terms for a client with no active contract | The lookup **fails loudly**. There is no fallback, and no invoice is produced |
+
+#### Tested against
+
+- **Happy** — one hospital, one site, one contact designated for day 90, one rate card line, one active
+  contract; rate lookup and terms lookup both answer.
+- **All** — scenarios 1–12, plus: rate lookup with no matching line; overlapping effective dates;
+  contract version history read back after three changes; the renewal alert not firing twice; a
+  deactivated contact excluded from link issue; every write appearing on the activity trail.
+
+---
+
+### F-P1-3 · Vacancy management
+
+*A recruiter enters a vacancy; the record, its states and the board they work from all exist.*
+
+**Specs** [03-03](/docs/03-modules/03-03-requisitions-and-allocation) (permanent only)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D2` | `M3-I9` | Requisition form, including verbal capture | XL |
+| `SOW-D2` | `M3-I10` | Requisition record with source evidence | XL |
+| `SOW-D2` | `M3-I11` | Version history | L |
+| `SOW-D2` | `M3-I12` | Fulfilment board | XL |
+| `SOW-D2` | `M3-I15` | Hold, revise and close | M |
+| `SOW-D2` | `M3-I27` · `M3-I28` | Requisition record and states; append-only status change log | XL, L |
+| `SOW-D14` | `M3-I16` | Owner and allocation | L |
+
+`M3-I13` shift templates and `M3-I14` shift demand lines are **Part 2**. Priority ordering and
+requisition approval (`M14-*`) are **Part 3**.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | New requisition | `/requisitions/new` | The form, showing which required fields are missing |
+| 2 | Requisition list | `/requisitions` | Every vacancy with its state and age |
+| 3 | Requisition record | `/requisitions/:id` · tab **Overview** | Status, age, positions, actions |
+| 4 | Source evidence | `/requisitions/:id` · tab **Source** | Channel and the original message — `verbal` in Part 1 |
+| 5 | Version history | `/requisitions/:id` · tab **Versions** | What changed, when, by whom |
+| 6 | Owner and allocation | `/requisitions/:id` · tab **Allocation** | Owner, allocated recruiters, full history |
+| 7 | Activity trail | `/requisitions/:id` · tab **Activity** | `F-P1-1` screen 8, on this record |
+| 8 | Fulfilment board | `/board` | **The screen a recruiter lives on** |
+| 9 | Hold / revise / close | inline dialogs | Each requiring a reason from the configured list |
+
+##### Screens 1 and 3 — Requisition · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `reference` | string | System-issued, human-quotable |
+| `clientId` · `locationId` · `departmentId` | string | Department optional; **absent for home healthcare**, which is Part 2 |
+| `serviceLine` | enum | `permanent` · `contractual` — **`permanent` only in Part 1** |
+| `category` | enum | `nurse` · `doctor` · `allied_health` — **`nurse` only in Part 1**. Selecting a category **swaps the attribute field set** (`AS-04`) |
+| `careSetting` | enum | `hospital` · `home_healthcare` — `hospital` only |
+| `roleTitle` | string | Required |
+| `positionsRequested` | integer | Required, at least 1 |
+| `positionsFilled` | integer | Derived from placements, never typed |
+| `status` | enum | `incomplete` · `awaiting_client` · `complete` · `open` · `in_fulfilment` · `on_hold` · `partially_filled` · `filled` · `closed` · `awaiting_approval` (Part 3) |
+| `missingFields` | string, many | Shown on the form as it is filled |
+| `completeness` | number | Scored identically however the requisition arrived |
+| `daysAged` · `heldDays` | integer | **Age excludes days on hold** |
+| `ownerId` · `allocatedRecruiterIds` | string / many | Allocation is append-only history, not a mutable field |
+| `sourceChannel` | enum | `email` · `spreadsheet` · `whatsapp_text` · `whatsapp_voice` · `hrms` · `portal` · `verbal` — **`verbal` only in Part 1** |
+| `rateMatched` · `rateReference` | boolean / string | Flags a requisition whose rate does not match the card |
+| `attributes` | map | The category attribute set, from `SOW-A9` |
+| `targetJoinDate` | date | The permanent path's date field |
+| `holdReason` · `closeReason` | string | **From the configured list, required** |
+| `versions` · `transitions` · `allocations` | list | Append-only, all three |
+
+##### Screen 8 — Fulfilment board · elements
+
+Columns: client · site · role · category · positions requested / filled / open · days open · owner ·
+allocated recruiters · rate-mismatch flag.
+Filters: client · category · owner · status · **"no recruiter allocated"**.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A recruiter enters a permanent nurse vacancy with every required field | Status `open`; it appears on the board |
+| 2 | A required field is left out | Status `incomplete`; the form names exactly what is missing |
+| 3 | Category is changed on the form | The attribute field set is **swapped**, not added to |
+| 4 | The requisition is placed on hold with a reason | Status `on_hold`; **`daysAged` stops advancing** and `heldDays` starts |
+| 5 | It is released | Age resumes from where it stopped, not from zero |
+| 6 | It is revised | A new version records the changed fields, the source and who did it |
+| 7 | It is closed with a reason | Status `closed`; the reason comes from the configured list, never free text alone |
+| 8 | A recruiter is allocated, then removed, then a second allocated | All three are on the allocation history with times |
+| 9 | Rate on the requisition does not match the rate card | The rate-mismatch flag shows on the board and on the record |
+| 10 | The board is filtered to "no recruiter allocated" | Only unallocated open requisitions, ordered by age |
+| 11 | A placement is confirmed against the requisition | `positionsFilled` rises; status moves to `partially_filled` or `filled` |
+| 12 | Any status change happens | A `StatusTransition` row is written **and an event is emitted** |
+
+#### Tested against
+
+- **Happy** — one permanent nurse requisition entered, appearing on the board, allocated to a
+  recruiter, filled by a placement and closed.
+- **All** — scenarios 1–12, plus: aging across a hold and a release; a version history of three
+  revisions read back; a close with no reason refused; the board's empty state written for the board
+  rather than generic; every transition and allocation appearing in the event log.
+
+---
+
+### F-P1-4 · Candidate app
+
+*A nurse signs up with her phone, uploads a CV, and confirms whether she is available.*
+
+**Specs** [03-05](/docs/03-modules/03-05-candidate-app) (sign-up, profile, jobs, availability) ·
+[02-01](/docs/02-platform/02-01-identity-and-access) (candidate realm) ·
+[02-12](/docs/02-platform/02-12-data-protection) (consent at capture)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D3` | `M4-I1` | Sign up — phone, OTP, category, consent | L |
+| `SOW-D3` | `M4-I2` | Build profile from CV or by hand | L |
+| `SOW-A9` | `M4-I3` | Specialty details, per category | L |
+| `SOW-D3` | `M4-I4` | Jobs (Base A) | L |
+| `SOW-D3` | `M4-I6` | My applications | L |
+| `SOW-D3` | `M4-I10` | Am I available | L |
+| `SOW-D3` | `M4-I22` | Candidate sign-in — phone and one-time code | L |
+
+`M4-I5` shifts and `M4-I7` check-in are **Part 2** (`F-P2-1`); `M4-I8` my documents and `M4-I9`
+notification settings are **Part 2** (`F-P2-8`). `M4-I20` CV reading is **Part 3** — in Part 1 the CV
+is **stored and read by a recruiter**.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Landing | `/app` | What the app is, before any account exists |
+| 2 | Sign up | `/app/signup` | Phone, one-time code, category, consent |
+| 3 | Sign in | `/app/login` | Phone and one-time code. **No password** |
+| 4 | Home | `/app/home` | What needs her attention |
+| 5 | Profile | `/app/profile` | Identity, experience, specialty details, CV |
+| 6 | Jobs | `/app/jobs`, `/app/jobs/:id` | Permanent roles, filter, detail, apply |
+| 7 | My applications | `/app/applications` | Stage tracking, interview confirmation, offer acceptance, **trial check-in prompts at day 0, 7, 30, 60 and 90** |
+| 8 | Am I available | `/app/availability` | Notice period, and when she last confirmed it |
+
+##### Screen 2 — Sign up · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `phone` | string | Required. **The identifier — there is no password** |
+| `otp` | string | Time-limited, single use, rate-limited |
+| `category` | enum | `nurse` · `doctor` · `allied_health` — `nurse` only in Part 1 |
+| `consent` | versioned consent | **Captured at the moment data is, with the notice version recorded.** Refusing ends sign-up; it does not create a record |
+
+##### Screens 5 and 8 — Candidate profile and availability · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `fullName` · `phone` · `email` · `city` · `state` | string | |
+| `experienceYears` | number | |
+| `bases` | enum, many | `base_a` (permanent) · `base_b` (shift) — **`base_a` only in Part 1** |
+| `profileState` | enum | `registered` · `profile_complete` · `verification_pending` · `verified` · `partly_verified` · `failed` |
+| `attributes` | map | Nurse: specialty, acuity. The set comes from `SOW-A9`, never from code |
+| `cv` | file | Uploaded, virus-scanned, stored. **Read by a recruiter in Part 1** |
+| `availabilityPayload` | string | Base A: notice period |
+| `availabilityLastConfirmedAt` | timestamp | **Shown to her, and it is what ranking trusts** |
+| `availabilityConfidence` | number | Decays with time since last confirmation |
+
+##### Screen 7 — Application · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `stage` | enum | `applied` · `shortlisted` · `interviewing` · `offered` · `joined` · `rejected` |
+| `interview` | object | Proposed slots, and the one she confirmed |
+| `offer` | object | Value, expiry, accepted |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A nurse signs up with her phone and accepts the consent notice | Account created, consent stored **with its notice version** |
+| 2 | She declines consent | **No candidate record is created at all** |
+| 3 | The one-time code is entered wrong three times | Rate-limited; a new code must be requested |
+| 4 | She uploads a CV | Stored, scanned, attached to her record and visible to a recruiter. It is **not** parsed |
+| 5 | She fills specialty and acuity | Written into `attributes` against the nurse field definition |
+| 6 | She opens jobs | Only permanent roles she is eligible for; each with client, location and range |
+| 7 | She applies | An application appears on the console against the requisition |
+| 8 | She confirms she is available with a notice period | `availabilityLastConfirmedAt` is set to now and confidence resets |
+| 9 | She does not confirm for a long period | Confidence decays, and ranking shows the availability as **stale** |
+| 10 | She is shortlisted, then offered | The stage advances on her application screen without her being told twice |
+| 11 | She is prompted at day 7 of her trial | The prompt appears on the app, and her answer reaches the trial record |
+| 12 | She signs in on a second device | Works. Sessions are per device and both are auditable |
+
+#### Tested against
+
+- **Happy** — sign-up with consent, CV uploaded, specialty filled, availability confirmed, one job
+  applied for, and the application visible on the console within the same session.
+- **All** — scenarios 1–12, plus: an expired one-time code; a CV that fails the virus scan; a
+  candidate record created by Ops appearing in the app once she signs up on the same number; the five
+  screen states on every screen; and the app remaining usable on a slow connection.
+
+---
+
+### F-P1-5 · Candidate record and verification
+
+*The nurse is checked against the nursing council, and her registration and expiry are held on her
+record.*
+
+**Specs** [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) (nurse, one registry) ·
+[02-13](/docs/02-platform/02-13-market-adapter-layer) (interfaces plus the nursing council)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-A2` | `M4-I15` · `M4-I16` | Candidate list; candidate record | L, XL |
+| `SOW-D16` | `M4-I11` | Verification queue and pendency view | L |
+| `SOW-D16` | `M4-I13` · `M4-I25` | Credentials; credential expiry | L |
+| `SOW-D4` | `M4-I12` · `M4-I24` | Verification detail; verification checks service | XL |
+| `SOW-A9` | `M4-I18` · `M4-I26` | Category fields, and their definitions as a service | L |
+| `SOW-A12` | `M1-I3` · `M1-I13` · `M1-I14` | Registry settings; the three interfaces and the common response schema; India registry adapters | L–XXL |
+
+`M4-I14` document review against OCR, `M4-I21` duplicate resolution and `M4-I19` certifications and
+learner matching are **Part 3**. `M4-I17` pool assignment and `M1-I15` the verification aggregator are
+**Part 2**.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Candidate list | `/candidates` | Every candidate, filterable |
+| 2 | Candidate record | `/candidates/:id` · tab **Profile** | Profile, category fields, state |
+| 3 | Credentials | `/candidates/:id` · tab **Credentials** | Issuer, number, validity, method |
+| 4 | Verification | `/candidates/:id` · tab **Verification** | Each check green / amber / red, with the registry's answer |
+| 5 | Consent | `/candidates/:id` · tab **Consent** | What she consented to, when, which notice version |
+| 6 | Activity | `/candidates/:id` · tab **Activity** | `F-P1-1` screen 8, on this record |
+| 7 | Verification queue | `/verification` | Outstanding checks, **orderable by live requisition demand** |
+| 8 | Pendency | `/verification/pendency` | Grouped by candidate, registry or reviewer, with age |
+| 9 | Registries | `/admin/registries` | Active registries, endpoint, credentials, manual mode |
+| 10 | Category fields | `/admin/settings` · tab **Reference data** | The nurse attribute set, **as data** |
+
+##### Screen 3 — Credential · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `credentialType` | string | From the configured list |
+| `issuer` | string | The council or authority |
+| `registrationNumber` | string | |
+| `validFrom` · `validTo` | date | **Expiry is flagged before it happens** |
+| `verificationMethod` | enum | `api` · `manual` · `document_only` |
+| `state` | enum | `claimed` · `submitted` · `checking` · `verified` · `flagged` · `rejected` · `expired` |
+| `outcome` | enum | `green` · `amber` · `red` — **one schema, whichever registry answered** |
+
+##### Screens 4 and 7 — Verification case · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `checkType` | string | Named, so "what is outstanding" is answerable |
+| `state` | enum | `queued` · `in_progress` · `awaiting_registry` · `awaiting_candidate` · `manual_review` · `resolved` |
+| `outcome` | enum | `green` · `amber` · `red` |
+| `pendencyCause` | enum | `candidate` · `registry` · `reviewer` — **this is what the pendency view groups by** |
+| `pendencySince` | timestamp | Drives age |
+| `registryAnswer` | string | The registry's own words, and when it said them |
+| `overridden` · `overrideReason` | boolean / string | **An override always carries a reason** |
+
+##### Screen 9 — Registry · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `code` · `name` · `market` | string | Market is what makes a second country configuration, not code |
+| `interfaceType` | enum | `identity` · `certification` · `qualification` — **the three interfaces** |
+| `mode` | enum | `api` · `manual` · `disabled` — **manual mode is the fallback that makes Part 1 possible before the aggregator contract lands** |
+| `categories` | enum, many | Which candidate categories it answers for |
+| `costPerCheck` · `slaHours` | number | |
+
+Credentials are shown as a secrets reference, **never as a value**.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A nurse completes her profile | A verification case is opened per required check |
+| 2 | Consent has not been captured | **No adapter is dispatched at all.** The case waits on consent |
+| 3 | The nursing council answers positively | Credential `verified`, outcome `green`, the answer and its timestamp stored |
+| 4 | The council answers with a mismatch | Outcome `red`, case moves to `manual_review`, nothing is auto-rejected |
+| 5 | The council is unreachable | Case `awaiting_registry` with `pendencyCause` = `registry`; retried on the job runtime, never silently dropped |
+| 6 | The registry is set to `manual` mode | The check is queued for a human with the same states and the same green/amber/red result |
+| 7 | A reviewer overrides an outcome | Reason required; the original registry answer is retained beside the override |
+| 8 | The queue is ordered by live requisition demand | Candidates against open requisitions rise to the top |
+| 9 | A registration expires in 30 days | Flagged on the record and in the queue before it lapses |
+| 10 | An administrator adds a value to the nurse attribute set | It appears on the app and on the requisition form **without a deployment** |
+| 11 | A second registry is configured | It answers on the same schema; no consumer changes |
+| 12 | A candidate asks what is outstanding | Every open check is named, not counted |
+
+#### Tested against
+
+- **Happy** — a nurse verified end to end through the nursing council, with a green credential, an
+  expiry date on her record and every step on her activity trail.
+- **All** — scenarios 1–12, plus: verification through the **manual fallback** with an identical
+  result shape; the pendency view grouping correctly for all three causes; an override reason appearing
+  on the trail; a check dispatched without consent failing the test suite; category fields added as data
+  reaching three surfaces.
+
+---
+
+### F-P1-6 · Ranking and shortlisting
+
+*Candidates are put in order for a vacancy with a plain explanation of why each one ranked where it did.*
+
+**Specs** [03-07](/docs/03-modules/03-07-matching-and-ranking) (one weight set: nurse × Base A)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D18` | `M6-I3` | Ranked candidates, "why this rank", override | XL |
+| `SOW-D18` | `M6-I5` · `M6-I6` · `M6-I7` · `M6-I8` | Ranking weights; ranking engine; ranking inputs; weight set selection | XL–XXL |
+| `SOW-D5` | `M6-I1` | Candidate search | L |
+| `SOW-D5` | `M6-I4` | Build shortlist and submit | L |
+
+`M6-I2` talent segments and `M6-I10` shift ranking are **Part 2**. `M6-I9` outcome write-back and
+saved searches are **Part 3**.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Ranked candidates | `/requisitions/:id` · tab **Ranking** | Best first, with score and a **stale badge** when the requisition changed |
+| 2 | Why this rank | ranking tab · drawer | Met / partly met / unmet, **and how fresh the availability behind it is** |
+| 3 | Override rank | ranking tab · dialog | Move up or down, **reason required** |
+| 4 | Build shortlist | `/requisitions/:id` · tab **Shortlist** | Tick from the ranked list, add from search, submit |
+| 5 | Candidate search | `/search` | Skill, location, experience, status, category, credential state, availability |
+| 6 | Ranking weights | `/admin/ranking-weights` | Per category × base, effective-dated |
+
+##### Screens 1–3 — Ranked set and entry · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `state` | enum | `generating` · `current` · `stale` · `failed` |
+| `staleReason` | string | Why it no longer matches the requisition |
+| `failureReason` | string | **Ranking fails visibly on a partial input set. It never guesses** |
+| `weightSetId` | string | Which weight set produced this order |
+| `rank` · `score` | integer / number | |
+| `met` · `partiallyMet` · `unmet` | string, many | **The rationale is produced while scoring, not reconstructed after** |
+| `availabilityStale` | boolean | Shown on the row, not only in the drawer |
+| `overridden` | object | `fromRank`, `toRank`, `reason`, `by` — all four required |
+
+##### Screen 6 — Weight set · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `category` | enum | `nurse` · `doctor` · `allied_health` — **`nurse` only in Part 1** |
+| `base` | enum | `base_a` · `base_b` — **`base_a` only in Part 1** |
+| `version` · `effectiveFrom` | integer / date | Versioned; a past ranking stays explicable |
+| `weights` | map | **Only inputs valid for that category are shown** |
+| `eligibility` | map | Per input: `exclude` or `reduce` |
+
+##### Screen 4 — Shortlist · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `state` | enum | `draft` · `submitted` · `awaiting_client` · `responded` · `superseded` |
+| `entries[].position` | integer | The order the client sees |
+| `entries[].addedFrom` | enum | `ranked_set` · `search` |
+| `entries[].clientResponse` | enum | `accepted` · `rejected` · `interview_requested` |
+| `entries[].clientReason` | string | **From the same taxonomy used internally** |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A recruiter opens ranking on an open requisition | A ranked set, best first, each row with a score |
+| 2 | She opens "why this rank" | Met, partly met and unmet named in plain words, plus availability freshness |
+| 3 | An input the weight set needs is missing | The set is `failed` with a named reason. **No silent partial ranking** |
+| 4 | The requisition is revised after ranking | The set becomes `stale` with the reason, and the badge shows on every row |
+| 5 | She moves a candidate up two places | Reason required; the override is stored with from, to, who and why |
+| 6 | She builds a shortlist of four and submits it | State `submitted`; a shortlist link is issued to the designated contact |
+| 7 | She adds a fifth candidate from search | `addedFrom` = `search`, and it ranks alongside the others on the client page |
+| 8 | The client rejects one with a reason | The reason comes from the shared taxonomy, and lands against the entry |
+| 9 | A second shortlist is submitted for the same requisition | The first is `superseded`, not deleted |
+| 10 | An administrator changes a weight | A **new version** with an effective date; existing ranked sets keep their explanation |
+| 11 | A candidate's availability is months old | The row shows stale, and the drawer says how old |
+| 12 | Ranking is asked for on a category with no weight set | Fails visibly with a named reason |
+
+#### Tested against
+
+- **Happy** — a ranked list produced against a live requisition, one override with a reason, a
+  shortlist of four submitted, and the client's response landing against the right entry.
+- **All** — scenarios 1–12, plus: a crude ranked list on three fields in front of recruiters, with
+  **their overrides captured as the weighting specification** (`OI-A-11`); the same requisition ranked
+  before and after a weight change producing two explicable orders; ranking failing rather than
+  degrading on incomplete inputs.
+
+---
+
+### F-P1-7 · Interview, offer and client links
+
+*The hospital opens a link with no password to accept or reject, and the offer goes out over WhatsApp.*
+
+**Specs** [03-08](/docs/03-modules/03-08-selection-and-offers) (all but templates by state, role and
+skill) · [02-14](/docs/02-platform/02-14-client-link-surfaces) (mechanism plus two link types) ·
+[02-09](/docs/02-platform/02-09-outbound-messaging) (transactional sends)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D6` | `M7-I1` · `M7-I2` · `M7-I3` · `M7-I4` | Propose interview; interview list, reschedule and cancel; interview feedback; selection decision and history | L |
+| `SOW-D20` | `M7-I6` · `M7-I7` · `M7-I16` | Create offer; offer tracking; offer to contract link | L–XL |
+| `SOW-A13` | `M7-I17` · `M7-I8` · `M7-I9` · `M7-I10` · `M7-I18` · `M7-I13` | Client link mechanism; link types; link recipients; the shortlist page; answer routing; link log | L–XL |
+
+`M7-I5` offer templates by state, role and skill is **Part 2**. `M7-I11` day 30 / 60 pages and
+`M7-I12` timesheet approval are **Part 2** — the day-90 page is in `F-P1-8`. Electronic signature is
+**Part 3**; in Part 1 an accepted offer is signed outside the platform and attached.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Shortlists | `/shortlists` | What has gone to clients, and what came back |
+| 2 | Interviews | `/interviews` | By date, with **awaiting-feedback marked** |
+| 3 | Offers | `/offers` | Sent, opened, signed, expiring |
+| 4 | Client link log | `/links` | Every link, its state, and whether it was answered. **Finance can read it without recruiter permissions** |
+| 5 | Link types | `/admin/link-types` | The four types as configuration on one mechanism |
+| 6 | Client shortlist page | `/l/:token` | **Public, no account.** Accept, reject with a reason, or request an interview |
+| 7 | Link index | `/l` | POC only — lists the issuable tokens so the pages can be opened |
+
+##### Screens 2 — Interview · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `state` | enum | `proposed` · `confirmed` · `held` · `feedback_recorded` · `rescheduled` · `cancelled` · `expired` |
+| `format` | enum | `in_person` · `video` · `phone` |
+| `scheduledStart` | timestamp | |
+| `candidateConfirmedAt` · `clientConfirmedAt` | timestamp | **Both are recorded; one is not assumed from the other** |
+| `rescheduleCount` | integer | A reschedule keeps the original, it does not overwrite it |
+| `cancellationReason` | string | Required on cancel |
+| `feedback.ratings` | map | Structured, by category |
+| `feedback.source` | enum | `apollo` · `client_link` |
+
+##### Selection decision · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `decision` | enum | `accepted` · `held` · `rejected` |
+| `reasonCode` | string | **From the configured rejection taxonomy — the same one the client link uses** |
+| `reasonText` | string | In addition to the code, never instead of it |
+| `decidedBy` · `decidedAt` | string / timestamp | |
+
+##### Screen 3 — Offer · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `reference` | string | |
+| `state` | enum | `draft` · `generated` · `sent` · `opened` · `signed` · `expired` · `declined` · `withdrawn` |
+| `ctc` | number | |
+| `placementFeePct` | number | **Taken from the contract version in force, not typed** |
+| `contractVersion` | integer | Snapshotted onto the offer |
+| `expiresAt` | timestamp | Unanswered offers expire; reminders fire before |
+| `sentAt` · `openedAt` · `signedAt` | timestamp | |
+| `declinedReason` | string | Required on decline |
+
+##### Screens 4–6 — Client link · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `token` | string | **Single-purpose, expiring, unguessable.** Never reused |
+| `linkTypeCode` | enum | `shortlist_response` · `day_90_retention` in Part 1; the other three are Part 2 |
+| `recipientId` | string | A designated client contact from `F-P1-2` screen 4 |
+| `subjectType` | enum | `shortlist` · `placement` · `timesheet` |
+| `state` | enum | `issued` · `sent` · `opened` · `answered` · `expired` · `deemed` · `revoked` |
+| `issuedAt` · `sentAt` · `firstOpenedAt` · `answeredAt` · `expiresAt` | timestamp | Every one recorded — this is how link adoption is measured |
+| `deemedWindowDays` · `deemedWindowSource` | integer / enum | `client` · `platform_default` |
+
+The public page is **mobile-first, single column, no navigation, no third-party script.** Expired,
+already-answered and revoked are each **a clear state, never an error page**, and every page ends with
+an explicit confirmation that the response was received.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A shortlist is submitted | A `shortlist_response` link is issued to the designated contact and sent over WhatsApp and email |
+| 2 | The contact opens it on a phone with no account | The shortlist renders; `firstOpenedAt` is stamped |
+| 3 | They accept one candidate and reject another with a reason | Both land against the right entries; the reason is from the shared taxonomy |
+| 4 | They request an interview | An interview is proposed and appears on the console |
+| 5 | The link is opened a second time after answering | The already-answered state, **not an error** |
+| 6 | The link expires unanswered | State `expired`, visible on the link log, and reissuable |
+| 7 | An interview is proposed and both sides confirm | Two separate confirmation timestamps |
+| 8 | An interview is rescheduled | The original is kept, `rescheduleCount` rises |
+| 9 | Feedback is recorded | The interview shows `feedback_recorded` and drops off the awaiting-feedback list |
+| 10 | A candidate is rejected at decision | Reason code required; the decision history links to the feedback that informed it and to any ranking override |
+| 11 | An offer is created | The fee percentage and contract version come from the contract in force; a preview is shown before sending |
+| 12 | An offer is not answered by its expiry | State `expired`; reminders fired beforehand; the position returns to the requisition |
+| 13 | Finance opens the link log | Readable **without recruiter permissions** |
+
+#### Tested against
+
+- **Happy** — a shortlist of four sent as a link, opened on a phone, one candidate accepted, an
+  interview held, feedback recorded, an offer generated at the contract's fee percentage, sent and
+  signed.
+- **All** — scenarios 1–13, plus: a revoked token; a token guessed or tampered with; the page under
+  120KB gzipped; the reject reason taxonomy identical on the link page and in the console; the offer
+  refusing to generate when no contract version is in force.
+
+---
+
+### F-P1-8 · Placement and the ninety-day trial
+
+*The nurse joins and is checked in on at day 0, 7, 30, 60 and 90.*
+
+**Specs** [03-09](/docs/03-modules/03-09-placement-and-trial) (all but privileging and the dashboard at
+width) · [02-14](/docs/02-platform/02-14-client-link-surfaces) (the day-90 page)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D7` | `M8-I1` · `M8-I2` | Confirm joining; placements list and drop-out | L |
+| `SOW-A6` | `M8-I4` · `M8-I11` · `M8-I12` | Check-in settings; check-in scheduling; check-in questions | L |
+| `SOW-A6` | `M8-I5` · `M8-I6` · `M8-I13` | Candidate answers; trial outcome; **the day-90 record** | L–XL |
+| `SOW-A13` | `M7-I11` (day 90 only) | Client page: check-in | XL |
+
+`M8-I3` the trial dashboard at width is **Part 3**. `M8-I10` privileging is **Part 2** — it arrives
+with doctors. The day 30 and day 60 **client** pages are **Part 2**; the day 30 and 60 **candidate**
+check-ins are here.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Placements | `/placements` | Candidate, client, joining date, trial day, next check-in, **billing-trigger state** |
+| 2 | Placement record | `/placements/:id` · tab **Trial check-ins** | Every trial event, done / due / missed |
+| 3 | Retention record | `/placements/:id` · tab **Retention record** | The immutable day-90 answer, and what it was snapshotted against |
+| 4 | Activity | `/placements/:id` · tab **Activity** | `F-P1-1` screen 8, on this record |
+| 5 | Trial dashboard | `/trial` | Day-90 answers coming up. **Thin in Part 1** |
+| 6 | Check-in settings | `/admin/settings` · configurable lists — **question sets not in POC** | Events and questions per category |
+| 7 | Confirm joining | `/placements` · dialog | Date, site, department. **Starts the 90-day clock** |
+| 8 | Record drop-out | `/placements` · dialog | Reason; **returns the position to the requisition** |
+| 9 | Client day-90 page | `/l/:token` | **One question, one action**: is the person still there |
+
+##### Screens 1–2 — Placement · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `reference` | string | |
+| `candidateId` · `requisitionId` · `offerId` · `clientId` · `locationId` | string | |
+| `serviceLine` | enum | `permanent` · `contractual` — `permanent` only in Part 1 |
+| `joiningDate` | date | **Day 0. Everything else is computed from it** |
+| `state` | enum | `offered` · `joined` · `in_trial` · `trial_survived` · `trial_ended` · `dropped_out` |
+| `trialDay` | integer | Derived, never typed |
+| `contractVersion` | integer | Snapshotted at joining |
+| `ctc` | number | |
+| `hasLinkRecipient` | boolean | **False flags a placement that cannot be billed**, before day 90 arrives |
+| `dropOut` | object | `kind` = `did_not_join` · `left_early`; reason; date |
+
+##### Screen 2 — Trial event · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `dayOffset` | integer | `0` · `7` · `30` · `60` · `90` |
+| `audience` | enum | `candidate` · `client` — **only day 90 has a client audience in Part 1** |
+| `dueOn` | date | Scheduled from `joiningDate` at joining, not swept for later |
+| `state` | enum | `scheduled` · `due` · `answered` · `escalated` · `missed` |
+| `answers` | map | Attendance, salary timeliness, preceptor, accommodation |
+| `flagged` | boolean | **A negative answer is flagged for action, not just stored** |
+
+##### Screen 3 — Retention record · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `outcome` | enum | `retained` · `not_retained` |
+| `basis` | enum | `acknowledged` · `deemed` — **the two are visibly distinguished everywhere** |
+| `recipientName` | string | Who at the hospital confirmed |
+| `acknowledgedAt` · `deemedAt` | timestamp | |
+| `deemedWindowDays` · `deemedWindowSource` | integer / enum | `client` · `platform_default` |
+| `contractVersion` | integer | **Snapshotted. The invoice is priced on this, not on today's contract** |
+
+**The retention record is immutable once written.** It is the only thing a permanent invoice may be
+raised against.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | An offer is signed and joining is confirmed | Placement `joined`; the 90-day clock starts; five trial events are scheduled immediately |
+| 2 | Day 7 arrives | The candidate is prompted in the app; the event becomes `due` |
+| 3 | She answers that salary was late | Answer stored and **flagged for action** |
+| 4 | She does not answer by the escalation point | The event escalates, then is marked `missed`. It is never silently dropped |
+| 5 | Day 90 arrives | A `day_90_retention` link is issued to the designated contact |
+| 6 | The contact answers "yes, still here" | An immutable retention record with `basis` = `acknowledged`, their name, the time and the contract version |
+| 7 | The contact does not answer within the window | `basis` = `deemed`, with the window and **whether it came from the client or the platform default** |
+| 8 | The placement had no designated recipient | Flagged on the placements list **before** day 90, so it can be fixed |
+| 9 | The nurse leaves at day 45 | Drop-out `left_early` with a reason; state `trial_ended`; **no billing trigger is created** |
+| 10 | She never joins | `did_not_join`; the position returns to the requisition |
+| 11 | Someone tries to answer day 30 or day 60 to trigger billing | **Refused.** Only the day-90 record can |
+| 12 | The contract changes between joining and day 90 | The record carries the version **in force at the trigger**, and the invoice is priced on that |
+| 13 | Someone edits an existing retention record | Refused. It is immutable |
+
+#### Tested against
+
+- **Happy** — a nurse joins, is checked in on at 0, 7, 30 and 60, the hospital confirms at day 90 on a
+  phone, and an immutable retention record exists with their name against it.
+- **All** — scenarios 1–13, plus: **day 30 and day 60 proven unable to reach the billing path**;
+  deemed retention producing a valid invoice input; a drop-out at each of the five points; the trial
+  events surviving a change to the check-in question set after scheduling.
+
+---
+
+### F-P1-9 · Invoicing
+
+*The permanent invoice is raised once the hospital confirms at day 90 that she is still there.*
+
+**Specs** [03-11](/docs/03-modules/03-11-billing-and-receivables) (permanent invoice and its evidence)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-D8` | `M9-I12` | Permanent invoice (service) | XL |
+| `SOW-D8` | `M9-I1` | Invoices list | L |
+| `SOW-D8` | `M9-I14` | Contract terms at trigger | M |
+| `SOW-A7` | `M9-I13` | Day 90 record store | L |
+| `SOW-A7` | `M9-I3` | Billing evidence | L |
+
+`M9-I2` money owed and `M9-I4` / `M9-I15` shift invoices are **Part 2**. Everything in `SOW-D25`
+(collections) is **Part 3**.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Invoices | `/invoices` | Client, type, value, state |
+| 2 | Invoice detail | `/invoices/:id` | Lines, and **the record that allowed it to be raised** |
+| 3 | Billing evidence | `/billing/evidence` | Day-90 records invoices were raised against — **who confirmed, when, which terms** |
+
+##### Screens 1–2 — Invoice · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `reference` | string | |
+| `invoiceType` | enum | `permanent_placement` · `shift` — **`permanent_placement` only in Part 1** |
+| `billingTriggerId` | string | **Required. There is no invoice without a trigger** |
+| `clientId` · `contractVersion` | string / integer | The version snapshotted at the trigger |
+| `subtotal` · `tax` · `total` | number | Priced from `permanentFeePct` × `ctc` at the snapshotted version |
+| `state` | enum | `draft` · `raised` · `exported` · `cancelled` |
+| `raisedAt` | timestamp | |
+| `lines[]` | object | `description`, `candidateId`, `quantity`, `unitRate`, `amount`, `basis` |
+
+##### Screen 3 — Billing trigger · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `triggerType` | enum | `retention_day_90` · `approved_timesheet` — **`retention_day_90` only in Part 1** |
+| `placementId` | string | |
+| `basis` | enum | `acknowledged` · `deemed` — **shown distinctly, never merged** |
+| `recipientName` | string | Who confirmed |
+| `state` | enum | `pending` · `confirmed` · `consumed` · `void` |
+| `termsSnapshot` | map | The commercial terms as they stood at the trigger |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A retention record is written with `outcome` = `retained` | A billing trigger is created, `state` = `confirmed` |
+| 2 | The invoice runs | One invoice, priced at the **snapshotted** fee percentage, referencing the trigger |
+| 3 | Finance opens the invoice | The day-90 record is reachable **in two clicks**, showing who confirmed, when and on which terms |
+| 4 | The retention was deemed rather than acknowledged | The invoice still raises, and the evidence screen shows `deemed` distinctly, with the window and its source |
+| 5 | `outcome` = `not_retained` | **No trigger, no invoice** |
+| 6 | The client has no active contract at the trigger | The run **fails loudly and raises nothing**. There is no fallback |
+| 7 | The contract changed after joining but before day 90 | The invoice uses the version at the trigger, not at joining and not today |
+| 8 | The invoice run is executed twice | Idempotent. The trigger is `consumed` and cannot produce a second invoice |
+| 9 | An invoice is cancelled | State `cancelled`; the trigger is **not** silently freed for reuse |
+| 10 | An invoice is exported to the finance system | State `exported`; the export is recorded on the trail |
+| 11 | A recruiter opens the invoices screen | Permission-gated; recruiters do not see money |
+
+#### Tested against
+
+- **Happy** — one permanent invoice raised from one acknowledged day-90 record, traceable back to the
+  hospital contact who confirmed it, in two clicks.
+- **All** — scenarios 1–11, plus: a deemed trigger and an acknowledged trigger producing invoices that
+  differ only in evidence; the run repeated with no duplicate; a missing contract failing rather than
+  guessing; the invoice total recomputed by hand and matching.
+
+---
+
+### F-P1-10 · Platform foundations and the record of what happened
+
+*Listed last, built first. The event spine, reference data, files, jobs, environments and the design
+system that the other nine functionalities stand on.*
+
+**Specs** [02-11](/docs/02-platform/02-11-event-spine) ·
+[02-03](/docs/02-platform/02-03-settings-and-reference-data) ·
+[02-04](/docs/02-platform/02-04-file-storage) ·
+[02-05](/docs/02-platform/02-05-design-system) ·
+[02-07](/docs/02-platform/02-07-list-engine) ·
+[02-09](/docs/02-platform/02-09-outbound-messaging) (transactional only) ·
+[02-10](/docs/02-platform/02-10-job-runtime) ·
+[02-12](/docs/02-platform/02-12-data-protection) (consent and residency) ·
+[02-15](/docs/02-platform/02-15-environments-and-observability)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description | Band |
+|---|---|---|---|
+| `SOW-F14` | `M3-I31` | Event recording — every module writes events as work happens | XL |
+| `SOW-F05` | `M0-I5` | Settings list, reference data, edit list, edit waiting period | XL |
+| `SOW-F06` | `M0-I6` | File storage — store, scan, serve, version, retain | XL |
+| `SOW-F12` | `M1-I4` | Component library, tokens, standard states | XL |
+| `SOW-F08` | `M2-I14` | Shared list component | XL |
+| `SOW-F07` | `M3-I30` | Message sending — queue, retry, delivery receipts | XL |
+| `SOW-F13` | `M4-I27` | Consent, residency, retention | XL |
+| `SOW-F10` | `M1-I16` | Four environments, pipeline, monitoring, backup and restore | XXL |
+| `SOW-D11` | `M1-I5` | Deploy to Apollo's AWS account, approved pipeline, rollback | XXL |
+| — | — | Job runtime — queues, retries, dead letters, schedules **[engineering addition]** | — |
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Settings and lists | `/admin/settings` · tab **Configurable lists** | The nine lists the plan names |
+| 2 | Reference data | `/admin/settings` · tab **Reference data** | **Categories, care settings and service lines as data** |
+| 3 | Waiting periods | `/admin/settings` · tab **Waiting periods** | Platform default beside every client override |
+| 4 | Jobs and schedules | `/admin/jobs` | Runs, dead letters, schedules |
+| 5 | System health | `/admin/system` | Version per environment, migration state, queue depths, last backup |
+| 6 | Delivery log | `/messaging/delivery-log` | Every send, its status and its cost |
+| 7 | Event log inspector | `/admin/events` — **not in POC** | Diagnostic. **Not a report** |
+| 8 | Component showcase | `/showcase` | POC only — every design-system component and the five states |
+| 9 | Open decisions | `/admin/open-decisions` | POC only — the register from [05-03](/docs/05-delivery/05-03-open-decisions), on screen |
+
+##### Screen 2 — Reference data · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `code` · `label` · `order` · `isActive` | string / integer / boolean | Add, rename, reorder, deactivate |
+| The nine lists | — | close reason · hold reason · rejection reason · required fields per category · contact schedule · retention confirmation window · timesheet approval window · follow-up window · market configuration |
+
+**Deactivating an entry warns how many existing records use it.** Changing a platform default warns
+that deadlines already running are unaffected.
+
+##### Job run · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `queue` | string | |
+| `jobClass` | enum | `interactive` · `provider` · `batch` · `schedule` |
+| `status` | enum | `enqueued` · `running` · `completed` · `failed` · `dead_letter` · `cancelled` |
+| `attempt` · `maxAttempts` | integer | |
+| `error` | string | On the run, readable without a database session |
+
+##### Message · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `templateCode` · `channel` | string / enum | `whatsapp` · `sms` · `email` · `push` |
+| `cause` | string | **Why it was sent. This is what makes cost attributable later** |
+| `status` | enum | `queued` · `sent` · `delivered` · `read` · `failed` · `given_up` · `suppressed` |
+| `costUnits` | number | Recorded per send from the first message onward |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | Any module writes a record | An event is written **in the same transaction**, through the outbox |
+| 2 | The event publisher is down | Work still commits; events publish on recovery. Nothing is lost |
+| 3 | Someone tries to update or delete an event | Refused at the grant |
+| 4 | An administrator adds a candidate category | It appears on the requisition form, the app and the ranking weights screen **without a deployment** |
+| 5 | An administrator deactivates a list entry in use | Warned, with the count of records affected |
+| 6 | A file is uploaded | Virus-scanned before it is servable; a poor-quality image prompts re-capture |
+| 7 | A file is requested | Served by an expiring link. **It never leaves `ap-south-1`** |
+| 8 | A file is replaced | The previous version is retained with who replaced it and when |
+| 9 | A candidate's data is captured without consent | The capture is refused; consent is versioned and stored with its notice version |
+| 10 | A job fails its last attempt | It lands in dead letters, visible and re-queueable, and it alerts |
+| 11 | An offer message fails at the provider | Retried, then given up with the failure readable on the delivery log |
+| 12 | A release is promoted dev → prod | One artefact through the pipeline, **no hand-edited config**, with a rollback proven |
+| 13 | A restore is rehearsed | The rehearsal date is on the system health screen |
+| 14 | A list screen is opened with no matching rows | The **purposeful empty state written for that list**, not a generic one |
+
+#### Tested against
+
+- **Happy** — four environments provisioned from one pipeline; a category added as data reaching three
+  surfaces; an event written for every status change in `F-P1-3`.
+- **All** — scenarios 1–14, plus: the event log replayed to rebuild a projection; the five standard
+  states rendered on every list; append-only grants proven by test on both the event log and the
+  activity trail; a restore rehearsed end to end; residency asserted for every stored object.
+
+## 4. Part 1 exit conditions
+
+Part 1 is complete when all of the following are demonstrated on real data, not on fixtures.
+
+| # | Condition | Proves |
+|---|---|---|
+| 1 | A named recruiter signs in, sees only their permitted navigation, and every action appears on the activity trail | `F-P1-1` |
+| 2 | An administrator adds a candidate category **as data**, and it reaches three surfaces without a deployment | `F-P1-10`, and the whole Part 2 category argument |
+| 3 | A contract is activated with its three windows and read back through the terms lookup | `F-P1-2` |
+| 4 | A nurse is verified end to end through a real registry **or its manual fallback** | `F-P1-5` |
+| 5 | A crude ranked list on three fields is put in front of recruiters, and **their overrides are captured as the weighting specification** | `F-P1-6`, and `OI-A-11` |
+| 6 | **One client, one nurse, one link**: a tokenised day-90 link reaches a real hospital contact, is opened on a phone, answered, and produces an immutable retention record | `F-P1-7`, `F-P1-8` — **and the riskiest assumption in the engagement** |
+| 7 | A permanent invoice fires from that record and is traceable to the confirmation in two clicks | `F-P1-9` |
+| 8 | A release is promoted dev → prod without hand-edited config, and a restore is rehearsed | `F-P1-10` |
+
+**Condition 6 is the one that matters most.** If a hospital contact will not click the link, the entire
+permanent billing chain needs another trigger — and Part 1 is where that is found out, not Part 3.
+
+## 5. Open questions
+
+| Ref | Question | Working assumption |
+|---|---|---|
+| `OI-A-11` | What are the ranking weights? | Recruiter overrides on the Part 1 crude ranked list **are** the specification |
+| `OI-A-13` | Does the guarantee period change the billing trigger or only the refund? | Only the refund. The day-90 record stays the trigger. **This one changes scope, not a number** |
+| `OI-HS-29` | Will a hospital contact actually click a link and answer? | Yes. Tested in Part 1 exit condition 6, and there is no fallback trigger if the answer is no |
+| `OI-HS-66` | Is one line of business an acceptable Part 1 boundary? | Yes — see [07-00 §11](/docs/07-phases/07-00-release-model#11-open-questions) |
+
+All are registered in [05-03](/docs/05-delivery/05-03-open-decisions).

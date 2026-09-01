@@ -3,7 +3,7 @@ title: "00-05 Delivery roadmap"
 description: "Seven build phases across six months (126 working days at 21/month). The phases are the engineering sequence; the plan's milestones are the commercial one."
 ---
 
-**Package** `n/a` · **Schema** `n/a` · **Plan** all 16 milestones · **Effort** 1362.5pd · **Risk** — · **Build in** Phase 0
+**Package** `n/a` · **Schema** `n/a` · **Plan** all 16 milestones · **Effort** 1362.5pd · **Risk** — · **Build in** Phase 0 · **Release** Parts 1–3
 
 Seven build phases across six months (126 working days at 21/month). The phases are the engineering
 sequence; the plan's milestones are the commercial one. The mapping is exact — no milestone is split
@@ -11,6 +11,10 @@ across a phase boundary except where the plan itself splits it (D14, D22, D25).
 
 Effort as planned: **design 224.0 · build 780.5 · QA 358.0 = 1362.5 person-days**, average team 10.8.
 Design front-loads into months 1–3; QA back-loads into months 4–6.
+
+**The seven phases are not the same thing as the three release parts.** A phase completes a component;
+a part releases a capability. The mapping between them is in [§8](#8-the-three-release-parts), and the
+parts themselves are specified in [07-00](/docs/07-phases/07-00-release-model).
 
 ## 1. Phases
 
@@ -122,3 +126,50 @@ Get a placeholder build through app store review early. It removes `X12`/`X13` r
 | `03-05` app | `03-10` attendance | No attendance, no timesheet, no shift invoice |
 | `03-01` `ContractVersion` + windows | `03-11` billing | Permanent billing does not run — there is **no fallback** |
 | `02-03` category as reference data | everything | A core built to one category makes doctors a migration |
+
+---
+
+## 8. The three release parts
+
+The phases above answer *what order the components are built in*. The three release parts answer *what
+ships together and what it proves*. Both are kept, because they are different questions, and the parts
+**carry no calendar of their own** — the months in [§1](#1-phases) are the only calendar in these docs.
+
+| Part | Name | What it carries | Specified in |
+|---|---|---|---|
+| **1** | Straight Through | One client, one category, one line of business, sign-in to permanent invoice | [07-01](/docs/07-phases/07-01-part-1-straight-through) |
+| **2** | All Threads Open | Shift staffing, multi-channel intake, engagement, doctors and allied health, home healthcare, the portal, associate onboarding | [07-02](/docs/07-phases/07-02-part-2-all-threads-open) |
+| **3** | Full Depth | Intake at width, legacy migration, reporting, the portal at width, workforce and collections, platform depth, go-live | [07-03](/docs/07-phases/07-03-part-3-full-depth) |
+
+### Phase → part
+
+Many-to-many by design: a phase completes a component, a part releases a capability, and **27 of the 35
+specs are sliced across two or three parts**.
+
+| Build phase | Feeds |
+|---|---|
+| 1 Foundations | Part 1 |
+| 2 Client and candidate spine | Part 1, thickened in Part 2 |
+| 3 Demand | Part 1 (event spine, requisitions) · Part 2 (inbound, intake) |
+| 4 Engagement and matching | Part 1 (links, ranking) · Part 2 (engagement) |
+| 5 Selection, placement and attendance | Part 1 (selection, placement) · Part 2 (attendance) |
+| 6 Money and the rest of Release 1 | Part 1 (permanent invoice) · Part 2 (shift invoice, portal, onboarding) · Part 3 (reporting, prioritisation) |
+| 7 R2 remainders | Part 3 |
+
+### Gate → part
+
+The eight gates in [§2](#2-phase-gates) are the demonstrations. Each belongs to one part's claim.
+
+| Gate | Part | The claim it contributes to |
+|---|---|---|
+| G1 | 1 | Staff sign in, roles hold, actions are recorded |
+| G2 | 1 | **One client, one nurse, one link** — the day-90 confirmation, and the whole permanent billing chain |
+| G2b | 1 | Recruiters accept a ranked shortlist, and their overrides are the weighting specification |
+| G3 | 2 | Intake is one path however a requirement arrives |
+| G4 | 2 | Cadence changes a ranking, and **app adoption is measured** |
+| G5 | 1 | Shortlist to signed offer to confirmed joining |
+| G6 | 2 | Check-in to timesheet to approval to shift invoice |
+| G7 | 1 (invoice) · 3 (funnel) | A permanent invoice from a day-90 record; a report covering a past period |
+
+**Rule where the two disagree:** the build phase wins on ordering, the part wins on release content. A
+component cannot be released in a part earlier than the phase that builds its dependencies.

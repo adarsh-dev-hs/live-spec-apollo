@@ -3,9 +3,15 @@ title: "05-01 Build sequence"
 description: "The dependency-ordered order of work, with a gate at the end of each phase."
 ---
 
-**Package** `n/a` · **Schema** `n/a` · **Plan** all · **Risk** — · **Build in** Phase 0
+**Package** `n/a` · **Schema** `n/a` · **Plan** all · **Risk** — · **Build in** Phase 0 · **Release** Parts 1–3
 
 The dependency-ordered order of work, with a gate at the end of each phase.
+
+**This file orders the build. It does not say what ships together** — that is the three-part release
+model in [07-00](/docs/07-phases/07-00-release-model), and the two are reconciled in
+[00-05 §8](/docs/00-foundation/00-05-delivery-roadmap#8-the-three-release-parts). A phase completes a
+component; a part releases a capability, and **27 of the 35 specs below are sliced across two or three
+parts**, so finishing a spec is not the same as finishing what the next release needs from it.
 
 **There are no day counts or calendar dates in this file, deliberately.** Sequence and effort are
 different questions and they get answered in different places: [00-05](/docs/00-foundation/00-05-delivery-roadmap)
@@ -254,3 +260,25 @@ Cut in this order:
 | 3 | [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) demand prioritisation | Prioritisation reverts to recruiter judgement |
 | 4 | [03-14](/docs/03-modules/03-14-client-portal) client portal | The tokenised links already cover every client action |
 | 5 | [03-17](/docs/03-modules/03-17-payroll) payroll | **Cut last despite being least ready** — until it exists payroll is manual, and that caps contractual volume (`OI-A-16`) |
+
+---
+
+## 11. Which part each phase feeds
+
+The row order above is the build order. The column below is the release it reaches a user in. Use
+[07-04](/docs/07-phases/07-04-traceability) for the item-level mapping, and each part file for the slice
+that part takes of a given spec.
+
+| Phase | Part 1 | Part 2 | Part 3 |
+|---|---|---|---|
+| 1 Foundations | all of it | — | — |
+| 2 Client and candidate spine | 02-07 (thin) · 02-12 (thin) · 03-01 · 03-04 (nurse) · 03-05 (thin) | 02-07 · 02-12 · 03-01 senders · 03-04 categories · 03-05 shifts · 03-13 profiling | 02-07 bulk · 02-12 sweep · 03-04 OCR and duplicates · 03-05 CV reading |
+| 3 Demand | **02-11** · 03-03 permanent | 02-08 · 02-09 · 03-02 · 03-03 shift lines | 03-02 spreadsheets, voice, HRMS |
+| 4 Engagement and matching | 02-14 mechanism + 2 types · 03-07 one weight set | 02-14 remaining types · 03-06 · 03-07 per category | 03-06 voice · 03-07 tuning and write-back |
+| 5 Selection, placement and attendance | 03-08 · 03-09 | 03-08 templates · 03-09 privileging · 03-10 | 03-08 e-signature · 03-09 dashboard |
+| 6 Money and the rest of Release 1 | 03-11 permanent | 03-11 shift · 03-14 login · 03-15 | 03-12 · 03-14 full · 03-16 · 03-18 |
+| 7 R2 remainders | — | — | 03-17 · 03-19 · 03-20 |
+
+**02-11 is bold for the same reason it is bold everywhere else.** It is built in Phase 3 and released in
+Part 1, and it is the only row where releasing late is not a choice — the reports in Part 3 cover the
+Part 1 period **only because the events were written from the start**.

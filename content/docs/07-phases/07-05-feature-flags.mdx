@@ -1,0 +1,260 @@
+---
+title: "07-05 Part gating and feature flags"
+description: "How the app is organised so Part 1 ships enabled and Parts 2 and 3 can be turned on and off: the flag register, what a flag may and may not gate, and the four gating levels."
+---
+
+**Package** `@apollo/config` · **Schema** `n/a` · **Plan** all · **Risk** Medium · **Release** Part 1 (the mechanism), Parts 2–3 (the flags)
+
+## 1. Purpose
+
+Part 1 ships enabled. **Everything in Parts 2 and 3 ships behind a flag that defaults to off**, so a
+release can carry code that is finished but not yet accepted, and so a demonstration, a pilot client
+and production can each be shown a different amount of the platform without a separate build.
+
+This file is the contract the applications implement: the flag register, the four levels a flag acts
+at, what a flag is **never** allowed to gate, and how a flag is retired.
+
+## 2. Scope
+
+### In scope
+
+- The flag register: one flag per scoped functionality in `F-P2-*` and `F-P3-*`
+- The four gating levels — route, navigation, screen section, reference-data value
+- The rules a flag must obey, and the four things a flag must never touch
+- Configuration: environment variables, precedence, and the dev-only switcher
+- How a flag is retired once its part is accepted
+
+### Explicitly out of scope
+
+- Permissions. **A flag is not a permission.** Roles decide what a user may reach within what the
+  release contains; flags decide what the release contains. They are evaluated separately and never
+  substituted for one another — see [02-01](/docs/02-platform/02-01-identity-and-access) and
+  [01-07](/docs/01-standards/01-07-auth-and-rbac).
+- Per-client entitlement. Every client on a given deployment sees the same release.
+- A/B testing, gradual rollout percentages, or user-level targeting.
+
+### Explicitly not built
+
+- A flag admin screen for non-engineers in Part 1. Flags are set by deployment configuration; the
+  in-app switcher is **development-only** and is not present in a production build.
+- Flags on anything in Part 1. Part 1 is the floor, not an option.
+
+## 3. The flag register
+
+One flag per scoped functionality. The name is the functionality's identifier, so a flag is always
+traceable to a specification.
+
+| Flag | Functionality | Default | Gates |
+|---|---|---|---|
+| `P2_SHIFT_STAFFING` | [`F-P2-1`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-1--shift-staffing-end-to-end) | off | Shift lines, app shifts and check-in, attendance, timesheets, timesheet approval links, shift invoices |
+| `P2_VACANCY_INTAKE` | [`F-P2-2`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-2--vacancy-intake) | off | Inbound queues, unmatched senders, manual entry, duplicates, channels, templates, sender identities |
+| `P2_AVAILABILITY_AND_CONTACT` | [`F-P2-3`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-3--availability-and-contact) | off | Segments, contact schedules, replies to review, cadence runs, delivery log, contact history |
+| `P2_DOCTORS_AND_ALLIED` | [`F-P2-4`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-4--doctors-and-allied-health) | off | The `doctor` and `allied_health` category values, their registries and weight sets, privileging |
+| `P2_HOME_HEALTHCARE` | [`F-P2-5`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-5--home-healthcare) | off | The `home_healthcare` care-setting value, visit addresses, its check-in question set |
+| `P2_CLIENT_PORTAL` | [`F-P2-6`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-6--client-portal-opened) | off | The portal build, portal sign-in, portal requisitions |
+| `P2_ASSOCIATE_ONBOARDING` | [`F-P2-7`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-7--onboarding-and-payroll-opened) | off | Associate onboarding, statutory forms, the app onboarding flow |
+| `P2_RECRUITER_SCREENS` | [`F-P2-8`](/docs/07-phases/07-02-part-2-all-threads-open#f-p2-8--the-screens-recruiters-work-from) | off | Saved views, column chooser, export, offer templates, money owed, app documents and notifications |
+| `P3_INTAKE_FULL_WIDTH` | [`F-P3-1`](/docs/07-phases/07-03-part-3-full-depth#f-p3-1--vacancy-intake-at-full-width) | off | Spreadsheet mapping, voice-note transcription, HRMS feeds |
+| `P3_LEGACY_MIGRATION` | [`F-P3-2`](/docs/07-phases/07-03-part-3-full-depth#f-p3-2--moving-apollos-existing-data) | off | Migration status, failed records, reconciliation |
+| `P3_REPORTING` | [`F-P3-3`](/docs/07-phases/07-03-part-3-full-depth#f-p3-3--reporting) | off | All seven reports and the monthly pack |
+| `P3_PORTAL_FULL_WIDTH` | [`F-P3-4`](/docs/07-phases/07-03-part-3-full-depth#f-p3-4--client-portal-at-full-width) | off | Portal raise, shortlists, timesheets, invoices. **Requires `P2_CLIENT_PORTAL`** |
+| `P3_WORKFORCE_AND_COLLECTIONS` | [`F-P3-5`](/docs/07-phases/07-03-part-3-full-depth#f-p3-5--workforce-changes-and-collections) | off | Requests and approvals, salary, advances, attendance upload, geo-fences, payments, dunning, credit notes |
+| `P3_PLATFORM_DEPTH` | [`F-P3-6`](/docs/07-phases/07-03-part-3-full-depth#f-p3-6--depth-across-the-platform) | off | Trial dashboard at width, weight tuning, CV reading, OCR review, duplicates, e-signature, voice campaigns, payroll, prioritisation, leave and overtime |
+| `P3_DOCS_AND_GOLIVE` | [`F-P3-7`](/docs/07-phases/07-03-part-3-full-depth#f-p3-7--documentation-and-go-live) | off | Nothing in the app. Listed for completeness — it is a delivery functionality with no screens |
+
+### Dependencies between flags
+
+A flag may require another. Turning on a flag whose requirement is off is a **configuration error that
+fails at startup**, not a silent partial enable.
+
+| Flag | Requires |
+|---|---|
+| `P3_PORTAL_FULL_WIDTH` | `P2_CLIENT_PORTAL` |
+| `P3_INTAKE_FULL_WIDTH` | `P2_VACANCY_INTAKE` |
+| `P3_WORKFORCE_AND_COLLECTIONS` | `P2_ASSOCIATE_ONBOARDING` |
+| `P3_PLATFORM_DEPTH` | `P2_SHIFT_STAFFING`, `P2_ASSOCIATE_ONBOARDING`, `P2_AVAILABILITY_AND_CONTACT` |
+
+## 4. The four gating levels
+
+A flag acts at four levels, and **all four are required** for it to be off convincingly.
+
+### Level 1 — Routes
+
+A route behind an off flag is **not registered**. It is not registered-and-redirected; the route table
+does not contain it, so the bundle can be code-split on the same boundary.
+
+| Route | Flag |
+|---|---|
+| `/requisitions/:id` tab **Shift lines** · `/attendance` · `/timesheets` · `/timesheets/:id` · `/app/shifts` · `/app/check-in` | `P2_SHIFT_STAFFING` |
+| `/inbound` · `/inbound/unmatched` · `/inbound/manual-entry` · `/duplicates` · `/admin/channels` · `/admin/templates` | `P2_VACANCY_INTAKE` |
+| `/segments` · `/engagement/review` · `/engagement/calls` · `/engagement/runs` · `/messaging/delivery-log` · `/admin/cadence` | `P2_AVAILABILITY_AND_CONTACT` |
+| `/portal` and every route beneath it | `P2_CLIENT_PORTAL` |
+| `/workforce/onboarding` · `/app/onboarding` | `P2_ASSOCIATE_ONBOARDING` |
+| `/receivables` | `P2_RECRUITER_SCREENS` |
+| `/app/documents` · `/app/notifications` | `P2_RECRUITER_SCREENS` |
+| `/portal/requisitions/new` · `/portal/shortlists` · `/portal/timesheets` · `/portal/invoices` | `P3_PORTAL_FULL_WIDTH` |
+| `/reports/*` | `P3_REPORTING` |
+| `/workforce/requests` · `/workforce/payroll` · `/app/payslips` | `P3_WORKFORCE_AND_COLLECTIONS`, `P3_PLATFORM_DEPTH` |
+| `/learner-matches` · `/admin/ranking-weights` tuning controls | `P3_PLATFORM_DEPTH` |
+
+A direct URL to an unregistered route renders **"Not in this release"** — a named state with the part
+it belongs to and nothing else. It is distinct from
+`NoPermission`, because the two mean different things and a user who is told the wrong one will ask the
+wrong person.
+
+### Level 2 — Navigation
+
+A navigation group or entry whose flag is off is **not rendered at all**, exactly as an entry the user
+lacks permission for is not rendered
+([02-06](/docs/02-platform/02-06-console-shell)). Navigation is filtered by permission **and** by flag,
+in that order, and a group left with no visible entries disappears with them.
+
+| Navigation group | Flag |
+|---|---|
+| Demand — Inbound, Unmatched senders, Manual entry, Suspected duplicates | `P2_VACANCY_INTAKE` |
+| Placement — Attendance, Timesheets | `P2_SHIFT_STAFFING` |
+| Engagement — whole group | `P2_AVAILABILITY_AND_CONTACT` |
+| Matching — Talent segments | `P2_AVAILABILITY_AND_CONTACT` |
+| Billing — Money owed | `P2_RECRUITER_SCREENS` |
+| Reporting — whole group | `P3_REPORTING` |
+| Workforce — Associate onboarding | `P2_ASSOCIATE_ONBOARDING` |
+| Workforce — Requests and approvals, Payroll | `P3_WORKFORCE_AND_COLLECTIONS`, `P3_PLATFORM_DEPTH` |
+| Candidates — Learner matches | `P3_PLATFORM_DEPTH` |
+| Admin — Channels, Message templates, Contact schedules | `P2_VACANCY_INTAKE`, `P2_AVAILABILITY_AND_CONTACT` |
+
+### Level 3 — Screen sections
+
+Some flags gate part of a screen that otherwise exists in Part 1. A gated section is **removed, not
+disabled** — a disabled control asks a question the user cannot answer.
+
+| Screen | Section | Flag |
+|---|---|---|
+| `/requisitions/:id` | The **Shift lines** tab | `P2_SHIFT_STAFFING` |
+| `/requisitions/:id` | The **Source** tab's inbound payload panel | `P2_VACANCY_INTAKE` |
+| `/candidates/:id` | The **Contact history** tab | `P2_AVAILABILITY_AND_CONTACT` |
+| `/candidates/:id` | The **Documents** tab's OCR-beside-values view | `P3_PLATFORM_DEPTH` |
+| `/placements/:id` | The **Privileging** tab | `P2_DOCTORS_AND_ALLIED` |
+| `/clients/:id` | The **Sender identities** tab | `P2_VACANCY_INTAKE` |
+| `/board`, every list | Saved views, column chooser, export controls | `P2_RECRUITER_SCREENS` |
+| `/board` | The priority sort option | `P3_PLATFORM_DEPTH` |
+| `/invoices` | The shift-invoice filter | `P2_SHIFT_STAFFING` |
+| `/trial` | The full dashboard; Part 1 shows day-90 only | `P3_PLATFORM_DEPTH` |
+| `/l/:token` | Timesheet, day-30 and day-60 link types | `P2_SHIFT_STAFFING`, `P2_DOCTORS_AND_ALLIED` |
+
+### Level 4 — Reference-data values
+
+Three flags gate **values**, not screens. This is the level that proves the Part 1 architecture: because
+category, care setting and service line are reference data
+([02-03](/docs/02-platform/02-03-settings-and-reference-data)), turning a category on is a
+configuration change and turning it off removes it from every surface at once.
+
+| Flag | Values it makes available |
+|---|---|
+| `P2_DOCTORS_AND_ALLIED` | `category` = `doctor`, `allied_health`; their attribute sets, registries, weight sets and check-in question sets |
+| `P2_HOME_HEALTHCARE` | `careSetting` = `home_healthcare`; visit addresses on shift lines; its check-in question set |
+| `P2_SHIFT_STAFFING` | `serviceLine` = `contractual`; `supplyBase` = `base_b`; `linkType` = `timesheet_approval`; `invoiceType` = `shift`; `triggerType` = `approved_timesheet` |
+
+**A gated value is filtered out of every enumeration the user can choose from, and never removed from
+the type.** Existing records that already carry it stay readable — the flag controls what can be
+created, not what exists. A record whose value is behind an off flag renders its label with a marker
+saying which part it belongs to.
+
+## 5. What a flag must never gate
+
+These four are the whole reason Part 1 is shaped as it is. **A flag that touches any of them is a
+defect**, and each has a test that fails if one does.
+
+| Never gated | Why | Test |
+|---|---|---|
+| **The event spine.** Every event defined in Part 1 is written in Part 1, whatever is switched off | Reports in `F-P3-3` cover the whole period **only because the events were written the whole time.** A flag that stops an event silently destroys the Part 3 reports | Every state transition emits its event with every Part 2 and Part 3 flag off |
+| **The audit trail.** Every action is recorded whatever the release contains | An action that happened and was not recorded is unrecoverable | Every write appears on the trail with all flags off |
+| **Consent and residency.** Captured and enforced at every level | A flag that skips consent creates data that cannot lawfully be used later | Consent required before any adapter dispatch, with all flags off |
+| **Scope predicates and permissions.** Never widened by a flag being off | A flag is a release device. If turning one off widened access, it would be a security control, and it is not one | Every list route carries its scope predicate in every flag combination |
+
+Two further rules follow from these:
+
+1. **Flags gate surfaces, not schemas.** Tables, columns and state machines for Parts 2 and 3 are
+   created by the migrations that ship with them and are present whether the flag is on or off. Nothing
+   is dropped when a flag is turned off.
+2. **Turning a flag on must never require a migration or a backfill.** If it does, the split was wrong
+   and the work belonged in the earlier part.
+
+## 6. Configuration
+
+| Source | Form | Precedence |
+|---|---|---|
+| Part level | `VITE_PARTS=1` · `1,2` · `1,2,3` — enables every flag in the listed parts | Lowest |
+| Per flag | `VITE_FEATURE_P2_SHIFT_STAFFING=on` / `off` | Overrides the part level |
+| Dev switcher | An in-app panel, **development builds only** | Highest, and never present in production |
+
+Defaults, and the rules around them:
+
+- **`VITE_PARTS` defaults to `1`.** A build with no configuration is a Part 1 build.
+- Configuration is read **once at startup**. A flag does not change during a session, so no screen has
+  to handle a capability disappearing under it.
+- The resolved flag set is logged at startup and shown on `/admin/system`, so what a given deployment
+  contains is answerable without reading its environment.
+- An unknown flag name in configuration **fails at startup**. A silently ignored typo is how a
+  demonstration ends up missing a feature nobody can explain.
+- A flag turned on whose requirement in [§3](#dependencies-between-flags) is off **fails at startup**.
+
+Suggested shape, one module, no framework:
+
+```ts
+// src/config/parts.ts
+export type Flag =
+  | 'P2_SHIFT_STAFFING' | 'P2_VACANCY_INTAKE' | 'P2_AVAILABILITY_AND_CONTACT'
+  | 'P2_DOCTORS_AND_ALLIED' | 'P2_HOME_HEALTHCARE' | 'P2_CLIENT_PORTAL'
+  | 'P2_ASSOCIATE_ONBOARDING' | 'P2_RECRUITER_SCREENS'
+  | 'P3_INTAKE_FULL_WIDTH' | 'P3_LEGACY_MIGRATION' | 'P3_REPORTING'
+  | 'P3_PORTAL_FULL_WIDTH' | 'P3_WORKFORCE_AND_COLLECTIONS'
+  | 'P3_PLATFORM_DEPTH' | 'P3_DOCS_AND_GOLIVE'
+
+export function isOn(flag: Flag): boolean
+export function enabledFlags(): readonly Flag[]
+```
+
+Every consumer imports `isOn`. **There is no second way to ask**, no inline `import.meta.env` read
+outside this module, and no string flag names at call sites — the union type is what makes a typo a
+build failure rather than a missing screen.
+
+## 7. Retiring a flag
+
+A flag is a release device with a finite life, not a permanent configuration.
+
+| Step | When |
+|---|---|
+| 1. The part's exit conditions are demonstrated and accepted | End of the part |
+| 2. The flag's default flips to on, and the release notes say so | Immediately after |
+| 3. The flag and every branch it guarded are **deleted**, in one change that touches no behaviour | Within the next part |
+| 4. The row is struck from [§3](#3-the-flag-register), leaving the functionality documented and the flag gone | With step 3 |
+
+**A flag that outlives its part becomes a permanent branch, and a permanent branch is a second product
+to test.** The count of live flags is expected to fall to zero by the end of Part 3, and a flag still
+present two parts after its own is a defect to be raised, not a configuration to be maintained.
+
+## 8. Acceptance criteria
+
+| # | Criterion | Traces to |
+|---|---|---|
+| AC1 | A build with no configuration presents exactly Part 1: every `F-P1-*` screen reachable, no `F-P2-*` or `F-P3-*` route registered | [07-01](/docs/07-phases/07-01-part-1-straight-through) |
+| AC2 | With all Part 2 and Part 3 flags off, **every Part 1 event is still emitted** and every write still appears on the activity trail | [§5](#5-what-a-flag-must-never-gate) |
+| AC3 | An entry whose flag is off is **not rendered** in navigation, and a direct URL to it renders "Not in this release", distinct from `NoPermission` | [02-06](/docs/02-platform/02-06-console-shell) |
+| AC4 | Turning on `P2_DOCTORS_AND_ALLIED` makes the two categories selectable on the app, the requisition form and the weight sets **with no migration and no deployment of new code paths** | [07-02](/docs/07-phases/07-02-part-2-all-threads-open) `F-P2-4` |
+| AC5 | A record created while a flag was on stays readable after it is turned off, marked with the part it belongs to | [§4 level 4](#level-4--reference-data-values) |
+| AC6 | Turning on a flag whose requirement is off fails at startup with the missing requirement named | [§3](#dependencies-between-flags) |
+| AC7 | An unknown flag name in configuration fails at startup | [§6](#6-configuration) |
+| AC8 | `/admin/system` shows the resolved flag set for the running deployment | [02-15](/docs/02-platform/02-15-environments-and-observability) |
+| AC9 | Every scope predicate and every permission check behaves identically in every flag combination | [01-07](/docs/01-standards/01-07-auth-and-rbac) |
+| AC10 | The test suite runs in at least three configurations: Part 1 only, Parts 1–2, Parts 1–3 | [01-08](/docs/01-standards/01-08-testing-and-quality) |
+
+## 9. Open questions
+
+| Ref | Question | Working assumption |
+|---|---|---|
+| `OI-HS-69` | Which Part 2 and Part 3 capabilities must be switchable in **production**, rather than merely unbuilt? | All of them, per [§3](#3-the-flag-register). The cost is the three-configuration test matrix in AC10 |
+| `OI-HS-70` | Does any client need a different release than another on the same deployment? | No. Per-client entitlement is explicitly out of scope; a second entitlement axis would multiply the test matrix rather than add to it |
+| `OI-HS-71` | Should the flag set be changeable at runtime by an administrator? | No. Read once at startup, so no screen has to handle a capability disappearing mid-session |
+
+`OI-HS-69` is registered in [05-03](/docs/05-delivery/05-03-open-decisions);
+`OI-HS-70` and `OI-HS-71` are raised here.

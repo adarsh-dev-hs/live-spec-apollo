@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName } from './shared';
+import { appName, pocAppUrl } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -8,9 +8,20 @@ export function baseOptions(): BaseLayoutProps {
     },
     links: [
       {
+        text: 'Release parts',
+        url: '/docs/07-phases/07-00-release-model',
+        description: 'The three-part release model: what ships in Part 1, 2 and 3',
+      },
+      {
         text: 'Original plan',
         url: '/requirement-doc',
         description: "The client's delivery plan, exactly as issued",
+      },
+      {
+        text: 'Live POC app',
+        url: pocAppUrl,
+        external: true,
+        description: 'The screens every specification links to',
       },
     ],
   };

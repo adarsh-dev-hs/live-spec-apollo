@@ -1,0 +1,299 @@
+---
+title: "07-00 The three-part release model"
+description: "The whole platform classified into three releases: one line of business straight through, then every thread open, then full depth. The rule that decides which part a capability lands in."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** all 208 items · **Effort** — · **Risk** — · **Release** Parts 1–3
+
+## 1. Purpose
+
+The whole platform classified into three releases. **Part 1** takes one line of business straight
+through, from a recruiter signing in to an invoice raised, and nothing else. **Part 2** opens every
+other thread the platform has to carry — the second line of business, the second and third candidate
+categories, the second care setting, the other intake channels and the other client surface — none of
+them yet at full width. **Part 3** takes each of those threads to full depth, moves Apollo's existing
+data across, measures the operation, and hands the platform over.
+
+This file holds the classification and the rule behind it. The functionality inside each part is
+specified in [07-01](/docs/07-phases/07-01-part-1-straight-through),
+[07-02](/docs/07-phases/07-02-part-2-all-threads-open) and
+[07-03](/docs/07-phases/07-03-part-3-full-depth).
+
+## 2. Scope
+
+### In scope
+
+- The rule that decides which part a capability lands in, and the order the three tests are applied in
+- The three parts, what each contains, and what each has to prove before the next one starts
+- The **thin-slice matrix**: every spec that is built in more than one part, and which slice lands where
+- How the three parts sit against the seven build phases in
+  [00-05](/docs/00-foundation/00-05-delivery-roadmap) and [05-01](/docs/05-delivery/05-01-build-sequence)
+- The document format the three part files follow, and the `F-P<n>-<k>` identifier scheme
+- How a screen reference resolves to a screen in the live POC app
+
+### Explicitly out of scope
+
+- **Calendar.** No month numbers, no dates, no durations. Parts are a dependency and depth ordering,
+  not a schedule. The calendar lives in [00-05](/docs/00-foundation/00-05-delivery-roadmap) and the
+  client's own effort figures live in [06-03](/docs/06-source-plan/06-03-timeline).
+- **Effort.** Person-days are a commercial number and stay in
+  [06-03](/docs/06-source-plan/06-03-timeline) and [06-04](/docs/06-source-plan/06-04-register).
+- Component design. A part file says *which slice* of a spec is in that part; the spec says *what it is*.
+- The commercial milestone structure. `M0`–`M15` are the plan's own sequence and are untouched.
+
+### Explicitly not built
+
+- A fourth part. Anything that does not fit the three is an open decision, not a Part 4.
+- A per-part rewrite of any spec. The thirty-five specs are the single description of each component,
+  and a part file never restates a field, an endpoint or a state machine that a spec already owns —
+  it restates only where **Part N's slice differs from the finished component**.
+
+## 3. The classification rule
+
+Three tests, applied in this order. The first one that answers, decides.
+
+| # | Test | If yes |
+|---|---|---|
+| 1 | **Can it be retrofitted?** Would adding this later mean rewriting existing code or losing data that was never recorded? | **Part 1**, regardless of the other two tests |
+| 2 | **Does the money path close without it?** Is it on the shortest path from a vacancy arriving to an invoice being raised for one client, one category, one line of business? | **Part 1** |
+| 3 | **Is it a new thread, or a deeper one?** A capability that opens a path the platform does not yet have — a second line of business, a new category, a new intake channel, a new surface — is a new thread. A capability that widens, measures or automates a path that already runs is depth. | New thread → **Part 2** · Depth → **Part 3** |
+
+**Test 1 exists because four things cannot be added afterwards.** They are in Part 1 even though a
+narrow reading of test 2 would push three of them out:
+
+| Cannot be retrofitted | Spec | What is lost by deferring it |
+|---|---|---|
+| The event spine | [02-11](/docs/02-platform/02-11-event-spine) | Reports **cannot cover the earlier period at all**. Not recoverable |
+| Category and care setting as reference data | [02-03](/docs/02-platform/02-03-settings-and-reference-data) | A core built to nurses makes doctors a migration rather than a configuration |
+| The audit trail | [02-02](/docs/02-platform/02-02-audit-trail) | Who did what before the trail existed is gone |
+| The market adapter interfaces | [02-13](/docs/02-platform/02-13-market-adapter-layer) | Every registry gets written twice, and verification becomes a branch per council |
+
+**Test 3 is the one that does the most work.** It is what separates "vacancies also arrive by email"
+(a new thread, Part 2) from "vacancies arrive as a spreadsheet in each client's own format" (the same
+thread, wider, Part 3). Applied consistently, it is why the client portal appears in both Part 2 and
+Part 3 — logging in and seeing your own vacancies is the thread; raising them, approving timesheets and
+downloading invoices is the width.
+
+## 4. The three parts
+
+### Part 1 — Straight Through
+
+**One client. One category. One line of business. One intake route. One client surface.**
+
+A recruiter signs in, a hospital is set up with its rate card and contract terms, a vacancy is entered
+in the console, a nurse signs up on her phone and is verified against the nursing council, she is
+ranked and shortlisted, the hospital accepts by a link with no password, an offer goes out, she joins,
+she is checked in on at day 0, 7, 30, 60 and 90, and the invoice is raised once the hospital confirms
+at day 90 that she is still there.
+
+Everything in Part 1 is on that sentence. Nothing else is.
+
+| | Part 1 carries | Part 1 does not carry |
+|---|---|---|
+| Line of business | Permanent placement | Contractual shift staffing |
+| Category | Nurses | Doctors, allied health |
+| Care setting | Hospital | Home healthcare |
+| Intake | Console, entered by a recruiter | Email, WhatsApp, spreadsheet, HRMS, portal |
+| Client surface | Tokenised link — shortlist and day 90 | Portal login, timesheet approval |
+| Money | One permanent invoice | Shift invoices, receivables chasing, payroll |
+| Reporting | The activity trail on a record | Every report |
+
+### Part 2 — All Threads Open
+
+**Every path the platform has to carry exists. None of them at full width.**
+
+Shift staffing joins permanent placement and closes its own money path — shifts offered, accepted,
+checked into, turned into a timesheet, approved by the client and invoiced. Vacancies stop being typed
+and start arriving by email and WhatsApp, filling themselves in, with the missing details chased on the
+channel they came from. Candidates are contacted on a schedule and the platform learns who is genuinely
+available. Doctors and allied health go live with their own councils, specialty fields, ranking weights
+and trial questions. Home healthcare runs beside hospital. Clients log in. Associates are onboarded with
+their statutory forms, ready for a payroll engine that is not yet connected.
+
+### Part 3 — Full Depth
+
+**Each thread widened, the old data moved, the operation measured, the platform handed over.**
+
+Intake widens to each client's own spreadsheet format, voice notes and feeds from client HR systems.
+The legacy system is profiled, moved, reconciled and switched off. Fill rate, time to fill, where
+candidates drop out and how recruiters perform are all reportable. The client portal reaches full width.
+Salary changes and advances run through proper approvals, overdue invoices are chased, and payroll is
+connected. Then documentation, acceptance testing support and the cutover.
+
+## 5. The thin-slice principle
+
+**Twenty-seven of the thirty-five specs are built in more than one part.** This is the central fact of
+the model and the thing most likely to be misread: a spec appearing in Part 1 does **not** mean the
+component is finished in Part 1.
+
+The rule for splitting a spec across parts:
+
+- A part takes the slice of a spec that its own thread needs, and **no more**.
+- A later part **adds to** the same tables, endpoints and screens. It never replaces them. If a later
+  slice would require changing a column type, dropping a table or rewriting a state machine, the split
+  is wrong and the whole spec belongs in the earlier part.
+- The spec is written once, for the finished component. Each part file names the slice; the spec is
+  always the authority on what that slice is made of.
+
+| Spec | Part 1 slice | Part 2 slice | Part 3 slice |
+|---|---|---|---|
+| [02-01](/docs/02-platform/02-01-identity-and-access) identity and access | Staff realm, roles, sign-in, permissions | Candidate and client-portal realms | Portal data scoping at width, the SSO decision |
+| [02-02](/docs/02-platform/02-02-audit-trail) audit trail | **Whole spec** | — | — |
+| [02-03](/docs/02-platform/02-03-settings-and-reference-data) settings and reference data | The nine lists, category and care setting as data, the three waiting periods | Values for the new categories and care setting, trial question sets | — |
+| [02-04](/docs/02-platform/02-04-file-storage) file storage | Upload, virus scan, versions, expiring links | Camera capture in the app | Handoff to OCR, document review surfaces |
+| [02-05](/docs/02-platform/02-05-design-system) design system | Console and link-page tokens and components | App and portal surfaces | — |
+| [02-06](/docs/02-platform/02-06-console-shell) console shell | **Whole spec** | Navigation grows as modules land | — |
+| [02-07](/docs/02-platform/02-07-list-engine) list engine | Server-side filter, sort, cursor paging, the standard states | Column chooser, saved views, export | Bulk actions, virtualisation |
+| [02-08](/docs/02-platform/02-08-inbound-pipeline) inbound pipeline | — | Receive, dedupe, resolve sender, classify intent — email and WhatsApp | Spreadsheet, HRMS and voice receivers, reclassification |
+| [02-09](/docs/02-platform/02-09-outbound-messaging) outbound messaging | Transactional sends only: the offer, the two link types | Templates, triggers, channel fallback, cadence sends | Receipt reconciliation, cost attribution, preferences |
+| [02-10](/docs/02-platform/02-10-job-runtime) job runtime | **Whole spec** | — | The dead-letter operator view |
+| [02-11](/docs/02-platform/02-11-event-spine) event spine | **Whole spec — cannot be retrofitted** | New event definitions as modules land | Mart replay |
+| [02-12](/docs/02-platform/02-12-data-protection) data protection | Consent captured at the moment data is, residency | Withdrawal and erasure intake | Retention sweep, the consent gap report |
+| [02-13](/docs/02-platform/02-13-market-adapter-layer) market adapter layer | The three interfaces, one nursing registry behind them | Doctor and allied-health registries | Registry health, manual fallback at width |
+| [02-14](/docs/02-platform/02-14-client-link-surfaces) client link surfaces | The mechanism, plus shortlist and day-90 link types | Day 30 / 60 check-in and timesheet approval link types | Link-type configuration, reissue, the finance link log |
+| [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) clients, contracts and rate cards | One client with sites, contacts, rate card, contract and its three windows | Many clients, sender identities, link recipients per type | HRMS tenants, contract versioning at width |
+| [03-02](/docs/03-modules/03-02-demand-intake) demand intake | — | The four queues, channel config, required fields, the chase | Per-client spreadsheet mapping, voice notes, HRMS feeds |
+| [03-03](/docs/03-modules/03-03-requisitions-and-allocation) requisitions and allocation | Permanent requisition, its states and versions, the fulfilment board, owner and allocation | Shift templates and the shift demand lines they generate | Priority ordering — via [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) |
+| [03-04](/docs/03-modules/03-04-candidate-record-and-credentials) candidate record and credentials | Nurse record, credentials, the verification queue against one registry | Doctor and allied attribute sets, further registries, both supply bases | Document review against OCR, duplicate resolution, learner matching |
+| [03-05](/docs/03-modules/03-05-candidate-app) candidate app | Sign-up, consent, profile from a CV, jobs, availability | Shifts, check-in, documents, notifications, the guided onboarding flow | Payslips, automatic CV reading |
+| [03-06](/docs/03-modules/03-06-engagement-and-availability) engagement and availability | — | Segments, contact schedules, WhatsApp replies, availability confidence | Voice campaigns, the free-text review queue at width |
+| [03-07](/docs/03-modules/03-07-matching-and-ranking) matching and ranking | Ranked set with a plain rationale, shortlist building, override with a reason | Weight sets for the new categories and bases, talent segments | Per-category weight tuning, saved searches, override analytics |
+| [03-08](/docs/03-modules/03-08-selection-and-offers) selection and offers | Interview, structured decision, offer generated and sent | Offer templates by state, role and skill | Electronic signature |
+| [03-09](/docs/03-modules/03-09-placement-and-trial) placement and trial | Joining, day 0 / 7 / 30 / 60 / 90, the immutable day-90 record | Doctor privileging, per-category and per-care-setting question sets | The trial dashboard at width |
+| [03-10](/docs/03-modules/03-10-attendance-and-timesheets) attendance and timesheets | — | Check-in attendance, exceptions, timesheet, client approval, deemed approval | Pairing against externally uploaded attendance |
+| [03-11](/docs/03-modules/03-11-billing-and-receivables) billing and receivables | The permanent invoice and the evidence behind it | The shift invoice from an approved timesheet | Receivables ageing at width |
+| [03-12](/docs/03-modules/03-12-analytics-and-reporting) analytics and reporting | — | — | **Whole spec** |
+| [03-13](/docs/03-modules/03-13-legacy-migration) legacy migration | — | Profiling only — until it runs, the work cannot be sized | The pipeline, duplicates, reconciliation, cutover |
+| [03-14](/docs/03-modules/03-14-client-portal) client portal | — | Login, and seeing your own vacancies | Raising vacancies, shortlists, timesheet approval, invoices |
+| [03-15](/docs/03-modules/03-15-associate-onboarding) associate onboarding | — | Associate profile, statutory forms, document checklist | The pay-run gate, once there is a pay run |
+| [03-16](/docs/03-modules/03-16-workforce-operations) workforce operations | — | — | **Whole spec** |
+| [03-17](/docs/03-modules/03-17-payroll) payroll | — | — | **Whole spec** |
+| [03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) demand prioritisation | — | — | **Whole spec** |
+| [03-19](/docs/03-modules/03-19-timesheet-extensions) timesheet extensions | — | — | **Whole spec** |
+| [03-20](/docs/03-modules/03-20-collections) collections | — | — | **Whole spec** |
+| [02-15](/docs/02-platform/02-15-environments-and-observability) environments and observability | **Whole spec** | — | — |
+
+Full item-level traceability is in [07-04](/docs/07-phases/07-04-traceability).
+
+## 6. What each part has to prove
+
+A part is not done when its functionality is built. It is done when its one claim is demonstrated on
+real data, in front of the named attendees the client requires.
+
+| Part | The claim | Demonstrated by |
+|---|---|---|
+| **1** | **Money can reach Apollo through the platform.** One permanent invoice, raised from a day-90 confirmation that a real hospital contact gave on a phone, traceable in two clicks back to who confirmed, when, and against which contract terms | One client, one nurse, one link, one invoice — end to end, with the activity trail readable at every step |
+| **2** | **No path is a special case.** The second line of business, the second and third categories, the second care setting, the other intake channels and the other client surface all run on the same records, the same states and the same ranking | The same requirement sent by email and WhatsApp produces requisitions differing only in source channel; a doctor and an allied-health professional go through the identical path a nurse did in Part 1; a shift is checked into, timesheeted, approved and invoiced |
+| **3** | **The old system can be switched off.** Everything Apollo has is in the platform and reconciles to source totals, the operation is measurable, and the users have been trained on it | A reconciled migration, the monthly pack covering a period that has already passed, and the cutover |
+
+**The Part 1 claim is the one that settles the riskiest assumption in the whole engagement**: that a
+hospital contact will actually click a link and answer. Everything on the permanent billing path
+depends on it, and there is no fallback trigger. Proving it in Part 1 rather than at the end is the
+main reason the parts are cut this way.
+
+## 7. Relationship to the seven build phases
+
+The three parts and the seven build phases answer different questions and both are kept.
+
+| | Three parts (here) | Seven build phases ([05-01](/docs/05-delivery/05-01-build-sequence)) |
+|---|---|---|
+| Answers | **What is released together, and what it proves** | **What order the components are built in, and what blocks what** |
+| Unit | A user-visible capability, in the client's own language | A spec, in dependency order |
+| Splits a spec? | Yes — a spec is sliced across parts | No — a spec is one row |
+| Carries a calendar? | No | No — the calendar is in [00-05](/docs/00-foundation/00-05-delivery-roadmap) |
+
+The mapping is many-to-many by design, because a build phase completes a component and a part releases
+a capability:
+
+| Build phase | Feeds |
+|---|---|
+| 1 Foundations | Part 1 |
+| 2 Client and candidate spine | Part 1, thickened in Part 2 |
+| 3 Demand | Part 1 (event spine, requisitions) and Part 2 (inbound, intake) |
+| 4 Engagement and matching | Part 1 (links, ranking) and Part 2 (engagement) |
+| 5 Selection, placement and attendance | Part 1 (selection, placement) and Part 2 (attendance) |
+| 6 Money and the rest of Release 1 | Part 1 (permanent invoice), Part 2 (shift invoice, portal, onboarding), Part 3 (reporting, prioritisation) |
+| 7 R2 remainders | Part 3 |
+
+**Where the two disagree, the build phase wins on ordering and the part wins on release content.** A
+component cannot be released in a part earlier than the phase that builds its dependencies — if a part
+file appears to ask for that, it is a defect in the part file, not a licence to reorder the build.
+
+## 8. The document format
+
+Each of the three part files is one document with two halves, following the agreed structure:
+
+```
+Part N
+  Scope
+    the SOW references this part covers
+  Scoped functionality
+    F-PN-1: <name>
+      SOW ref            the client's own deliverable, with its wording pulled in
+      Specs              which of the thirty-five specs this draws on, and which slice
+      Screens
+        Screen 1
+          Screen reference    a route in the live POC app
+          Elements            fields, datatype, enumeration
+          Scenarios
+          Tested against      happy path, and all paths
+        Screen 2
+          ...
+      Scenarios
+      Tested against
+```
+
+Two conventions that keep the part files from turning into a second copy of the specs:
+
+1. **Elements are stated where the part's slice differs from the finished component**, and referenced
+   to the owning spec otherwise. Part 1 states most of its elements, because almost every Part 1 slice
+   is narrower than the spec that describes it. Parts 2 and 3 state fewer, because by then the slice
+   and the spec have converged.
+2. **A section that does not apply says N/A. It is never omitted** — the same rule the specs follow, so
+   a reader can always tell "nothing here" from "not written yet".
+
+## 9. Identifiers
+
+Added to the scheme in the [docs index](/docs):
+
+| Prefix | Means | Example |
+|---|---|---|
+| `Part 1` / `Part 2` / `Part 3` | A release part | `Part 2` — All Threads Open |
+| `F-P<n>-<k>` | One scoped functionality inside Part `n` | `F-P1-3` — vacancy management |
+| `SOW-<ref>` | A scope-of-work reference. **These are the client's own deliverable identifiers**, not a second numbering: `D<n>` and `A<n>` are the client's, `F<nn>` is a platform prerequisite Hiresense identified, `M<n>-I<k>` is the buildable item | `SOW-D1`, `SOW-A13`, `SOW-F14` |
+| `FLAG_*` | A feature flag gating a part or a slice in the app — see [07-05](/docs/07-phases/07-05-feature-flags) | `FLAG_PART2_SHIFT_STAFFING` |
+
+**`SOW-` is a readability prefix, not a new identifier space.** `SOW-D1` and `D1` are the same thing.
+The prefix exists so a scope table reads as scope rather than as a component reference, and every
+`SOW-` ref resolves to a row in [06-04](/docs/06-source-plan/06-04-register).
+
+Every `F-P<n>-<k>` names the specs it draws on, and every spec slice named in
+[§5](#5-the-thin-slice-principle) appears in at least one `F-P<n>-<k>`. The two are reconciled in
+[07-04](/docs/07-phases/07-04-traceability).
+
+## 10. Screen references and the POC app
+
+Every screen in a part file carries a **screen reference**: a route in the live POC app
+(`live_app_apollo`), a React + Vite build that renders the console, the candidate app, the public link
+pages and the client portal against mock data.
+
+- A screen reference is written as a route — `/board`, `/requisitions/new`, `/app/check-in`.
+- Resolve it against the POC base URL, which is `NEXT_PUBLIC_POC_APP_URL` and defaults to
+  `http://localhost:5173`. It is set in one place, and the docs-site top nav links to it.
+- A screen the spec requires but the POC does not yet render is marked **not in POC**. That is a gap in
+  the POC, never a gap in scope — the spec is the authority on whether the screen exists.
+
+The POC is a **reference for shape, not a specification**. Where the POC and a spec disagree on a field
+name, an enumeration or a state, the spec wins and the POC is wrong.
+
+## 11. Open questions
+
+| Ref | Question | Working assumption |
+|---|---|---|
+| `OI-HS-66` | Does the client accept a release boundary at Part 1 that carries **one** line of business, or must permanent and contractual go live together? | Part 1 carries permanent placement alone. Contractual has no fallback attendance route until the app is adopted, and coupling them puts the whole money path behind app adoption |
+| `OI-HS-67` | Is the nurse-only scope of Part 1 acceptable for the first client demonstration, given the client's stated category priority? | Yes. Category is reference data from Part 1 onward ([02-03](/docs/02-platform/02-03-settings-and-reference-data)), so doctors are configuration in Part 2, not a migration |
+| `OI-HS-68` | Do the three parts replace the seven build phases in client-facing reporting, or run alongside them? | Alongside. Parts are how a release is described, phases are how the work is sequenced — see [§7](#7-relationship-to-the-seven-build-phases) |
+| `OI-HS-69` | Which Part 2 and Part 3 capabilities must be **switchable off in production**, rather than simply unbuilt? | Every Part 2 and Part 3 capability is flag-gated, defaulting off, per [07-05](/docs/07-phases/07-05-feature-flags). Flags are removed once a part is accepted |
+
+`OI-HS-66` is the only one of these that changes scope rather than sequence. All four are registered in
+[05-03](/docs/05-delivery/05-03-open-decisions).

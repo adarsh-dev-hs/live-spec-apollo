@@ -31,6 +31,7 @@ const SECTIONS = [
   { dir: '04-integrations', title: '04 Integrations', icon: 'PlugZap' },
   { dir: '05-delivery',     title: '05 Delivery',     icon: 'Rocket' },
   { dir: '06-source-plan',  title: '06 Source plan',  icon: 'FileText' },
+  { dir: '07-phases',       title: '07 Release parts', icon: 'Milestone' },
 ];
 
 /* ------------------------------------------------------------------ *

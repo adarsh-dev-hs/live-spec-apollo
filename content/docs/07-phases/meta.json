@@ -1,0 +1,13 @@
+{
+  "title": "07 Release parts",
+  "icon": "Milestone",
+  "pages": [
+    "index",
+    "07-00-release-model",
+    "07-01-part-1-straight-through",
+    "07-02-part-2-all-threads-open",
+    "07-03-part-3-full-depth",
+    "07-04-traceability",
+    "07-05-feature-flags"
+  ]
+}

@@ -1,0 +1,519 @@
+---
+title: "07-03 Part 3 — Full Depth"
+description: "Each thread widened, Apollo's existing data moved across and reconciled, the operation measured, and the platform documented, tested and handed over."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** A1, A5, A7, A8, A10, A11, D9, D11, D12, D14, D22, D23, D24, D25, D28, F08, F13 · **Risk** — · **Release** Part 3
+
+## 1. Purpose
+
+Part 2 opened every path. Part 3 takes each one to full depth, moves everything Apollo already has into
+the platform, makes the operation measurable, and hands it over.
+
+Intake widens to each client's own spreadsheet format, voice notes and feeds from client HR systems.
+The legacy system is profiled, moved, reconciled and switched off. Fill rate, time to fill, where
+candidates drop out and how recruiters perform are all reportable. The client portal reaches full
+width. Salary changes and advances run through proper approvals and overdue invoices are chased. Then
+documentation, acceptance testing support, and the cutover.
+
+**The claim Part 3 has to prove is that the old system can be switched off.**
+
+## 2. Scope
+
+### SOW references covered
+
+| SOW ref | What the plan calls it | Functionality | Slice in Part 3 |
+|---|---|---|---|
+| `SOW-A1` | Spreadsheet mapping, voice notes, HRMS feeds, learner records | F-P3-1 | The remaining four intake channels |
+| `SOW-A10` | Migration screens, pipeline, duplicate resolution | F-P3-2 | Everything except the profiling done in Part 2 |
+| `SOW-D9` | Funnel, fill and time to fill, trial survival | F-P3-3 | Whole |
+| `SOW-D28` | Drop-out, channel and recruiter performance, monthly pack, marts | F-P3-3 | Whole |
+| `SOW-A11` | Rate variance | F-P3-3 | Whole |
+| `SOW-D12` | Portal: raise, shortlists, timesheets, invoices | F-P3-4 | The remaining four screens |
+| `SOW-D23` | Maker-checker, salary revision, advances, holds, attendance upload, geo-fencing | F-P3-5 | Whole |
+| `SOW-D25` | Payments, TDS, ageing, dunning, credit and debit notes | F-P3-5 | Whole |
+| `SOW-D8` | Receivables ageing | F-P3-5 | The ageing and chasing on top of the Part 2 list |
+| `SOW-A6` | Trial dashboard | F-P3-6 | At width |
+| `SOW-D18` | Per-category weight tuning, saved searches | F-P3-6 | Whole |
+| `SOW-A8` | Outcome write-back into ranking | F-P3-6 | Whole |
+| `SOW-D3` | CV reading | F-P3-6 | Whole |
+| `SOW-D4` | Document review against OCR, duplicate candidates | F-P3-6 | Whole |
+| `SOW-D16` | Certification records and learner matching | F-P3-6 | Whole |
+| `SOW-D20` | Electronic signature | F-P3-6 | Whole |
+| `SOW-A5` | Voice campaigns and voice answer extraction | F-P3-6 | Whole |
+| `SOW-D24` | Pay run, payroll settings, statutory reports, payslips | F-P3-6 | Whole |
+| `SOW-D21` | The onboarding gate on a pay run | F-P3-6 | Whole |
+| `SOW-D22` | Leave, overtime, internal approval routing | F-P3-6 | Whole |
+| `SOW-D14` | Priority board, suggested recruiter, requisition approval | F-P3-6 | Whole |
+| `SOW-F08` | Bulk actions and virtualisation | F-P3-6 | Whole |
+| `SOW-F13` | Retention sweep and the consent gap report | F-P3-6 | Whole |
+| `SOW-D11` | Technical documentation, user guides, UAT support, cutover | F-P3-7 | Whole |
+
+### Explicitly out of scope
+
+- Anything not in the client's 208 items. Feedback at a Part 3 gate that introduces new capability is a
+  **change**, not a completion.
+- A second market. The adapter interfaces make one possible; configuring one is not in this engagement.
+
+### Explicitly not built
+
+- A replacement for the finance system. Invoices are **exported to it**, not raised inside it.
+- A payroll engine. Pay runs are **sent to a third-party engine** and results received back.
+- Automatic merging of migrated duplicates. Every merge is a human decision, in Part 3 as in Part 2.
+
+## 3. Scoped functionality
+
+Screen references resolve against the POC base URL (`NEXT_PUBLIC_POC_APP_URL`, default
+`http://localhost:5173`).
+
+---
+
+### F-P3-1 · Vacancy intake at full width
+
+*Spreadsheets in each client's own format, voice notes, and feeds from client HR systems.*
+
+**Specs** [02-08](/docs/02-platform/02-08-inbound-pipeline) (remaining receivers) ·
+[03-02](/docs/03-modules/03-02-demand-intake) (spreadsheet mapping) ·
+[04-08](/docs/04-integrations/04-08-client-spreadsheets) ·
+[04-05](/docs/04-integrations/04-05-speech-to-text) ·
+[04-07](/docs/04-integrations/04-07-client-hrms-ats)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-A1` | `M3-I6` | Spreadsheet mapping — column mapping, sample upload, preview |
+| `SOW-A1` | `M3-I20` | Parsers — the spreadsheet, voice-note and HRMS paths |
+| `SOW-A1` | `M3-I32` | Inbound learner records (conditional on `OI-HS-15`) |
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Spreadsheet mapping | `/admin/spreadsheet-mappings` — **not in POC** | Column mapping per client, sample upload, preview |
+| 2 | Manual entry | `/inbound/manual-entry` | Now with **playable audio** for voice notes |
+| 3 | Channels | `/admin/channels` | All six live, none listed-but-unavailable |
+| 4 | Inbound list | `/inbound` | Six channels, one queue |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A client sends its own spreadsheet format | Mapped per client; a sample upload previews the result before it is accepted |
+| 2 | A spreadsheet has some bad rows | **Each bad row is reported by name and the good ones still load** |
+| 3 | A WhatsApp voice note arrives | Transcribed; the audio remains **playable beside the transcript** on the manual entry queue |
+| 4 | The transcript is below the confidence threshold | Manual entry, prefilled, with the audio attached |
+| 5 | An HRMS feed delivers a vacancy | Resolved through the client's HRMS tenant identity to exactly one client |
+| 6 | A voice note, an email, a spreadsheet row and an HRMS record describe the same requirement | Four requisitions **differing only in source channel and raw payload** |
+| 7 | A client changes its spreadsheet columns | The mapping is edited; historical loads are not re-interpreted |
+| 8 | A learner record arrives inbound | Handled per `OI-HS-15`; if out of scope, discarded with a reason, never silently dropped |
+
+#### Tested against
+
+- **Happy** — the same requirement in four formats producing four identical requisitions.
+- **All** — scenarios 1–8, plus: the partial-failure summary on a mixed spreadsheet; a transcript
+  retained beside its audio; an HRMS tenant resolving to exactly one client and never to two.
+
+---
+
+### F-P3-2 · Moving Apollo's existing data
+
+*The old system profiled, records moved across, duplicates resolved, and the old tool switched off.*
+
+**Specs** [03-13](/docs/03-modules/03-13-legacy-migration) ·
+[04-15](/docs/04-integrations/04-15-legacy-cpal)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-A10` | `M1-I2` | Migration screens — status, failed records |
+| `SOW-A10` | `M1-I11` | Migration pipeline |
+| `SOW-A10` | `M1-I12` | Duplicate resolution on migrated data |
+
+`M1-I10` profiling was done in Part 2. **Every item here carries Low confidence and names `OI-A-02` as
+the reason** — the contents of the legacy system are not known until profiling has run.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Migration status | `/admin/migration` — **not in POC** | Each run: records read, loaded, failed. **Progress observable while running** |
+| 2 | Failed records | `/admin/migration/:batchId/exceptions` — **not in POC** | Reason per record; correct and resend, or reject with a reason |
+| 3 | Reconciliation | `/admin/migration/:batchId/reconciliation` — **not in POC** | Source total against loaded, exceptions, rejected, and **whether it reconciles** |
+| 4 | Suspected duplicates | `/duplicates` | Migrated records against app registrations, side by side |
+
+##### Migration record · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `source` | enum | On the candidate: `app` · `migration` · `ops` · `learner_record` — **a migrated record is always identifiable as one** |
+| `consentBasis` | enum | `app` · `migrated_unverified` · `ops` — **migrated records carry no app consent, and the platform must never pretend they do** |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A batch is started | Progress is observable while it runs, not only at the end |
+| 2 | It is paused and resumed | Resumable and re-runnable, with no double-loading |
+| 3 | A record fails to load | The reason is given per record; the failing field can be corrected and resent |
+| 4 | A record cannot be salvaged | Rejected with a reason and counted in reconciliation |
+| 5 | A delta run happens before cutover | Only changes since the last run are moved |
+| 6 | A migrated candidate later signs up on the app | Surfaced as a suspected duplicate. **Never merged automatically** |
+| 7 | A duplicate is merged by a human | The merge is on the activity trail with both source records named |
+| 8 | Reconciliation runs | Source total = loaded + exceptions + rejected, or the batch **does not reconcile and says so** |
+| 9 | A migrated candidate is selected by a cadence | Suppressed on consent, because `consentBasis` is `migrated_unverified` |
+| 10 | Cutover happens | The legacy system is read-only, then retired, with the date recorded |
+
+#### Tested against
+
+- **Happy** — a full load reconciling to source totals, with duplicates resolved by a human and the
+  legacy system switched off.
+- **All** — scenarios 1–10, plus: a batch resumed mid-run with no duplicates; a delta run after the
+  main load; a migrated record correctly excluded from consent-gated sends; reconciliation failing
+  loudly when totals disagree.
+
+---
+
+### F-P3-3 · Reporting
+
+*Fill rate, time to fill, where candidates drop out, and how recruiters and intake channels perform.*
+
+**Specs** [03-12](/docs/03-modules/03-12-analytics-and-reporting) ·
+[02-11](/docs/02-platform/02-11-event-spine) (the mart source, live since Part 1)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D9` | `M9-I5` · `M9-I6` · `M9-I7` | Funnel; fill and time to fill; trial survival |
+| `SOW-D28` | `M9-I8` · `M9-I9` · `M9-I10` | Where candidates drop out; channel and recruiter performance; monthly pack |
+| `SOW-A11` | `M9-I11` | Rate variance |
+| `SOW-D28` | `M9-I17` | Reporting tables (marts) |
+
+**This functionality is only possible because `SOW-F14` was built in Part 1.** Reports here cover the
+whole period since the event spine went live, including Parts 1 and 2, because the events were being
+written the entire time.
+
+#### Screens
+
+| # | Screen | Screen reference | What it reports |
+|---|---|---|---|
+| 1 | Funnel | `/reports/funnel` | Requisitions reaching each stage through to placement, and the drop between |
+| 2 | Fill and time to fill | `/reports/fill` | Proportion filled, and how long — **not counting days on hold** |
+| 3 | Trial survival | `/reports/trial-survival` | Proportion lasting to day 90, and why the rest did not |
+| 4 | Where candidates drop out | `/reports/stage-loss` | By client and recruiter, with the rejection reasons behind the losses |
+| 5 | Channel and recruiter performance | `/reports/performance` | Which intake channels and which recruiters convert |
+| 6 | Rate variance | `/reports/rate-variance` | Agreed against baseline, by client, role, specialty and acuity |
+| 7 | Monthly pack | `/reports/monthly-pack` | Schedule, composition, export |
+
+Every screen shows the **as-at time of the last mart refresh**, so nobody mistakes a daily mart for
+live data.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | The funnel is opened for a period before Part 3 began | **It is complete**, because the events existed from Part 1 |
+| 2 | Time to fill is computed for a requisition held for eleven days | Held days are excluded, matching the aging rule on the board |
+| 3 | Stage loss is grouped by recruiter | The rejection reason codes from `F-P1-7` are what it groups on |
+| 4 | Channel performance is opened | Compares console, email, WhatsApp, spreadsheet, HRMS and portal on one axis |
+| 5 | Rate variance is opened | Agreed against `baselineRate`, which has been captured since Part 1 |
+| 6 | The monthly pack is scheduled | It composes, exports and delivers on the schedule |
+| 7 | The mart has not refreshed today | The as-at time says so, plainly, on every screen |
+| 8 | A report is asked for a client with no data | The purposeful empty state, not a chart of zeroes |
+| 9 | The mart is rebuilt from the event log | The same numbers come out |
+
+#### Tested against
+
+- **Happy** — the funnel report covering a period that has already passed, and a monthly pack delivered
+  on schedule.
+- **All** — scenarios 1–9, plus: a mart replayed from events reproducing the same figures; time to fill
+  reconciling to the board's own aging; every report honouring the reader's permissions.
+
+---
+
+### F-P3-4 · Client portal at full width
+
+*Raising vacancies, shortlists, timesheet approval and invoices.*
+
+**Specs** [03-14](/docs/03-modules/03-14-client-portal) (the remaining four screens)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D12` | `M10-I3` | Portal: raise requisition |
+| `SOW-D12` | `M10-I5` | Portal: shortlists |
+| `SOW-D12` | `M10-I6` | Portal: timesheets |
+| `SOW-D12` | `M10-I7` | Portal: invoices |
+
+**The tokenised links do not go away.** A client with portal access and a client without both keep
+working, and the same action taken either way produces the same record.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Raise a requisition | `/portal/requisitions/new` | Same fields as internal; sites and departments **limited to the client** |
+| 2 | Shortlists | `/portal/shortlists` | Accept, reject with a reason, request an interview |
+| 3 | Timesheets | `/portal/timesheets` | Approve, or query a line with a reason |
+| 4 | Invoices | `/portal/invoices` | List and download; rate card and contract read-only |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A client raises a vacancy in the portal | **The same requisition record** as any other channel, with `sourceChannel` = `portal` |
+| 2 | It is submitted incomplete | Completeness is checked **at submit**, so the chase loop is rarely needed |
+| 3 | Their site list is opened | Only their own sites and departments |
+| 4 | They accept a shortlisted candidate in the portal | The same shortlist entry as the link page would have written |
+| 5 | The same shortlist is also open as a link | Answering either one answers the shortlist; the other shows already-answered |
+| 6 | They approve a timesheet in the portal | The same approval, the same billing trigger |
+| 7 | They query a line | The same query state and reason as the link path |
+| 8 | They download an invoice | Only their own; the rate card and contract are read-only |
+| 9 | A portal user without invoice permission opens it | The no-permission state within their own client scope |
+
+#### Tested against
+
+- **Happy** — a client raises a vacancy, receives a shortlist, accepts a candidate, approves a
+  timesheet and downloads the invoice, entirely in the portal.
+- **All** — scenarios 1–9, plus: the portal path and the link path producing byte-identical records for
+  the same action; the scope predicate on all four new routes; the portal-raised requisition scoring
+  completeness identically to a typed one.
+
+---
+
+### F-P3-5 · Workforce changes and collections
+
+*Salary changes and advances through proper approvals, and overdue invoices chased.*
+
+**Specs** [03-16](/docs/03-modules/03-16-workforce-operations) ·
+[03-20](/docs/03-modules/03-20-collections) ·
+[03-11](/docs/03-modules/03-11-billing-and-receivables) (ageing)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D23` | `M12-I1` · `M12-I6` | Requests — the maker-checker queue; the request-and-approve engine |
+| `SOW-D23` | `M12-I2` · `M12-I3` | Salary revision, individual and bulk; advances and holds |
+| `SOW-D23` | `M12-I4` · `M12-I5` | Attendance upload and pairing; geo-fence settings |
+| `SOW-D25` | `M15-I3` · `M15-I4` · `M15-I5` · `M15-I7` | Payments received and matching; overdue invoices; credit and debit notes; overdue reminders |
+| `SOW-D8` | `M9-I2` | Receivables ageing, on top of the Part 2 list |
+
+**Specification basis:** D23 and D25 are named in the client's Part A with their contents listed; there
+is no client module chapter for either. All items carry Low confidence. `OI-A-13` may pull `M15-I5`
+(credit notes) forward.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Requests and approvals | `/workforce/requests` | Waiting for approval **with before and after values shown**. The raiser cannot approve |
+| 2 | Salary revision | `/workforce/salary` — **not in POC** | One associate or a group, effective date, send for approval |
+| 3 | Advances and holds | `/workforce/advances` — **not in POC** | An advance with its recovery plan; hold and release |
+| 4 | Attendance upload | `/workforce/attendance-upload` — **not in POC** | Uploaded attendance **paired against app check-ins**, mismatches resolved with a reason |
+| 5 | Geo-fence settings | `/admin/geo-fences` — **not in POC** | Boundary per site and per visit address, mode, tolerance |
+| 6 | Payments received | `/payments` — **not in POC** | Match across invoices and part payments, record TDS, unmatched queue |
+| 7 | Overdue invoices | `/receivables` | Grouped by how overdue, **with what has already been sent chasing each one** |
+| 8 | Credit and debit notes | `/credit-notes` — **not in POC** | Raised against an invoice with a reason, sent for approval |
+| 9 | Dunning schedule | `/admin/dunning` — **not in POC** | When reminders go, and when they stop |
+
+##### Workforce request · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `requestType` | enum | `salary_revision` · `advance` · `hold` · `release` |
+| `beforeValue` · `afterValue` | string | **Both shown to the approver. An approval on a value alone is not an approval** |
+| `state` | enum | `drafted` · `submitted` · `approved` · `rejected` · `applied` |
+| `raisedBy` · `approvedBy` | string | **The raiser cannot be the approver** |
+| `rejectedReason` | string | Required on reject |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A salary revision is raised | State `submitted`; before and after values are both visible to the approver |
+| 2 | The raiser tries to approve it | **Refused** |
+| 3 | It is approved | State `applied`, effective from the stated date, on the activity trail |
+| 4 | It is rejected | Reason required; nothing is applied |
+| 5 | A bulk revision covers forty associates and two fail validation | The two are reported **by name** and the other thirty-eight proceed |
+| 6 | An advance is granted | Its recovery plan is recorded and honoured by later pay runs |
+| 7 | External attendance is uploaded | Paired against app check-ins; mismatches listed and resolved with a reason |
+| 8 | A geo-fence is set for a visit address | Check-ins outside it are flagged in `F-P2-5` terms |
+| 9 | A payment arrives covering two invoices in part | Matched across both, with TDS recorded, and the remainder left open |
+| 10 | A payment cannot be matched | It waits in the unmatched queue. **Nothing is guessed** |
+| 11 | An invoice passes its payment terms | Ageing starts from the contract's own payment terms, not a platform default |
+| 12 | Dunning is scheduled and the client pays | **The chase stops on payment**, mid-schedule |
+| 13 | A credit note is raised | Against a named invoice, with a reason, and sent for approval |
+
+#### Tested against
+
+- **Happy** — a salary revision raised, approved by a second person and applied; an overdue invoice
+  chased and the chase stopping the moment payment lands.
+- **All** — scenarios 1–13, plus: maker-checker proven unbypassable; a part payment across two invoices
+  with TDS; ageing computed from client payment terms; the bulk partial-failure summary naming rows.
+
+---
+
+### F-P3-6 · Depth across the platform
+
+*Trial dashboards, per-category ranking weights, CV reading, duplicate resolution, electronic
+signature, automated phone calls, and the payroll engine connected.*
+
+**Specs** [03-09](/docs/03-modules/03-09-placement-and-trial) ·
+[03-07](/docs/03-modules/03-07-matching-and-ranking) ·
+[03-05](/docs/03-modules/03-05-candidate-app) ·
+[03-04](/docs/03-modules/03-04-candidate-record-and-credentials) ·
+[03-08](/docs/03-modules/03-08-selection-and-offers) ·
+[03-06](/docs/03-modules/03-06-engagement-and-availability) ·
+[03-17](/docs/03-modules/03-17-payroll) ·
+[03-15](/docs/03-modules/03-15-associate-onboarding) ·
+[03-18](/docs/03-modules/03-18-demand-prioritisation-and-approval) ·
+[03-19](/docs/03-modules/03-19-timesheet-extensions) ·
+[02-07](/docs/02-platform/02-07-list-engine) ·
+[02-12](/docs/02-platform/02-12-data-protection) ·
+[04-04](/docs/04-integrations/04-04-outbound-voice) ·
+[04-06](/docs/04-integrations/04-06-ai-parsing-and-classification) ·
+[04-10](/docs/04-integrations/04-10-document-ocr) ·
+[04-11](/docs/04-integrations/04-11-electronic-signature) ·
+[04-14](/docs/04-integrations/04-14-payroll-engine)
+
+#### SOW ref
+
+Grouped as the client's own summary of this part groups them.
+
+| Depth | Ref | Item | Screen reference |
+|---|---|---|---|
+| Trial dashboards | `SOW-A6` | `M8-I3` | `/trial` |
+| Per-category ranking weights | `SOW-D18` | `M6-I5` · `M6-I1` (saved searches) | `/admin/ranking-weights`, `/search` |
+| Ranking learns from outcomes | `SOW-A8` | `M6-I9` | `/admin/ranking-weights` |
+| CV reading | `SOW-D3` | `M4-I20` | `/app/profile`, `/candidates/:id` |
+| Document reading and review | `SOW-D4` | `M4-I14` | `/verification/documents/:id` — **not in POC** |
+| Duplicate resolution | `SOW-D3` | `M4-I21` | `/duplicates` |
+| Certifications and learner matching | `SOW-D16` | `M4-I19` | `/learner-matches` |
+| Electronic signature | `SOW-D20` | `M7-I6` (signature path) | `/offers` |
+| Automated phone calls | `SOW-A5` | `M5-I6` · `M5-I13` | `/admin/voice-campaigns` — **not in POC**, `/engagement/calls` |
+| Payroll engine connected | `SOW-D24` | `M13-I1` · `M13-I2` · `M13-I3` · `M13-I4` | `/workforce/payroll`, `/app/payslips` |
+| The onboarding gate | `SOW-D21` | `M11-I5` | `/payroll/blocked` — **not in POC** |
+| Leave, overtime, internal approval | `SOW-D22` | `M15-I1` · `M15-I2` · `M15-I6` | `/timesheets`, `/admin/leave-overtime` — **not in POC** |
+| Demand prioritisation and approval | `SOW-D14` | `M14-I1` · `M14-I2` · `M14-I3` · `M14-I4` | `/board?sort=priority`, `/approvals` — **not in POC** |
+| Bulk actions and virtualisation | `SOW-F08` | `M2-I14` | every list |
+| Retention sweep and consent gaps | `SOW-F13` | `M4-I27` | `/admin/data-protection/retention` — **not in POC** |
+
+##### Pay run · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `periodStart` · `periodEnd` | date | |
+| `state` | enum | `open` · `inputs_locked` · `sent` · `results_received` · `payslips_issued` · `closed` · `failed` |
+| `associateCount` · `blockedCount` | integer | **Blocked associates are named with the reason, never only counted** |
+| `grossTotal` · `netTotal` | number | Received back from the engine, not computed here |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A recruiter opens the trial dashboard | Done, due and missed per placement, with day-90 answers coming up |
+| 2 | Weights are tuned for doctors only | Nurse and allied ranking are unaffected; each set is versioned separately |
+| 3 | A placement outcome is recorded | It writes back into the ranking inputs, and the change is explicable |
+| 4 | A CV is uploaded | Read automatically, with **review-and-correct** before anything is saved |
+| 5 | A document is uploaded | The source document is shown **beside the extracted values**, low-confidence fields distinguished |
+| 6 | A value read from a document is corrected | The correction is retained beside the original reading |
+| 7 | Two candidate records look like the same person | Surfaced for a human. **Nothing merges automatically** |
+| 8 | A certification is matched to a learner record | Linked, with the source named |
+| 9 | An offer is sent for electronic signature | Signed inside the platform; the signed document is stored and the offer state advances |
+| 10 | A voice campaign runs | Calls placed inside the call window, answers extracted, **the recording playable beside the transcript** |
+| 11 | A voice answer and a WhatsApp answer arrive from one candidate | **One availability record** |
+| 12 | A pay run opens with a blocked associate | Named, with the blocking checklist item, before inputs lock |
+| 13 | Inputs are locked and the run is sent to the engine | State `sent`; results received back are reconciled; exceptions reported per associate |
+| 14 | Payslips are issued | Available in the app and over WhatsApp |
+| 15 | Leave and overtime exist on a timesheet | The `F-P2-1` timesheet **gains lines; it is not replaced** |
+| 16 | A timesheet needs internal approval before the client sees it | Routed through the `F-P3-5` approval engine, **which is not built twice** |
+| 17 | The board is sorted by priority | Each score shows **why it scored as it did**; the old sort is still available |
+| 18 | A recruiter is suggested for a requisition | The suggestion shows **how many requisitions that recruiter already holds**; overriding requires a reason |
+| 19 | Retention periods lapse | The sweep runs; the consent gap report names what is missing |
+
+#### Tested against
+
+- **Happy** — a doctor ranked on a doctor weight set tuned from real outcomes, offered a role signed
+  electronically, onboarded, and paid through the engine with a payslip in the app.
+- **All** — scenarios 1–19, plus: OCR corrections retained beside originals; no automatic merge
+  anywhere; the approval engine shared rather than duplicated between `F-P3-5` and timesheets; the
+  priority sort never removing the original sort; payroll exceptions reported per associate rather than
+  as a failed run.
+
+---
+
+### F-P3-7 · Documentation and go-live
+
+*Technical and user documentation, acceptance testing support, and the cutover.*
+
+**Specs** [05-05](/docs/05-delivery/05-05-documentation-uat-and-golive) ·
+[01-08](/docs/01-standards/01-08-testing-and-quality)
+
+#### SOW ref
+
+| Ref | The plan's own description |
+|---|---|
+| `SOW-D11` | Technical documentation · user guides · UAT support · cutover and legacy retirement |
+
+These are **four named contract deliverables that are not components and not screens.** They are the
+last thing in the last part because they describe the finished platform, and describing it earlier
+means writing it twice.
+
+#### Deliverables
+
+| # | Deliverable | Done when |
+|---|---|---|
+| 1 | Technical documentation | The thirty-five specs, the standards and the operational runbooks are current against what shipped, with every deviation reconciled |
+| 2 | User guides | One per role: recruiter, fulfilment lead, BD, verification, finance, administrator — plus the candidate app and the client portal |
+| 3 | UAT support | The scenario catalogue authored jointly, executed by Apollo, with defects triaged and a written record of what was raised and what changed |
+| 4 | Cutover and legacy retirement | The platform is the system of record, the legacy system is read-only and then retired, and the date is recorded |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | UAT raises feedback on capability already inside the agreed scope | It **completes** the specification and is fixed |
+| 2 | UAT raises feedback introducing new capability | It is a **change**, recorded as one, and not absorbed silently |
+| 3 | A user guide is checked against the built screen | They match, or the guide is wrong and is corrected |
+| 4 | A spec is checked against the built component | They match, or the **spec** is corrected — the code is not the documentation |
+| 5 | Cutover runs | A final delta migration, reconciliation, and the legacy system set read-only |
+| 6 | A defect is found after cutover | The rollback path and the support route are both already documented |
+
+#### Tested against
+
+- **Happy** — Apollo runs the scenario catalogue itself, against the real platform, and signs it off.
+- **All** — scenarios 1–6, plus: every open decision in [05-03](/docs/05-delivery/05-03-open-decisions)
+  either closed or explicitly carried forward with a named owner; every `AS-` assumption either
+  confirmed or converted into a change.
+
+## 4. Part 3 exit conditions
+
+| # | Condition | Proves |
+|---|---|---|
+| 1 | The same requirement in four formats produces four requisitions differing only in source channel and raw payload | `F-P3-1` |
+| 2 | A full migration reconciles to source totals, with duplicates resolved by a human | `F-P3-2` |
+| 3 | The funnel report covers a period that has already passed, complete | `F-P3-3`, and that `SOW-F14` was built in Part 1 |
+| 4 | A client completes an entire cycle in the portal, producing records identical to the link path | `F-P3-4` |
+| 5 | Maker-checker is proven unbypassable, and a dunning chase stops on payment | `F-P3-5` |
+| 6 | A pay run completes through the engine with payslips in the app | `F-P3-6` |
+| 7 | Apollo executes the scenario catalogue itself and signs it off | `F-P3-7` |
+| 8 | **The legacy system is read-only, then retired** | The whole engagement |
+
+## 5. Open questions
+
+| Ref | Question | Working assumption |
+|---|---|---|
+| `OI-A-02` | What is in the legacy system? | Answered by the Part 2 profiling. Until then every `F-P3-2` item is Low confidence and **unsized** |
+| `OI-A-13` | Does the guarantee period change the billing trigger or only the refund? | Only the refund — but if it does not, `M15-I5` credit notes move earlier and `F-P1-8` changes |
+| `OI-A-16` | What volume can manual payroll support until `F-P3-6` lands? | Stated as a cap, not assumed away |
+| `OI-HS-15` | Are inbound learner records in scope? | Handled in `F-P3-1`; if out of scope they are discarded with a reason |
+
+**Half the suppliers named in this part are still unnamed** — speech-to-text, outbound voice, OCR,
+electronic signature, the payroll engine and the AI parser. Each is an unpriced integration and a
+failure mode nobody can test against until it is chosen; see
+[04-00](/docs/04-integrations/04-00-integration-register) and
+[05-04](/docs/05-delivery/05-04-external-dependencies).

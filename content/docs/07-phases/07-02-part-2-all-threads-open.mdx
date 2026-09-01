@@ -1,0 +1,687 @@
+---
+title: "07-02 Part 2 — All Threads Open"
+description: "Every path the platform has to carry now exists: shift staffing, multi-channel intake, engagement, three categories, home healthcare, the client portal and associate onboarding. None at full width."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** A1, A3, A4, A9, A12, A13, A14, D3, D5, D12, D14, D16, D21, D22, D25, D29, F07, F08, F13 · **Risk** — · **Release** Part 2
+
+## 1. Purpose
+
+Part 1 proved that one line of business can run from a vacancy to a paid invoice. Part 2 opens **every
+other path the platform has to carry**, and closes the second money path.
+
+Shift staffing runs end to end — shifts offered and accepted on the app, checked into, turned into a
+timesheet, approved by the client and invoiced. Vacancies stop being typed and start arriving by email
+and WhatsApp, filling themselves in, with missing details chased on the channel they came from.
+Candidates are contacted on a schedule and the platform learns who is genuinely available. Doctors and
+allied health go live with their own councils, specialty fields, ranking weights and trial questions.
+Home healthcare runs beside hospital. Clients log in and see their own vacancies. Associates are
+onboarded with their statutory forms, ready for a payroll engine that is connected in Part 3.
+
+**None of these is at full width.** Width is Part 3.
+
+## 2. Scope
+
+### SOW references covered
+
+| SOW ref | What the plan calls it | Functionality | Slice in Part 2 |
+|---|---|---|---|
+| `SOW-D22` | Shift attendance, timesheets, approval, export | F-P2-1 | Whole — leave and overtime are Part 3 |
+| `SOW-D2` | Shift templates and shift demand lines | F-P2-1 | The contractual half of the requisition |
+| `SOW-D3` | Shifts and check-in in the app | F-P2-1 | Whole |
+| `SOW-D25` | Shift invoices | F-P2-1 | The shift invoice only — collections are Part 3 |
+| `SOW-A13` | Timesheet approval and day 30 / 60 link types | F-P2-1, F-P2-4 | The remaining three link types |
+| `SOW-A1` | Inbound receiver, sender matching, intent detection, the four queues, the chase | F-P2-2 | Email and WhatsApp text — spreadsheet, HRMS and voice are Part 3 |
+| `SOW-D1` | Sender identities | F-P2-2 | Whole |
+| `SOW-F07` | Templates, triggers, the sender across four channels, retry and receipts | F-P2-2, F-P2-3 | Whole |
+| `SOW-D29` | Contact schedule and send window | F-P2-3 | Whole |
+| `SOW-A3` | Freshness score — decay and reset | F-P2-3 | Whole |
+| `SOW-A4` | Who to contact next | F-P2-3 | Whole |
+| `SOW-A14` | Candidate reply registration and reply handling | F-P2-3 | WhatsApp and app — voice is Part 3 |
+| `SOW-D5` | Talent segments | F-P2-3, F-P2-8 | Whole |
+| `SOW-A9` | Specialty details and category fields | F-P2-4 | Doctor and allied-health sets populated |
+| `SOW-A12` | India registry adapters and the verification aggregator | F-P2-4 | Doctor and allied councils, plus the aggregator |
+| `SOW-D16` | Pool assignment across both supply bases | F-P2-4 | Whole |
+| `SOW-D18` | Ranking weights per category and base | F-P2-4 | One weight set per live category × base |
+| `SOW-D7` | Privileging | F-P2-4 | Whole |
+| `SOW-A6` | Check-in question sets per category and care setting | F-P2-4, F-P2-5 | Whole |
+| `SOW-D12` | Client sign in, portal users, portal data scoping, my requisitions | F-P2-6 | Login and read — raising and approving are Part 3 |
+| `SOW-D21` | Associate details, statutory forms, document checklist, app onboarding | F-P2-7 | All but the pay-run gate |
+| `SOW-F08` | Column chooser, saved views, export | F-P2-8 | Whole — bulk actions are Part 3 |
+| `SOW-D20` | Offer templates by state, role and skill | F-P2-8 | Whole |
+| `SOW-D8` | Money owed | F-P2-8 | The list — ageing and chasing are Part 3 |
+| `SOW-F13` | Consent withdrawal and erasure intake | F-P2-2, F-P2-3 | Withdrawal and intake — the retention sweep is Part 3 |
+| `SOW-A10` | CPAL data profiling | F-P2-8 | **Profiling only.** Until it runs, the migration cannot be sized |
+
+### Explicitly out of scope
+
+- **Every intake channel except email and WhatsApp text.** Spreadsheets in client formats, voice notes
+  and HRMS feeds are Part 3.
+- **Voice campaigns and automated calling.** Part 3.
+- **Every report.** Part 3.
+- **The migration itself.** Only profiling happens here.
+- **Payroll.** Associates are onboarded and made ready; no pay run exists.
+- **Raising a vacancy from the portal**, portal shortlists, portal timesheet approval and portal
+  invoices. Part 3.
+- Collections, workforce changes, prioritisation, leave and overtime.
+
+### Explicitly not built
+
+- A second attendance route. **The app is the only way a shift check-in reaches the platform**, and it
+  stays that way. Externally uploaded attendance in Part 3 is a pairing exercise, not a second route.
+- Automatic merging of anything. Suspected duplicates are surfaced for a human in both Part 2 and Part 3.
+
+## 3. Scoped functionality
+
+Screen references resolve against the POC base URL (`NEXT_PUBLIC_POC_APP_URL`, default
+`http://localhost:5173`). Element definitions are stated where the Part 2 slice differs from the
+owning spec; otherwise the spec is the authority.
+
+---
+
+### F-P2-1 · Shift staffing end to end
+
+*Shifts offered and accepted on the app, checked into, turned into a timesheet, approved by the client
+and invoiced.*
+
+**Specs** [03-03](/docs/03-modules/03-03-requisitions-and-allocation) (shift half) ·
+[03-05](/docs/03-modules/03-05-candidate-app) (shifts, check-in) ·
+[03-10](/docs/03-modules/03-10-attendance-and-timesheets) (whole) ·
+[02-14](/docs/02-platform/02-14-client-link-surfaces) (timesheet approval) ·
+[03-11](/docs/03-modules/03-11-billing-and-receivables) (shift invoice) ·
+[03-07](/docs/03-modules/03-07-matching-and-ranking) (shift ranking)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D2` | `M3-I13` · `M3-I14` | Shift templates; shift demand lines |
+| `SOW-D3` | `M4-I5` · `M4-I7` | Shifts (Base B); shift check-in, offline-tolerant |
+| `SOW-D18` | `M6-I10` | Shift ranking |
+| `SOW-D22` | `M8-I7` · `M8-I8` · `M8-I9` | Shift attendance and exception resolution; timesheet; timesheet tracking |
+| `SOW-D22` | `M8-I14` · `M8-I15` · `M8-I16` · `M8-I17` | Check-in receiver; timesheet build; timesheet waiting period; approved timesheet export |
+| `SOW-A13` | `M7-I12` | Client page: timesheet approval |
+| `SOW-D25` | `M9-I4` · `M9-I15` | Shift invoices list; shift invoice (service) |
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Shift lines | `/requisitions/:id` · tab **Shift lines** | Per shift, with positions and state |
+| 2 | Shift templates | `/admin/shift-templates` — **not in POC** | The patterns demand lines are generated from |
+| 3 | App: shifts | `/app/shifts` | Date, times, location, rate; accept or decline |
+| 4 | App: check-in | `/app/check-in` | Arrive and finish. **Offline-tolerant** |
+| 5 | Shift attendance | `/attendance` | Who was expected, when they checked in, **where the phone was** |
+| 6 | Resolve a problem | `/attendance` · exception filter | Missed check-in or check-out, resolved with a reason |
+| 7 | Timesheet | `/timesheets/:id` | Shifts, hours and value; lines with unresolved problems marked |
+| 8 | Timesheet tracking | `/timesheets` | By period and state, **with time left before deemed approved** |
+| 9 | Client timesheet page | `/l/:token` | Approve, or query a line with a reason |
+| 10 | Shift invoices | `/invoices` · filter **shift** | With the timesheet each came from |
+
+##### Shift demand line · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `shiftDate` · `startsAt` · `endsAt` | date / timestamp | |
+| `positionsRequested` · `positionsFilled` | integer | |
+| `visitAddress` | string, optional | **Home healthcare only** — see `F-P2-5` |
+| `state` | enum | `open` · `partially_filled` · `filled` · `held` · `cancelled` |
+
+##### Shift attendance · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `expectedStart` · `expectedEnd` | timestamp | From the demand line |
+| `checkedInAt` · `checkedOutAt` | timestamp | **From the app. There is no other route** |
+| `locationFlag` | enum | `within_expected` · `outside_expected` · `unknown` |
+| `wasOfflineSync` | boolean | **An offline check-in keeps its original timestamp, not the sync time** |
+| `state` | enum | `expected` · `checked_in` · `checked_out` · `no_show` · `exception` · `resolved` |
+| `exceptionKind` · `correctionReason` | string | **A manual correction always carries a reason and is audited** |
+| `hours` | number | Derived |
+
+##### Timesheet · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `periodStart` · `periodEnd` | date | |
+| `state` | enum | `building` · `built` · `internally_approved` · `sent_for_approval` · `approved` · `deemed_approved` · `queried` · `invoiced` · `void` |
+| `hasUnresolvedExceptions` | boolean | **Blocks sending for approval** |
+| `approvalWindowDays` · `approvalWindowSource` | integer / enum | `client` · `platform_default` |
+| `approvedAt` · `approvedByRecipient` · `deemedAt` | timestamp / string | Approved and deemed are distinguished, as on the retention record |
+| `lines[]` | object | `shiftDate`, `hours`, `rate`, `value`, `hasException`, `queryReason` — **priced against the contract version, not today's rate card** |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A contractual requisition is created from a shift template | Demand lines are generated per shift, each with its own positions |
+| 2 | Shifts are offered to Base B candidates | Ranked by the Base B weight set; each candidate sees date, time, location and rate |
+| 3 | A nurse accepts two shifts that overlap | The second is refused. **Clash prevention is at acceptance, not at check-in** |
+| 4 | She checks in on site | Attendance `checked_in`, `locationFlag` = `within_expected` |
+| 5 | She checks in with no signal | Stored on the device, synced later, **keeping the original timestamp**, `wasOfflineSync` true |
+| 6 | She never checks in | `no_show`, surfaced on the attendance screen as an exception |
+| 7 | She checks out an hour late | Hours recomputed; the variance is visible |
+| 8 | An exception is corrected by hand | Reason required, and the correction is on the activity trail |
+| 9 | The period closes | A timesheet is built and priced from the contract version in force |
+| 10 | A timesheet with unresolved exceptions is sent for approval | **Refused**, naming the lines |
+| 11 | A clean timesheet is sent | A `timesheet_approval` link is issued to the designated contact |
+| 12 | The client approves | State `approved`, with who approved and when |
+| 13 | The client queries one line | State `queried` with the reason against that line; the rest is not approved by default |
+| 14 | The window runs out with no answer | State `deemed_approved` with the window and its source, **distinguishable from approved everywhere** |
+| 15 | An approved or deemed timesheet exists | A billing trigger of type `approved_timesheet`, and a shift invoice traceable to the approval **in two clicks** |
+| 16 | A systemic cause affects twenty shifts | Bulk-resolve with one reason, reported line by line |
+
+#### Tested against
+
+- **Happy** — a shift offered, accepted, checked into on site, timesheeted, approved by a client link
+  and invoiced, all traceable back to the check-in.
+- **All** — scenarios 1–16, plus: an offline check-in syncing days later; deemed approval producing a
+  valid invoice input; a timesheet priced across a contract version change; the shift invoice and the
+  permanent invoice sharing the same trigger and evidence model.
+
+---
+
+### F-P2-2 · Vacancy intake
+
+*Vacancies arrive by email and WhatsApp and fill themselves in; missing details are chased on the same
+channel.*
+
+**Specs** [02-08](/docs/02-platform/02-08-inbound-pipeline) (email, WhatsApp text) ·
+[03-02](/docs/03-modules/03-02-demand-intake) (all but per-client spreadsheets) ·
+[02-09](/docs/02-platform/02-09-outbound-messaging) (templates, triggers, the chase) ·
+[03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) (sender identities)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-A1` | `M3-I18` · `M3-I19` · `M3-I21` · `M3-I29` · `M3-I17` | Inbound receiver; sender matching to exactly one client; message type detection with threshold and fallback; second message type registration contract; reclassify |
+| `SOW-A1` | `M3-I1` · `M3-I2` · `M3-I3` · `M3-I4` | Inbound list; unmatched senders; manual entry queue; suspected duplicates |
+| `SOW-A1` | `M3-I5` · `M3-I7` · `M3-I8` | Channel settings; required fields per category; follow-up settings |
+| `SOW-A1` | `M3-I20` · `M3-I22` | Parsers; completeness scoring and chase |
+| `SOW-D1` | `M2-I6` | Client senders |
+| `SOW-F07` | `M5-I1` · `M5-I2` | Message templates with WhatsApp approval state; triggers |
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Inbound list | `/inbound` | Channel, sender, receipt time, state |
+| 2 | Unmatched senders | `/inbound/unmatched` | The original message alongside; link to a client, or escalate to BD |
+| 3 | Manual entry | `/inbound/manual-entry` | Raw text or file, with **a prefilled requisition form** |
+| 4 | Suspected duplicates | `/duplicates` | Two requisitions side by side, differing fields marked |
+| 5 | Sender identities | `/clients/:id` · tab **Sender identities** | Addresses and numbers mapped to exactly one client |
+| 6 | Channels | `/admin/channels` | Six listed; **portal shown as listed but not available** until `F-P2-6` |
+| 7 | Message templates | `/admin/templates` | By channel and purpose, with approval state and lead time |
+| 8 | Required fields | `/admin/required-fields` — **not in POC** | Per candidate category |
+| 9 | Follow-up settings | `/admin/followup` — **not in POC** | Windows and escalation |
+| 10 | Requisition source | `/requisitions/:id` · tab **Source** | Channel and **the original message**, retained |
+
+##### Inbound record · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `channel` | enum | `email` · `whatsapp_text` in Part 2; `spreadsheet` · `whatsapp_voice` · `hrms` · `portal` follow |
+| `senderRaw` · `senderName` | string | The address or number as received |
+| `clientId` | string, optional | Resolved to **exactly one** client, or the record is `unmatched` |
+| `state` | enum | `received` · `identified` · `unmatched` · `parsed` · `unparseable` · `consumed` · `discarded` |
+| `intentSet` | enum | `demand` · `candidate_response` · `learner_record` |
+| `intentConfidence` | number | **Shown on the reclassify control, so recurring misclassification is measurable** |
+| `rawPayload` | string | **Retained always.** A requisition can always be read back to what arrived |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | An email arrives from a known client address | `identified`, classified `demand`, parsed into a requisition |
+| 2 | The same requirement arrives on WhatsApp | A requisition **differing only in source channel and raw payload** |
+| 3 | The provider redelivers the same message | Deduplicated. No second requisition |
+| 4 | An address matches two clients | **Never auto-resolved.** It lands in unmatched for a human |
+| 5 | An unknown sender writes in | `unmatched`, with the original beside the resolution controls, and escalation to BD |
+| 6 | Confidence falls below the threshold | Routed to the manual entry queue, **prefilled with sender, channel and receipt time** |
+| 7 | A message is classified wrongly | Reclassified **without re-ingestion**, with the confidence visible |
+| 8 | A parsed requisition is missing required fields | `incomplete`, and a chase goes out **on the channel it arrived on** |
+| 9 | The chase is not answered inside the follow-up window | Escalated per the configured window |
+| 10 | Two requisitions look alike | Surfaced side by side with differing fields marked. **Nothing merges automatically** |
+| 11 | A second consumer registers a message type | The intent-registration contract test passes with no change to the pipeline |
+| 12 | A WhatsApp template has not been approved | The send is blocked with the approval state visible, not failed silently |
+
+#### Tested against
+
+- **Happy** — the same requirement sent by email and by WhatsApp produces two requisitions differing
+  only in source channel and raw payload, both completeness-scored identically to a typed one.
+- **All** — scenarios 1–12, plus: no automatic merge occurring anywhere; the raw payload readable from
+  the requisition after parsing; a chase stopping the moment the field arrives; the second-consumer
+  contract test.
+
+---
+
+### F-P2-3 · Availability and contact
+
+*The platform contacts candidates on a schedule and keeps track of who is genuinely available.*
+
+**Specs** [03-06](/docs/03-modules/03-06-engagement-and-availability) (all but voice) ·
+[02-09](/docs/02-platform/02-09-outbound-messaging) (whole) ·
+[03-07](/docs/03-modules/03-07-matching-and-ranking) (talent segments)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D29` | `M5-I5` | Contact schedule and send window |
+| `SOW-A3` | `M5-I10` | Freshness score — decay and reset |
+| `SOW-A4` | `M5-I11` | Who to contact next |
+| `SOW-A14` | `M5-I7` · `M5-I14` · `M5-I16` | Replies to review; candidate reply registration; write reply to candidate |
+| `SOW-F07` | `M5-I3` · `M5-I4` · `M5-I8` · `M5-I9` | Delivery log with cost attribution; contact history; the sender across four channels; retry, suppression and receipts |
+| `SOW-D5` | `M6-I2` | Talent segments |
+
+**`SOW-A3`, `SOW-A4`, `SOW-A14` and `SOW-D29` are one unit and must not be split across sprints** —
+build any three and none of them does anything useful.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Contact schedules | `/admin/cadence` | One per segment, with **a volume and cost projection before enabling** |
+| 2 | Talent segments | `/segments` | The six segments, shared with the cadence model |
+| 3 | Replies to review | `/engagement/review` | The original message beside the platform's reading; accept, correct or reject |
+| 4 | Cadence runs | `/engagement/runs` | Which rule ran, how many selected, **how many suppressed and why** |
+| 5 | Delivery log | `/messaging/delivery-log` | Every send, status, cost and failure |
+| 6 | Contact history | `/candidates/:id` · tab **Contact history** | Every message to this candidate, and what came back |
+| 7 | App: availability | `/app/availability` | The candidate's own answer, in her own hands |
+
+##### Segment and cadence · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `category` · `base` | enum | The six segments are category × base |
+| `cadence.intervalDays` | integer | |
+| `cadence.channelOrder` | string, many | Fallback order across WhatsApp, SMS, email and push |
+| `cadence.stalenessThreshold` | number | When an answer stops being trusted |
+| `cadence.decayHalfLifeDays` | number | How confidence falls between answers |
+| `projectedMonthlyMessages` · `projectedMonthlyCost` | number | **Shown before the schedule can be enabled** |
+| `isEnabled` | boolean | Off by default |
+
+##### Availability response · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `channel` | enum | `app` · `whatsapp` · `voice` — **voice is Part 3** |
+| `isStructured` | boolean | A tapped answer, or free text that had to be read |
+| `rawText` · `interpreted` · `confidence` | string / number | The original is kept beside the reading |
+| `state` | enum | `received` · `understood` · `needs_review` · `confirmed` · `rejected` |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A schedule is configured for a segment | The projected monthly volume and cost are shown **before** it can be enabled |
+| 2 | It is enabled and runs | The run records how many were selected and how many suppressed, by cause |
+| 3 | A candidate has opted out | Suppressed, counted as `suppressedOptOut`, never sent to |
+| 4 | A candidate has already had the maximum messages this period | Suppressed on frequency |
+| 5 | Consent is absent | Suppressed on consent. **No message is sent** |
+| 6 | A nurse replies on WhatsApp "free from Monday" | Read, `needs_review` if confidence is low, and the original is kept beside the reading |
+| 7 | A reviewer corrects the reading | The correction is stored; the original is not overwritten |
+| 8 | She answers the same question in the app instead | **One availability record**, whichever channel it came from |
+| 9 | Her answer is confirmed | Freshness resets, confidence returns to full |
+| 10 | Time passes with no answer | Confidence decays on the configured half-life |
+| 11 | A shift ranking runs after her reply | **The order changes because of it** |
+| 12 | Send window is 09:00–19:00 and a run fires at 21:00 | Held until the window opens; nothing is sent outside it |
+| 13 | Finance asks what messaging cost this month | The delivery log separates the intake chase from the cadence **on the same WhatsApp number**, because every message carries its cause |
+
+#### Tested against
+
+- **Happy** — a Base B nurse is contacted on cadence, replies on WhatsApp, her freshness resets, and a
+  shift ranking reorders because of it.
+- **All** — scenarios 1–13, plus: a response from the app and from WhatsApp reconciling to one record;
+  the cost projection matching the actual within a stated tolerance; suppression counted for all three
+  causes; **app adoption measured here on the in-house nurse pilot**.
+
+---
+
+### F-P2-4 · Doctors and allied health
+
+*Both categories go live with their own councils, specialty fields, ranking weights and trial questions.*
+
+**Specs** [02-03](/docs/02-platform/02-03-settings-and-reference-data) ·
+[02-13](/docs/02-platform/02-13-market-adapter-layer) ·
+[03-04](/docs/03-modules/03-04-candidate-record-and-credentials) ·
+[03-07](/docs/03-modules/03-07-matching-and-ranking) ·
+[03-09](/docs/03-modules/03-09-placement-and-trial)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-A9` | `M4-I3` · `M4-I18` | Specialty details per category; category fields — **doctor and allied sets populated** |
+| `SOW-A12` | `M1-I14` · `M1-I15` | India registry adapters; verification aggregator |
+| `SOW-D16` | `M4-I17` | Pool assignment across both supply bases |
+| `SOW-D18` | `M6-I5` | Ranking weights — one set per live category × base |
+| `SOW-D7` | `M8-I10` | Privileging |
+| `SOW-A6` | `M8-I12` | Check-in questions — one set per category |
+| `SOW-A13` | `M7-I11` | Client pages: day 30 and day 60 check-in |
+
+**This functionality is the test of the Part 1 architecture.** If anything here needs a code branch on
+category, the Part 1 reference-data work was done wrong.
+
+#### Screens
+
+Every screen is one already built in Part 1, now carrying two more categories. No new screen is created
+except privileging.
+
+| # | Screen | Screen reference | What changes |
+|---|---|---|---|
+| 1 | Reference data | `/admin/settings` · tab **Reference data** | Doctor and allied-health values added **as data** |
+| 2 | Registries | `/admin/registries` | Medical and allied councils, plus the aggregator |
+| 3 | Ranking weights | `/admin/ranking-weights` | One set per category × base; **only inputs valid for that category are shown** |
+| 4 | Candidate record | `/candidates/:id` · tab **Profile** | The attribute set swaps with category |
+| 5 | App: profile | `/app/profile` | Doctor: specialty, case-mix, grade. Allied: discipline, equipment, technique |
+| 6 | Privileging | `/placements/:id` · tab **Privileging** | **Doctors only.** Requests per placement and hospital |
+| 7 | Client day 30 / 60 page | `/l/:token` | How the placement is going, adjusted for care setting |
+
+##### Privileging · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `state` | enum | `requested` · `granted` · `rejected` · `not_required` |
+| `grantedFrom` | date | |
+| `reason` | string | Required on reject |
+
+**Privileging is separate from registration.** A doctor can be registered and not privileged at a
+given hospital, and the platform must be able to say so.
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | An administrator adds the doctor category with its attribute set | It reaches the app, the requisition form and the ranking weights screen **with no deployment** |
+| 2 | A doctor signs up | Specialty, case-mix and grade are asked for; nurse fields are not |
+| 3 | She is verified against the medical council | Same three interfaces, same green / amber / red schema |
+| 4 | The aggregator answers on identity checks | Same schema again. **No consumer changes** |
+| 5 | A doctor weight set is created | Only inputs valid for doctors are offered |
+| 6 | A doctor requisition is ranked | The doctor weight set is selected automatically by category × base |
+| 7 | An allied-health professional goes through the same path | Identical, on a third configuration |
+| 8 | A doctor is placed at a hospital | Privileging is requested; **the placement is visible as registered but not yet privileged** |
+| 9 | Privileging is rejected | Reason required; the placement state reflects it |
+| 10 | A doctor's trial check-in fires at day 30 | The doctor question set is used, not the nurse one |
+| 11 | A candidate belongs to both supply bases | Both are recorded; jobs and shifts are both offered |
+| 12 | A category is deactivated | Existing records keep their attributes; no new record can be created in it |
+
+#### Tested against
+
+- **Happy** — a doctor and an allied-health professional taken end to end down the identical path a
+  nurse took in Part 1, with no code branch on category anywhere.
+- **All** — scenarios 1–12, plus: three registries answering on one schema; three weight sets selected
+  by category × base; a doctor registered but not privileged; **a grep of the codebase finding no
+  conditional on a category value outside configuration**.
+
+---
+
+### F-P2-5 · Home healthcare
+
+*Runs alongside hospital, with its own check-in questions and visit addresses.*
+
+**Specs** [03-01](/docs/03-modules/03-01-clients-contracts-and-rate-cards) ·
+[03-03](/docs/03-modules/03-03-requisitions-and-allocation) ·
+[03-09](/docs/03-modules/03-09-placement-and-trial) ·
+[03-10](/docs/03-modules/03-10-attendance-and-timesheets)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-A6` | `M8-I4` · `M8-I12` | Check-in settings and questions — **a different set for home healthcare, with no preceptor and no accommodation** |
+| `SOW-D2` | `M3-I14` | Shift demand lines carrying **the visit address** |
+| `SOW-D22` | `M8-I7` | Attendance flagging **home-healthcare check-ins away from the visit address** |
+| `SOW-D1` | `M2-I3` | Sites without departments |
+
+Care setting is reference data from Part 1. This functionality populates the second value and adds the
+four behaviours that differ.
+
+#### Screens
+
+| # | Screen | Screen reference | What changes |
+|---|---|---|---|
+| 1 | Client details | `/clients/:id` · tab **Overview** | `careSetting` = `home_healthcare` |
+| 2 | Sites and departments | `/clients/:id` · tab **Sites & departments** | **Home-healthcare sites have no departments** |
+| 3 | Shift lines | `/requisitions/:id` · tab **Shift lines** | Each line carries a **visit address** |
+| 4 | App: check-in | `/app/check-in` | Location is compared against the visit address, not a site boundary |
+| 5 | Shift attendance | `/attendance` | Check-ins away from the visit address are flagged |
+| 6 | Check-in questions | `/admin/check-ins` — **not in POC** | The home-healthcare set: no preceptor, no accommodation |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A home-healthcare client is created | No department field is offered anywhere against it |
+| 2 | A requisition is raised for it | The department is absent, not empty-but-required |
+| 3 | A shift line is created | A visit address is required |
+| 4 | A nurse checks in at the visit address | `locationFlag` = `within_expected` |
+| 5 | She checks in two kilometres away | Flagged `outside_expected`, surfaced as an exception, **not blocked** |
+| 6 | Her day-30 trial check-in fires | The home-healthcare question set: **no preceptor question, no accommodation question** |
+| 7 | The client day-30 link is opened | The same adjustment applies on the client page |
+| 8 | A hospital placement and a home-healthcare placement are compared | Same tables, same states, different question sets |
+
+#### Tested against
+
+- **Happy** — a home-healthcare vacancy filled, visited, checked into at the visit address, and taken
+  through a trial whose questions differ from the hospital set.
+- **All** — scenarios 1–8, plus: a home-healthcare site rejecting a department; a check-in outside the
+  visit address flagged and resolvable; both care settings reportable side by side in Part 3.
+
+---
+
+### F-P2-6 · Client portal opened
+
+*Clients log in and see their own vacancies.*
+
+**Specs** [02-01](/docs/02-platform/02-01-identity-and-access) (portal realm) ·
+[03-14](/docs/03-modules/03-14-client-portal) (login and read only)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D12` | `M10-I1` | Client sign in, set up account |
+| `SOW-D12` | `M10-I2` | Portal users — a client-admin manages their own colleagues |
+| `SOW-D12` | `M10-I8` | **Portal data scoping — every query limited, fails closed** |
+| `SOW-D12` | `M10-I4` | Portal: my requisitions |
+
+`M10-I3` raise a requisition, `M10-I5` shortlists, `M10-I6` timesheets and `M10-I7` invoices are
+**Part 3**. Until then those actions continue to run on the tokenised links from Part 1 and `F-P2-1`,
+which do not stop working when the portal arrives.
+
+**Specification basis:** D12 is named as deferred throughout the client's Part A and **no client
+specification has been received.** Everything here is Hiresense analysis from the capability name, and
+carries Low confidence.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Client sign in | `/portal` | A separate build, its own subdomain, its own cookie namespace |
+| 2 | Set up account | `/accept-invite?token=` — **not in POC** | Consume the invitation |
+| 3 | My requisitions | `/portal/requisitions` | Status and fill, **aged by the same rule the console uses, excluding held days** |
+| 4 | Portal users | `/settings/users` — **not in POC** | A client-admin manages their own colleagues |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A client contact is invited and sets up an account | Portal account created in the portal realm, not the staff realm |
+| 2 | They sign in and open requisitions | **Only their own client's records.** Nothing else is reachable |
+| 3 | They request a record belonging to another client by ID | Refused. **The scope predicate fails closed, it does not filter to empty** |
+| 4 | A client-admin adds a colleague | The colleague sees the same scope |
+| 5 | The age of a requisition is compared to the console | **Identical**, including the exclusion of held days |
+| 6 | A staff session token is presented to the portal | Rejected. The realms do not cross |
+| 7 | A portal user is deactivated | Sessions end; the record stays |
+| 8 | A client without portal access | Continues on tokenised links with nothing broken |
+
+#### Tested against
+
+- **Happy** — a hospital contact logs in and sees exactly their own open vacancies, aged as the console
+  ages them.
+- **All** — scenarios 1–8, plus: **every portal list route carrying the scope predicate, proven by
+  test**; a cross-client request failing closed; the portal and the link surfaces both working for the
+  same client at the same time.
+
+---
+
+### F-P2-7 · Onboarding and payroll opened
+
+*Associates are onboarded with their statutory forms, ready for the payroll engine to be connected in
+Part 3.*
+
+**Specs** [03-15](/docs/03-modules/03-15-associate-onboarding) (all but the pay-run gate) ·
+[03-05](/docs/03-modules/03-05-candidate-app) (the guided flow) ·
+[02-12](/docs/02-platform/02-12-data-protection) (bank and statutory identifiers)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-D21` | `M11-I1` | Associate details — employment, bank, statutory identifiers |
+| `SOW-D21` | `M11-I2` | Statutory forms, with return-with-reason |
+| `SOW-D21` | `M11-I3` | Document checklist by role and state |
+| `SOW-D21` | `M11-I4` | App: onboarding — one task at a time, saved progress |
+
+`M11-I5` the onboarding gate is **Part 3** — it gates a pay run, and there is no pay run until then.
+
+**Specification basis:** named in the client's Part A as D21 with its contents listed; no client module
+chapter. Low confidence.
+
+#### Screens
+
+| # | Screen | Screen reference | What it is for |
+|---|---|---|---|
+| 1 | Associate onboarding | `/workforce/onboarding` | Employment, bank, statutory identifiers, what is still missing |
+| 2 | Statutory forms | `/workforce/onboarding` · forms panel | The list, each form, **return with a reason** |
+| 3 | Document checklist | `/workforce/onboarding` · checklist panel | Required against received, by role and state |
+| 4 | App: onboarding | `/app/onboarding` | **One task at a time**, photo capture, saved progress |
+
+##### Associate profile · elements
+
+| Field | Datatype | Enumeration / rule |
+|---|---|---|
+| `state` | enum | `not_started` · `in_progress` · `complete` · `verified` |
+| `missingMandatory` | string, many | **Named, never counted** |
+| `bankMasked` | string | **Stored encrypted, displayed masked, never logged** |
+| `uan` | string | |
+| `forms[]` | object | `code`, `name`, `state` = `pending` · `submitted` · `returned` · `verified`, `returnedReason` |
+| `checklist[]` | object | `documentType`, `state` = `awaiting` · `received` · `accepted` · `rejected`, `blocksPayroll` |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A contractual placement is confirmed | An associate profile is opened against it, `not_started` |
+| 2 | The associate opens the app | One task at a time, with progress saved between sessions |
+| 3 | She photographs a document | Captured, scanned, attached to the checklist item |
+| 4 | A form is returned with a reason | It **reappears in the app with the reason shown**, not as a silent rejection |
+| 5 | All mandatory items are complete | State `complete`, then `verified` after review |
+| 6 | An item is still missing | It is **named** on the associate screen, not counted |
+| 7 | Bank details are viewed | Masked. The full value is never rendered and never logged |
+| 8 | An item marked `blocksPayroll` is outstanding | Recorded now; **enforced in Part 3 when a pay run exists** |
+| 9 | She abandons halfway and returns a week later | Progress is where she left it |
+
+#### Tested against
+
+- **Happy** — an associate onboarded from a contractual placement to `verified`, with every statutory
+  form submitted from the app.
+- **All** — scenarios 1–9, plus: a returned form round-tripping with its reason; bank details absent
+  from every log and every export; the checklist varying correctly by role and state.
+
+---
+
+### F-P2-8 · The screens recruiters work from
+
+*The fulfilment board, placement and invoice lists, and the candidate-facing screens that were done by
+hand in Part 1.*
+
+**Specs** [02-07](/docs/02-platform/02-07-list-engine) (saved views, export, column chooser) ·
+[03-03](/docs/03-modules/03-03-requisitions-and-allocation) ·
+[03-05](/docs/03-modules/03-05-candidate-app) ·
+[03-08](/docs/03-modules/03-08-selection-and-offers) (offer templates) ·
+[03-11](/docs/03-modules/03-11-billing-and-receivables) (money owed) ·
+[03-13](/docs/03-modules/03-13-legacy-migration) (profiling only)
+
+#### SOW ref
+
+| Ref | Item | The plan's own description |
+|---|---|---|
+| `SOW-F08` | `M2-I14` | Column chooser, saved and shareable views, export of the filtered rows |
+| `SOW-D3` | `M4-I8` · `M4-I9` | App: my documents; notification settings |
+| `SOW-D20` | `M7-I5` | Offer templates by state, role and skill |
+| `SOW-D8` | `M9-I2` | Money owed — raised and unpaid by client |
+| `SOW-A10` | `M1-I10` | **CPAL data profiling** — volume, completeness, duplicate rate, fields with no target |
+
+`M1-I10` sits here because it is unrelated to the other rows in every way except one: **until it runs,
+the Part 3 migration cannot be sized at all**, and Part 2 is the last point at which finding that out
+still helps.
+
+#### Screens
+
+| # | Screen | Screen reference | What changes |
+|---|---|---|---|
+| 1 | Fulfilment board | `/board` | Saved views, column choice, export of the filtered rows |
+| 2 | Placements | `/placements` | The same, plus filters recruiters actually asked for |
+| 3 | Invoices | `/invoices` | The same |
+| 4 | Money owed | `/receivables` | Raised and unpaid by client, with how long outstanding |
+| 5 | Offer templates | `/admin/offer-templates` — **not in POC** | By state, role and skill, auto-selected on create |
+| 6 | App: my documents | `/app/documents` | Required set by category, camera capture, rejection reasons, expiry prompts |
+| 7 | App: notifications | `/app/notifications` | Messages received, and channel opt-out |
+| 8 | Profiling result | `/admin/migration/:batchId/profile` — **not in POC** | Volume, field completeness, duplicate rate, fields with no target |
+
+#### Scenarios
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | A recruiter filters the board and saves the view | The view is named, reusable and **shareable with a role** |
+| 2 | She chooses her columns | Persisted per user, not per browser |
+| 3 | She exports the filtered rows | **The row count is shown before the export is confirmed** |
+| 4 | A saved view is shared and the sharer leaves | The view survives; it belongs to the role, not the person |
+| 5 | An offer is created for a role with a template | The template is auto-selected, variables filled, **previewed before sending** |
+| 6 | A candidate uploads a required document in the app | It reaches the verification queue with its type |
+| 7 | A document is rejected | **The reason appears in the app** and the item reappears |
+| 8 | A candidate opts out of a channel | Respected by the cadence in `F-P2-3` from the next run |
+| 9 | Money owed is opened | Raised and unpaid by client with age. **Chasing is Part 3** |
+| 10 | Profiling runs against the legacy extract | Volume, completeness, duplicate rate and unmappable fields are reported |
+| 11 | Profiling cannot run | `OI-A-02` is **formally escalated** rather than assumed away |
+
+#### Tested against
+
+- **Happy** — a recruiter filters the board, saves the view, shares it, exports it, and finds it there
+  the next morning.
+- **All** — scenarios 1–11, plus: an export of a filtered set matching the on-screen count exactly; a
+  document rejection round-tripping to the app with its reason; the profiling figures delivered or the
+  escalation raised.
+
+## 4. Part 2 exit conditions
+
+| # | Condition | Proves |
+|---|---|---|
+| 1 | A shift is checked into on the app, appears on a timesheet, is approved by a client link, and raises a shift invoice traceable to the approval in two clicks | `F-P2-1` |
+| 2 | The same requirement sent by email and by WhatsApp produces requisitions differing only in source channel and raw payload | `F-P2-2` |
+| 3 | The intent-registration contract test passes with a second consumer registered, and no automatic merge occurs anywhere | `F-P2-2` |
+| 4 | A Base B nurse is contacted on cadence, replies on WhatsApp, her freshness resets, and a shift ranking reorders because of it | `F-P2-3` |
+| 5 | WhatsApp templates are approved and a cadence is enabled **with its cost projection shown first** | `F-P2-3` |
+| 6 | A doctor and an allied-health professional complete the identical path a nurse completed in Part 1, with **no code branch on category** | `F-P2-4` |
+| 7 | A home-healthcare placement runs with its own question set and its own location rule | `F-P2-5` |
+| 8 | A client signs in and sees only their own vacancies, with **every list route carrying the scope predicate** | `F-P2-6` |
+| 9 | An associate reaches `verified` with every statutory form submitted from the app | `F-P2-7` |
+| 10 | The CPAL profiling figures are delivered, **or `OI-A-02` is formally escalated** | `F-P2-8` |
+| 11 | **App adoption is measured** on the in-house nurse pilot | `F-P2-1`, `F-P2-3` — and the assumption underneath all shift billing |
+
+**Condition 11 is the one that matters most.** There is no attendance route but the app. If candidates
+do not install it, the contractual invoice chain has no fallback, and Part 2 is where that is found out.
+
+## 5. Open questions
+
+| Ref | Question | Working assumption |
+|---|---|---|
+| `OI-A-02` | What is in the legacy CPAL system, and can it be extracted? | Profiling in `F-P2-8` answers it. Until it does, the Part 3 migration is unsized and carries Low confidence throughout |
+| `OI-A-16` | What contractual volume can be supported before payroll is automated? | Manual payroll caps volume until Part 3. The cap is stated, not assumed away |
+| `OI-HS-15` | Are inbound learner records in scope for the intake pipeline? | No in Part 2. `M3-I32` is conditional and sits in Part 3 |
+| `OI-A-04` | Does Release 1 provisioning cover client-side users? | Portal users are provisioned by a client-admin in `F-P2-6`; Apollo does not provision them |
+
+All are registered in [05-03](/docs/05-delivery/05-03-open-decisions).

@@ -1,0 +1,248 @@
+---
+title: "07-04 Part traceability"
+description: "Every one of the 208 plan items mapped to a release part and a scoped functionality, the reverse index from functionality back to items, and the split items that appear in more than one part."
+---
+
+**Package** `n/a` · **Schema** `n/a` · **Plan** all 208 items · **Risk** — · **Release** Parts 1–3
+
+## 1. Purpose
+
+The reconciliation between the client's 208 buildable items and the three release parts. Every item
+appears here exactly once as a row, with the part it is released in and the scoped functionality that
+carries it. Where an item is **split** across parts, every part it touches is named and the split is
+stated in [§4](#4-split-items).
+
+This file is the counterpart of [00-04 §6](/docs/00-foundation/00-04-component-map#6-requirement-item--component-index),
+which maps the same 208 items to components. **Both are true at once**: an item belongs to exactly one
+component and is released in one or more parts.
+
+## 2. Scope
+
+### In scope
+
+- Item → part → functionality, for all 208 items, in plan order
+- Functionality → items, the reverse index
+- The split items, and what each part's share of them is
+- What is deliberately absent from Part 1, and the reason in each case
+
+### Explicitly out of scope
+
+- Effort and calendar. See [06-03](/docs/06-source-plan/06-03-timeline) and
+  [00-05](/docs/00-foundation/00-05-delivery-roadmap).
+- Component ownership. See [00-04 §6](/docs/00-foundation/00-04-component-map#6-requirement-item--component-index).
+
+### Explicitly not built
+
+- A second numbering of the items. `M<n>-I<k>` is the plan's own index and is reproduced verbatim.
+
+## 3. Item → part index
+
+In plan order. **Part** names every part the item is released in; where there is more than one, the
+split is in [§4](#4-split-items).
+
+### M0 — Foundations
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M0-I1` · `M0-I2` · `M0-I3` | 02-01 | 1 | `F-P1-1` |
+| `M0-I4` | 02-02 | 1 | `F-P1-1` |
+| `M0-I5` | 02-03 | 1 | `F-P1-10` |
+| `M0-I6` | 02-04 | 1 | `F-P1-10` |
+
+### M1 — Platform and migration groundwork
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M1-I1` | 02-06 | 1 | `F-P1-1` |
+| `M1-I2` | 03-13 | 3 | `F-P3-2` |
+| `M1-I3` · `M1-I13` | 02-13 | 1 | `F-P1-5` |
+| `M1-I14` | 02-13 · 04-09 | **1, 2** | `F-P1-5` (nursing council) · `F-P2-4` (medical, allied) |
+| `M1-I15` | 02-13 · 04-09 | 2 | `F-P2-4` |
+| `M1-I4` | 02-05 | 1 | `F-P1-10` |
+| `M1-I5` · `M1-I16` | 02-15 | 1 | `F-P1-10` |
+| `M1-I6` · `M1-I7` · `M1-I8` · `M1-I9` | 05-05 | 3 | `F-P3-7` |
+| `M1-I10` | 03-13 | 2 | `F-P2-8` |
+| `M1-I11` · `M1-I12` | 03-13 | 3 | `F-P3-2` |
+
+### M2 — Clients, contracts and lists
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M2-I1` … `M2-I5` | 03-01 | 1 | `F-P1-2` |
+| `M2-I6` | 03-01 | 2 | `F-P2-2` |
+| `M2-I7` … `M2-I13` | 03-01 | 1 | `F-P1-2` |
+| `M2-I14` | 02-07 | **1, 2, 3** | `F-P1-10` · `F-P2-8` · `F-P3-6` |
+
+### M3 — Demand intake, requisitions and the spine
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M3-I1` · `M3-I2` · `M3-I4` · `M3-I5` · `M3-I7` · `M3-I8` | 03-02 | 2 | `F-P2-2` |
+| `M3-I3` | 03-02 | **2, 3** | `F-P2-2` (text and file) · `F-P3-1` (playable audio) |
+| `M3-I6` | 03-02 · 04-08 | 3 | `F-P3-1` |
+| `M3-I9` · `M3-I10` · `M3-I11` · `M3-I15` · `M3-I16` · `M3-I27` · `M3-I28` | 03-03 | 1 | `F-P1-3` |
+| `M3-I12` | 03-03 | **1, 2** | `F-P1-3` (the board) · `F-P2-8` (at recruiter width) |
+| `M3-I13` · `M3-I14` | 03-03 | 2 | `F-P2-1` |
+| `M3-I17` · `M3-I18` · `M3-I19` · `M3-I21` · `M3-I29` | 02-08 | 2 | `F-P2-2` |
+| `M3-I32` | 02-08 | 3 | `F-P3-1` |
+| `M3-I20` | 03-02 · 04-06 | **2, 3** | `F-P2-2` (email, WhatsApp text) · `F-P3-1` (spreadsheet, voice, HRMS) |
+| `M3-I22` | 03-02 | 2 | `F-P2-2` |
+| `M3-I23` | 04-05 | 3 | `F-P3-1` |
+| `M3-I24` | 04-01 | 2 | `F-P2-2` |
+| `M3-I25` | 04-03 | 2 | `F-P2-2` |
+| `M3-I26` | 04-07 | 3 | `F-P3-1` |
+| `M3-I30` | 02-09 | **1, 2** | `F-P1-10` (transactional) · `F-P2-2` (templates, triggers, chase) |
+| `M3-I31` | 02-11 | 1 | `F-P1-10` — **cannot be retrofitted** |
+
+### M4 — Candidates, the app and verification
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M4-I1` · `M4-I2` · `M4-I4` · `M4-I6` · `M4-I10` | 03-05 | 1 | `F-P1-4` |
+| `M4-I3` | 03-05 | **1, 2** | `F-P1-4` (nurse set) · `F-P2-4` (doctor, allied sets) |
+| `M4-I5` · `M4-I7` | 03-05 | 2 | `F-P2-1` |
+| `M4-I8` · `M4-I9` | 03-05 | 2 | `F-P2-8` |
+| `M4-I20` | 03-05 · 04-06 | 3 | `F-P3-6` |
+| `M4-I11` · `M4-I12` · `M4-I13` · `M4-I15` · `M4-I16` · `M4-I24` · `M4-I25` | 03-04 | 1 | `F-P1-5` |
+| `M4-I14` · `M4-I19` · `M4-I21` | 03-04 | 3 | `F-P3-6` |
+| `M4-I17` | 03-04 | 2 | `F-P2-4` |
+| `M4-I18` · `M4-I26` | 03-04 | **1, 2** | `F-P1-5` (the mechanism, nurse set) · `F-P2-4` (doctor, allied sets) |
+| `M4-I22` | 02-01 | 1 | `F-P1-4` |
+| `M4-I23` | 04-10 | 3 | `F-P3-6` |
+| `M4-I27` | 02-12 | **1, 2, 3** | `F-P1-10` (consent, residency) · `F-P2-2`/`F-P2-3` (withdrawal, erasure intake) · `F-P3-6` (sweep, gap report) |
+
+### M5 — Messaging and engagement
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M5-I1` · `M5-I2` | 02-09 | 2 | `F-P2-2` |
+| `M5-I3` · `M5-I4` · `M5-I8` · `M5-I9` | 02-09 | 2 | `F-P2-3` |
+| `M5-I5` · `M5-I10` · `M5-I11` · `M5-I14` · `M5-I16` | 03-06 | 2 | `F-P2-3` |
+| `M5-I7` | 03-06 | **2, 3** | `F-P2-3` (replies to review) · `F-P3-6` (the call log) |
+| `M5-I6` · `M5-I13` | 03-06 | 3 | `F-P3-6` |
+| `M5-I12` | 04-04 | 3 | `F-P3-6` |
+| `M5-I15` | 04-01 | 2 | `F-P2-3` |
+
+### M6 — Matching and ranking
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M6-I1` | 03-07 | **1, 3** | `F-P1-6` (search) · `F-P3-6` (saved searches) |
+| `M6-I2` | 03-07 | 2 | `F-P2-3` |
+| `M6-I3` · `M6-I4` · `M6-I6` · `M6-I7` · `M6-I8` | 03-07 | 1 | `F-P1-6` |
+| `M6-I5` | 03-07 | **1, 2, 3** | `F-P1-6` (nurse × Base A) · `F-P2-4` (per category × base) · `F-P3-6` (tuning) |
+| `M6-I9` | 03-07 | 3 | `F-P3-6` |
+| `M6-I10` | 03-07 | 2 | `F-P2-1` |
+
+### M7 — Selection, offers and client links
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M7-I1` · `M7-I2` · `M7-I3` · `M7-I4` · `M7-I7` · `M7-I16` | 03-08 | 1 | `F-P1-7` |
+| `M7-I5` | 03-08 | 2 | `F-P2-8` |
+| `M7-I6` | 03-08 | **1, 3** | `F-P1-7` (generate and send) · `F-P3-6` (electronic signature path) |
+| `M7-I8` | 02-14 | **1, 2** | `F-P1-7` (shortlist, day 90) · `F-P2-1`/`F-P2-4` (timesheet, day 30, day 60) |
+| `M7-I9` · `M7-I10` · `M7-I13` · `M7-I17` · `M7-I18` | 02-14 | 1 | `F-P1-7` |
+| `M7-I11` | 02-14 | **1, 2** | `F-P1-8` (day 90 page) · `F-P2-4` (day 30 and 60 pages) |
+| `M7-I12` | 02-14 | 2 | `F-P2-1` |
+| `M7-I14` | 04-01 | 1 | `F-P1-7` — the offer goes out over WhatsApp |
+| `M7-I15` | 04-11 | 3 | `F-P3-6` |
+
+### M8 — Placement, trial, attendance and timesheets
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M8-I1` · `M8-I5` · `M8-I6` · `M8-I11` · `M8-I13` | 03-09 | 1 | `F-P1-8` |
+| `M8-I2` | 03-09 | **1, 2** | `F-P1-8` (the list) · `F-P2-8` (at recruiter width) |
+| `M8-I3` | 03-09 | **1, 3** | `F-P1-8` (thin, day-90 only) · `F-P3-6` (the dashboard at width) |
+| `M8-I4` · `M8-I12` | 03-09 | **1, 2** | `F-P1-8` (nurse, hospital) · `F-P2-4`/`F-P2-5` (per category and care setting) |
+| `M8-I10` | 03-09 | 2 | `F-P2-4` |
+| `M8-I7` · `M8-I8` · `M8-I9` · `M8-I14` · `M8-I15` · `M8-I16` · `M8-I17` | 03-10 | 2 | `F-P2-1` |
+
+### M9 — Billing and reporting
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M9-I1` · `M9-I3` · `M9-I12` · `M9-I13` · `M9-I14` | 03-11 | 1 | `F-P1-9` |
+| `M9-I2` | 03-11 | **2, 3** | `F-P2-8` (the list) · `F-P3-5` (ageing and chasing) |
+| `M9-I4` · `M9-I15` | 03-11 | 2 | `F-P2-1` |
+| `M9-I16` | 04-13 | 1 | `F-P1-9` — export of the first permanent invoice |
+| `M9-I5` … `M9-I11` · `M9-I17` | 03-12 | 3 | `F-P3-3` |
+
+### M10 — Client portal
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M10-I1` · `M10-I2` · `M10-I8` | 02-01 | 2 | `F-P2-6` |
+| `M10-I4` | 03-14 | 2 | `F-P2-6` |
+| `M10-I3` · `M10-I5` · `M10-I6` · `M10-I7` | 03-14 | 3 | `F-P3-4` |
+
+### M11–M15 — Workforce, payroll and the R2 remainder
+
+| Items | Component | Part | Functionality |
+|---|---|---|---|
+| `M11-I1` · `M11-I2` · `M11-I3` · `M11-I4` | 03-15 | 2 | `F-P2-7` |
+| `M11-I5` | 03-15 | 3 | `F-P3-6` |
+| `M12-I1` … `M12-I6` | 03-16 | 3 | `F-P3-5` |
+| `M13-I1` … `M13-I4` | 03-17 | 3 | `F-P3-6` |
+| `M13-I5` | 04-14 | 3 | `F-P3-6` |
+| `M14-I1` … `M14-I4` | 03-18 | 3 | `F-P3-6` |
+| `M15-I1` · `M15-I2` · `M15-I6` | 03-19 | 3 | `F-P3-6` |
+| `M15-I3` · `M15-I4` · `M15-I5` · `M15-I7` | 03-20 | 3 | `F-P3-5` |
+
+**Coverage: 208 of 208 items mapped. 0 items with no part. 0 parts with an item that is not in the
+plan.** The one component with no plan item —
+[02-10 job runtime](/docs/02-platform/02-10-job-runtime) — is declared an
+**[engineering addition]** and is released in Part 1 under `F-P1-10`.
+
+## 4. Split items
+
+Twenty-one items are released in more than one part. Each split adds to the same tables and screens;
+**none of them replaces earlier work**, which is the condition that makes the split legitimate at all
+(see [07-00 §5](/docs/07-phases/07-00-release-model#5-the-thin-slice-principle)).
+
+| Item | Part 1 gets | Part 2 gets | Part 3 gets |
+|---|---|---|---|
+| `M1-I14` | The nursing council adapter | Medical and allied-health council adapters | — |
+| `M2-I14` | Filter, sort, cursor paging, the five states | Column chooser, saved views, export | Bulk actions, virtualisation |
+| `M3-I3` | — | Raw text and file, with a prefilled form | Playable audio beside the transcript |
+| `M3-I12` | The fulfilment board | Saved views, column choice, export | Priority sort — via `M14-I1` |
+| `M3-I20` | — | Email and WhatsApp-text parsers | Spreadsheet, voice-note and HRMS parsers |
+| `M3-I30` | Transactional sends: the offer, the two link types | Templates, triggers, the chase, cadence sends | Receipt reconciliation at width |
+| `M4-I3` | The nurse specialty set | Doctor and allied-health sets | — |
+| `M4-I18` · `M4-I26` | The definition mechanism, nurse set populated | Doctor and allied-health sets populated | — |
+| `M4-I27` | Consent at capture, residency | Withdrawal and erasure intake | Retention sweep, consent gap report |
+| `M6-I1` | Candidate search | — | Saved searches |
+| `M6-I5` | One weight set: nurse × Base A | One set per live category × base | Tuning from outcomes |
+| `M7-I6` | Offer generated, sent, tracked | Templates by state, role and skill (`M7-I5`) | Electronic signature (`M7-I15`) |
+| `M7-I8` | `shortlist_response`, `day_90_retention` | `timesheet_approval`, `day_30_check_in`, `day_60_check_in` | Link-type configuration at width |
+| `M7-I11` | The day-90 client page | The day-30 and day-60 client pages | — |
+| `M8-I2` | Placements list and drop-out | Recruiter-width filters and views | — |
+| `M8-I3` | Thin — day-90 answers coming up | — | The dashboard at width |
+| `M8-I4` · `M8-I12` | Nurse, hospital question set | Per category, and the home-healthcare set | — |
+| `M9-I2` | — | Raised and unpaid by client | Ageing, dunning, chase history |
+| `M5-I7` | — | Replies to review | The call log |
+
+## 5. What is deliberately absent from Part 1
+
+Read this before asking why something is missing from the first release. In each case the reason is the
+[classification rule](/docs/07-phases/07-00-release-model#3-the-classification-rule), not an oversight.
+
+| Absent from Part 1 | Where it lands | Why not Part 1 |
+|---|---|---|
+| Shift staffing, in every form | Part 2, `F-P2-1` | A second money path. Part 1's claim is that **one** path closes; carrying two doubles the surface without strengthening the claim |
+| Every intake channel but the console | Part 2, `F-P2-2` | A vacancy typed by a recruiter produces the same requisition record. Intake changes how it arrives, not what it is |
+| Engagement cadence and availability | Part 2, `F-P2-3` | Ranking in Part 1 uses availability that candidates confirm themselves in the app. Cadence improves the freshness; it is not needed to rank |
+| Doctors and allied health | Part 2, `F-P2-4` | Category is reference data from Part 1, so this is **configuration**. Building it in Part 1 would prove nothing the nurse path does not |
+| Home healthcare | Part 2, `F-P2-5` | Same argument, on care setting |
+| The client portal | Part 2, `F-P2-6` | Every client action in Part 1 runs on a tokenised link, and the link is the thing that has to be **proven** |
+| Associate onboarding | Part 2, `F-P2-7` | It exists to feed payroll, and there is no payroll until Part 3 |
+| Legacy migration | Part 2 (profiling), Part 3 (the rest) | Nothing in Part 1 depends on historical data. Profiling is pulled into Part 2 only because it sizes the Part 3 work |
+| Every report | Part 3, `F-P3-3` | **The events are being written from Part 1**, so nothing is lost by reporting late. This is the whole reason `M3-I31` is in Part 1 |
+| Payroll, collections, workforce operations, prioritisation, leave and overtime | Part 3 | None is on the shortest path from a vacancy to an invoice |
+| CV reading, document OCR, duplicate resolution, electronic signature, automated calls | Part 3, `F-P3-6` | Each **automates** something Part 1 does by hand. Doing it by hand first is what makes the automation specifiable |
+
+## 6. Open questions
+
+**N/A.** This file records mappings, not decisions. Every decision affecting a mapping is registered in
+[05-03](/docs/05-delivery/05-03-open-decisions) and referenced from the part file it affects.
