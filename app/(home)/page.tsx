@@ -1,44 +1,55 @@
 import Link from 'next/link';
+import { originalPlanRoute, pocAppLoginUrl } from '@/lib/shared';
 
-const READING_ORDER = [
+const TABS = [
   {
-    href: '/docs/00-foundation/00-01-product-context',
-    title: 'Product context',
-    body: 'The business, the two ways money reaches Apollo, and the actors. Nothing else makes sense without it.',
+    href: originalPlanRoute,
+    title: 'Original Plan',
+    body: "The client's delivery plan exactly as it was issued — its own tabs, filters and styling, unmodified.",
+    meta: 'As issued',
+    external: false,
   },
   {
-    href: '/docs/00-foundation/00-02-system-architecture',
-    title: 'System architecture',
-    body: 'The shape of the system and why it is that shape.',
+    href: pocAppLoginUrl,
+    title: 'Live POC App',
+    body: 'Every screen the specifications describe, running. Screen references throughout the docs link straight into it.',
+    meta: 'Opens in a new tab',
+    external: true,
   },
   {
-    href: '/docs/00-foundation/00-04-component-map',
-    title: 'Component map',
-    body: 'What exists, what depends on what, and where each of the 208 plan items lives.',
+    href: '/docs/release-plan',
+    title: 'Release Plan',
+    body: 'The signed Statement of Work: 51 deliverables across three parts, with the assumptions and client dependencies behind them.',
+    meta: 'The authority on scope',
+    external: false,
   },
   {
-    href: '/docs/01-standards',
-    title: 'Standards',
-    body: 'All ten. Read once, obeyed always.',
-  },
-  {
-    href: '/docs/05-delivery/05-02-implementation-playbook',
-    title: 'Implementation playbook',
-    body: 'How to take one spec from this site to a merged pull request.',
+    href: '/docs/engineering',
+    title: 'Engineering Documentation',
+    body: 'How it is built: architecture, platform services, the twenty modules with their scope and purpose, data, APIs and infrastructure.',
+    meta: 'Eleven pages',
+    external: false,
   },
 ];
 
-const SECTIONS = [
-  { href: '/docs/00-foundation', title: 'Foundation', body: 'Context, read once.' },
-  { href: '/docs/01-standards', title: 'Standards', body: 'House rules, obeyed always.' },
-  { href: '/docs/02-platform', title: 'Platform', body: 'Shared components, built once.' },
-  { href: '/docs/03-modules', title: 'Modules', body: 'One spec per implementable unit.' },
-  { href: '/docs/04-integrations', title: 'Integrations', body: 'Every external system.' },
-  { href: '/docs/05-delivery', title: 'Delivery', body: 'Sequence, playbook, open decisions.' },
+const PARTS = [
   {
-    href: '/docs/06-source-plan',
-    title: 'Source plan',
-    body: "The client's plan, reproduced verbatim.",
+    href: '/docs/release-plan/parts/part-1',
+    label: 'Part 1 · Quarter 1',
+    title: 'Permanent placement, end to end',
+    body: 'One client, one category, one line of business — from sign-in to a day-90 retention invoice.',
+  },
+  {
+    href: '/docs/release-plan/parts/part-2',
+    label: 'Part 2 · Quarter 2',
+    title: 'All remaining capability opened',
+    body: 'Shift attendance and shift billing, the client portal, multi-channel intake, notifications, verified checking.',
+  },
+  {
+    href: '/docs/release-plan/parts/part-3',
+    label: 'Part 3 · Quarter 3',
+    title: 'Full depth',
+    body: 'Payroll, analytics and MIS, workforce operations, collections, the legacy migration, and go-live.',
   },
 ];
 
@@ -53,38 +64,17 @@ export default function HomePage() {
           Apollo Knowledge GWD
         </h1>
         <p className="text-fd-muted-foreground mt-4 max-w-3xl text-lg">
-          Engineering documentation for the AI-native healthcare talent platform: permanent placement
-          and contractual shift staffing for nurses, doctors and allied health professionals, across
-          hospital and home healthcare settings, in India.
+          An AI-native healthcare talent platform: permanent placement and contractual shift staffing
+          for nurses, doctors and allied health professionals, across hospital and home healthcare
+          settings, in India.
         </p>
-
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            href="/docs"
-            className="bg-fd-primary text-fd-primary-foreground rounded-md px-4 py-2 text-sm font-medium"
-          >
-            Read the documentation
-          </Link>
-          <Link
-            href="/docs/00-foundation/00-04-component-map"
-            className="border-fd-border rounded-md border px-4 py-2 text-sm font-medium"
-          >
-            Component map
-          </Link>
-          <Link
-            href="/requirement-doc"
-            className="border-fd-border rounded-md border px-4 py-2 text-sm font-medium"
-          >
-            The original plan
-          </Link>
-        </div>
 
         <dl className="border-fd-border mt-12 grid grid-cols-2 gap-6 border-t pt-8 md:grid-cols-4">
           {[
-            ['71', 'specifications'],
-            ['208', 'buildable items'],
-            ['1,062', 'conditions'],
-            ['96', 'open decisions'],
+            ['51', 'deliverables in scope'],
+            ['3', 'release parts'],
+            ['9', 'months'],
+            ['35', 'components built'],
           ].map(([n, label]) => (
             <div key={label}>
               <dt className="text-3xl font-semibold">{n}</dt>
@@ -96,59 +86,77 @@ export default function HomePage() {
 
       <section className="border-fd-border border-t">
         <div className="mx-auto w-full max-w-5xl px-6 py-14">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            What this is, and what it is not
-          </h2>
-          <p className="text-fd-muted-foreground mt-3 max-w-3xl">
-            The requirement document is organised by <strong>when work is sold and scheduled</strong>.
-            This is the engineering translation, organised by{' '}
-            <strong>what gets built and deployed</strong>. Nothing here is invented scope: every
-            requirement traces back to the source, and where the source is silent it is recorded as an
-            open decision with an explicit working assumption rather than a quiet guess.
-          </p>
-        </div>
-      </section>
-
-      <section className="border-fd-border border-t">
-        <div className="mx-auto w-full max-w-5xl px-6 py-14">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            First time on this project — read these five, in order
-          </h2>
-          <ol className="mt-6 space-y-3">
-            {READING_ORDER.map((item, i) => (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className="border-fd-border hover:bg-fd-accent flex gap-4 rounded-lg border p-4 transition-colors"
-                >
-                  <span className="text-fd-muted-foreground w-6 shrink-0 text-sm font-medium">
-                    {i + 1}
+          <h2 className="text-2xl font-semibold tracking-tight">Four places to look</h2>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            {TABS.map((t) => {
+              const inner = (
+                <>
+                  <span className="text-fd-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    {t.meta}
                   </span>
-                  <span>
-                    <span className="block font-medium">{item.title}</span>
-                    <span className="text-fd-muted-foreground text-sm">{item.body}</span>
+                  <span className="mt-1 block text-lg font-medium">
+                    {t.title}
+                    {t.external ? ' ↗' : ''}
                   </span>
+                  <span className="text-fd-muted-foreground mt-1 block text-sm">{t.body}</span>
+                </>
+              );
+              const className =
+                'border-fd-border hover:bg-fd-accent block rounded-lg border p-5 transition-colors';
+              return t.external ? (
+                <a key={t.href} href={t.href} target="_blank" rel="noreferrer" className={className}>
+                  {inner}
+                </a>
+              ) : (
+                <Link key={t.href} href={t.href} className={className}>
+                  {inner}
                 </Link>
-              </li>
-            ))}
-          </ol>
+              );
+            })}
+          </div>
         </div>
       </section>
 
       <section className="border-fd-border border-t">
         <div className="mx-auto w-full max-w-5xl px-6 py-14">
-          <h2 className="text-2xl font-semibold tracking-tight">Sections</h2>
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {SECTIONS.map((s) => (
+          <h2 className="text-2xl font-semibold tracking-tight">Three parts over nine months</h2>
+          <p className="text-fd-muted-foreground mt-3 max-w-3xl">
+            Scope follows the Statement of Work signed on <strong>3 September 2026</strong>. The
+            approach determines only the order in which capability becomes available — the whole of
+            the scope is delivered.
+          </p>
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            {PARTS.map((p) => (
               <Link
-                key={s.href}
-                href={s.href}
-                className="border-fd-border hover:bg-fd-accent rounded-lg border p-4 transition-colors"
+                key={p.href}
+                href={p.href}
+                className="border-fd-border hover:bg-fd-accent rounded-lg border p-5 transition-colors"
               >
-                <span className="block font-medium">{s.title}</span>
-                <span className="text-fd-muted-foreground text-sm">{s.body}</span>
+                <span className="text-fd-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  {p.label}
+                </span>
+                <span className="mt-1 block font-medium">{p.title}</span>
+                <span className="text-fd-muted-foreground mt-1 block text-sm">{p.body}</span>
               </Link>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-fd-border border-t">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14">
+          <h2 className="text-2xl font-semibold tracking-tight">What this documentation is</h2>
+          <div className="mt-4 grid gap-6 md:grid-cols-2">
+            <p className="text-fd-muted-foreground">
+              The <strong>release plan</strong> reproduces the signed SOW: every deliverable, which
+              part it falls in, and the assumptions and client dependencies the dates rest on. It is
+              the authority on scope.
+            </p>
+            <p className="text-fd-muted-foreground">
+              The <strong>engineering documentation</strong> is the translation of it — organised by
+              what gets built rather than by what was sold, with each module&apos;s purpose and scope
+              mapped to the deliverables it satisfies. Where the two disagree, the release plan wins.
+            </p>
           </div>
         </div>
       </section>

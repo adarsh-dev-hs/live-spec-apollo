@@ -1,0 +1,7 @@
+{
+  "title": "What gets built",
+  "description": "Fifteen shared services and twenty business modules.",
+  "icon": "Layers",
+  "defaultOpen": true,
+  "pages": ["platform-services", "modules"]
+}

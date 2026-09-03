@@ -1,0 +1,72 @@
+---
+title: "Overview"
+description: "How the platform is built: its shape, its shared services, its modules, its data, its APIs and its infrastructure — at the level a reader needs before opening code."
+icon: BookOpen
+---
+
+The Apollo Knowledge GWD platform is an AI-native healthcare talent platform: **permanent placement
+and contractual shift staffing for nurses, doctors and allied health professionals, across hospital
+and home healthcare settings, in India.**
+
+This section describes **how it is built**. The [release plan](/docs/release-plan) describes **what
+is delivered and when**, and it is the authority on scope. Where the two disagree, the release plan
+wins and this section is wrong.
+
+## What is here
+
+| Page | Answers |
+|---|---|
+| [Product context](/docs/engineering/context/product-context) | What the business does, who uses the platform, and the two ways money reaches Apollo |
+| [Architecture](/docs/engineering/context/architecture) | The shape of the system, the stack, and why each choice was made |
+| [Platform services](/docs/engineering/build/platform-services) | The fifteen shared components every module depends on |
+| [Modules](/docs/engineering/build/modules) | The twenty business modules: purpose, scope, functionality and release part |
+| [Data model](/docs/engineering/reference/data-model) | The core entities, who owns each, and the lifecycles that cross components |
+| [API design](/docs/engineering/reference/api-design) | The contract every endpoint obeys, and the endpoint groups per module |
+| [Infrastructure](/docs/engineering/reference/infrastructure) | Environments, compute, deployment, monitoring and recovery |
+| [Security and data protection](/docs/engineering/reference/security) | Who can reach what, and how personal and health data is handled |
+| [Integrations](/docs/engineering/reference/integrations) | Every external system, what it is used for, and what happens when it fails |
+| [Delivery and quality](/docs/engineering/delivery-and-quality) | Build order, testing, definition of done, and the decisions still open |
+
+## How the pieces relate
+
+```
+ Release plan (the SOW)            Engineering documentation
+ ─────────────────────             ─────────────────────────
+ 51 deliverables       ─────▶      15 platform services  +  20 modules
+ 3 release parts       ─────▶      what slice of each is switched on
+ assumptions           ─────▶      architecture and data-model decisions
+ client dependencies   ─────▶      integrations, and what fails without them
+```
+
+Every deliverable in the SOW is built in exactly one platform service or module, and the
+[scope and deliverables](/docs/release-plan/scope/deliverables) register names which.
+
+## The distinction that matters most
+
+**A module is not a release.** Twenty-five of the fifty-one deliverables are split across two or
+three parts, so a module is designed once for its finished shape and released in slices. The module
+page says what the finished component does; the part page says which slice ships now.
+
+Building a module to completion when its part asked for a slice is the most expensive mistake
+available on this engagement — and it is easy to make, because the module documentation reads like
+an instruction to build all of it.
+
+## Nine things that decide the shape of the build
+
+1. **The event spine must be live before the first requisition is written.** Build it later and the
+   Part 3 reports cannot cover the earlier period at all. Not recoverable.
+2. **There is no client login until Part 2.** Every client interaction before that is a tokenised
+   link, and both invoice paths run through it.
+3. **There is no attendance route but the candidate app.** No app, no attendance, no timesheet, no
+   shift invoice.
+4. **Permanent billing has no fallback.** No contract terms in force at the trigger means no invoice.
+5. **Categories and care settings are data, not code.** A core built to nurses makes doctors a
+   migration rather than a configuration change.
+6. **Half the external suppliers are unnamed.** Each is an unpriced integration and a failure mode
+   nobody can test against, so each sits behind an interface with a manual fallback.
+7. **The availability loop is four deliverables that only work together.** `A3`, `A4`, `A5` and `A14`
+   are one unit; build any three and none does anything useful.
+8. **The ranking and rejection schemas are one design.** Agree them jointly before either module is
+   built, or `A8` becomes a rebuild rather than a layer.
+9. **The legacy migration has no effort basis yet.** Profiling has not run, and until it does the
+   Part 3 plan carries a placeholder rather than an estimate.

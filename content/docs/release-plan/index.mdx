@@ -1,0 +1,62 @@
+---
+title: "Overview"
+description: "What is being delivered, in three parts over nine months, exactly as set out in the Statement of Work signed on 3 September 2026."
+icon: ScrollText
+---
+
+The Statement of Work signed on **3 September 2026** is the single source of truth for scope.
+This section reproduces it: the whole deliverable list, what falls in each of the three parts,
+and the assumptions and client dependencies the dates rest on.
+
+**Where this section and the engineering documentation disagree, this section wins.**
+
+## 1. What was agreed
+
+| | |
+|---|---|
+| Document | Statement of Work — *Talent & Workforce Platform: Sourcing-to-Placement and Deploy-to-Pay* |
+| Signed | 3 September 2026 |
+| Prepared against | Apollo Platform Build Specification Part A v2, Part B M3 v1, and the Apollo scope revision |
+| Delivery approach | **Approach 3 — three plus three plus three** |
+| Shape | Three parts over **nine months** |
+| Deliverables in scope | **51** — 12 platform prerequisites (`F`), 25 original/moved deliverables (`D`), 14 new additions (`A`) |
+| Descoped | D15, D17, D19, D26, D27 |
+| Not in scope | AI technical screening · VMS integration of clients |
+
+**The approach determines only the order in which capability becomes available.** The whole of the
+scope in [Scope and deliverables](/docs/release-plan/scope/deliverables) is delivered under
+every approach; Approach 3 fixes the sequence and the number of parts.
+
+## 2. The three parts
+
+| Part | Due | Theme | What it proves |
+|---|---|---|---|
+| **[Part 1](/docs/release-plan/parts/part-1)** | End of Quarter 1 | Permanent placement, end to end, for one client | A vacancy arrives, a nurse is found, verified, ranked, offered, placed — and at day 90 the client confirms and an invoice is raised |
+| **[Part 2](/docs/release-plan/parts/part-2)** | End of Quarter 2 | All remaining capability opened | Contractual shift staffing bills from an approved timesheet; clients log in; demand arrives by email, WhatsApp and portal; the platform contacts candidates on its own schedule |
+| **[Part 3](/docs/release-plan/parts/part-3)** | End of Quarter 3 | Full depth | Payroll, analytics and MIS, workforce operations, collections, the legacy migration, and go-live |
+
+## 3. How to read a part
+
+Each part page carries three things:
+
+1. **What becomes available** — in the client's own language, as the SOW states it.
+2. **The deliverables that part draws on** — with `(partial)` where the deliverable is split
+   across more than one part.
+3. **What is deliberately absent** — the capability a reader might expect and will not find.
+
+A deliverable marked `(partial)` is delivered across more than one part and appears in each part
+in which work on it falls. Twenty-one of the fifty-one are split this way; they are listed in the
+[deliverable matrix](/docs/release-plan/scope/matrix).
+
+**Building a deliverable to completion when its part only asked for a slice is the most expensive
+mistake available on this engagement.** Read the part before deciding how much of a module to build.
+
+## 4. The rule that decides what goes in Part 1
+
+Part 1 takes **one client, one candidate category, one line of business, one care setting** from
+sign-in to a raised invoice. Anything on that line is in. Anything that widens it — a second
+channel, a second category, home healthcare, a client login — waits for Part 2. Anything that
+deepens it — reporting, payroll, collections, migration — waits for Part 3.
+
+That is why the twelve `F` prerequisites are all in Part 1 and nowhere else: they are the floor the
+first line stands on, and there is no thinner version of them worth building.

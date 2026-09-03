@@ -1,0 +1,7 @@
+{
+  "title": "Scope",
+  "description": "Every deliverable, which part carries it, and what the dates rest on.",
+  "icon": "ListChecks",
+  "defaultOpen": true,
+  "pages": ["deliverables", "matrix", "assumptions"]
+}

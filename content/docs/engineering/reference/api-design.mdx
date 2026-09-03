@@ -1,0 +1,147 @@
+---
+title: "API design"
+description: "REST/JSON over HTTPS, schema-first, with one contract package typing the API and all four clients — plus the endpoint groups each module exposes."
+icon: Braces
+---
+
+**REST/JSON over HTTPS, schema-first.** One shared contracts package is the single definition of
+every request and response: the API validates against it, the OpenAPI document is generated from it,
+and the console, link pages, portal and mobile app all import it. **The contract cannot drift from
+the handler**, because the schema that validates a request is the schema that documents it.
+
+## 1. Shape
+
+| Rule | Detail |
+|---|---|
+| Base | `/v1` — the version is in the path and changes only on a breaking change |
+| Resources | Plural kebab nouns: `/v1/requisitions`, `/v1/shift-demand-lines` |
+| Sub-resources | `/v1/requisitions/:id/versions`, `/v1/candidates/:id/credentials` |
+| State transitions | A `POST` to a named action, **not** a `PATCH` of a status field: `POST /v1/requisitions/:id/hold` |
+| Verbs | `GET` read · `POST` create or act · `PATCH` partial update · `DELETE` only for genuinely removable things. **Never** for candidates, requisitions, invoices or any audited record |
+| Files | Uploaded via a presigned URL, never multipart through the API |
+| Time | UTC timestamps. Business dates mean `Asia/Kolkata`. |
+| Money | An explicit amount and currency, as a string. **Never a float.** |
+
+## 2. Envelopes
+
+A single resource comes back under `data`. A collection comes back with cursor pagination
+everywhere — offset pagination over a migrated base of unknown size is unpredictable.
+
+```json
+{
+  "data": [ { "id": "…", "reference": "REQ-2026-000431", "status": "in_fulfilment" } ],
+  "page": { "cursor": "eyJpZCI6…", "hasMore": true, "limit": 50 },
+  "meta": { "totalApprox": 1284 }
+}
+```
+
+The total is an **estimate and is labelled as such on screen**. An exact count is computed only when
+a list is exported, because the export must return exactly the filtered rows.
+
+## 3. Errors
+
+RFC 9457 problem details, with a stable machine-readable `code` alongside human-readable text.
+
+```json
+{
+  "type": "https://docs.apollo.internal/errors/precondition-failed",
+  "title": "Close reason is required",
+  "status": 422,
+  "code": "REQUISITION_CLOSE_REASON_REQUIRED",
+  "correlationId": "01JD8F…",
+  "errors": [ { "field": "reasonId", "code": "required", "message": "Select a close reason." } ]
+}
+```
+
+**Clients switch on `code`, never on the message.** Titles and details are human text and may change.
+
+## 4. Listing
+
+| Parameter | Form |
+|---|---|
+| `filter[field]` | `filter[status]=open,in_fulfilment` — repeated values are OR, different fields are AND |
+| `sort` | `sort=-daysAged,clientName` — a leading minus is descending |
+| `cursor`, `limit` | `limit` maximum 200, default 50 |
+| `q` | Free-text search, where the resource supports it |
+| `view` | A saved view id, expanding to a filter set |
+
+**Every list endpoint applies the caller's data scope before any filter.** Scope is not a parameter
+and cannot be widened by the caller.
+
+## 5. Idempotency and concurrency
+
+| Mechanism | Where it applies |
+|---|---|
+| An idempotency key header, **required** on requests that create money, messages or external calls | Invoices, offers, link issues, message sends, payroll submissions |
+| Webhook idempotency on the provider's message id | Inbound and outbound — redelivery is normal and must not create a second record |
+| Optimistic concurrency on records two people edit at once | Requisition, contract, candidate, rate card |
+| A duplicate link submission returns the **original** response | Client link pages |
+
+## 6. Auth realms
+
+| Realm | Credential |
+|---|---|
+| Staff | Session cookie, HTTP-only, secure, with a sliding idle expiry from settings |
+| Candidate | Short-lived bearer token plus a rotating refresh token |
+| Client user | Session cookie, **separate cookie name and separate signing key** from staff |
+| Link | An opaque token in the path, exchanged for a single-record, single-action session |
+| Provider webhook | Signature verification per provider; unsigned providers are IP-allowlisted and share a secret |
+
+**Realms never mix.** A candidate token presented to a staff route is a 401, not a 403.
+
+## 7. The link surface is different on purpose
+
+The public tokenised pages are the platform's largest exposure — tokens arrive over WhatsApp and can
+be forwarded — so that surface is built to a stricter contract than the rest of the API.
+
+| Rule | Why |
+|---|---|
+| **No collection endpoints at all** | A link reaches exactly one record. Enumerating another client's shortlist is the worst failure mode available here. |
+| A link session can call only the endpoints its type allows | Same reason |
+| Rate-limited per token and per IP | The token is not a secret once it has been forwarded |
+| Responses omit every field the client does not need — internal reason codes, scores, notes | Clients see client-appropriate status, never internal reasoning |
+
+## 8. Endpoint groups
+
+One group per module. Names are indicative of shape rather than exhaustive.
+
+| Module | Groups |
+|---|---|
+| Identity | `/v1/auth/*` · `/v1/users` · `/v1/roles` · `/v1/sessions` |
+| Settings | `/v1/settings` · `/v1/reference/*` · `/v1/waiting-periods` |
+| Files | `/v1/documents` · `/v1/documents/:id/download-url` |
+| Clients | `/v1/clients` · `/v1/locations` · `/v1/client-contacts` · `/v1/sender-identities` · `/v1/rate-cards` · `/v1/contracts` |
+| Demand intake | `/v1/inbound-records` · `/v1/channels` · `/v1/spreadsheet-mappings` · `/v1/follow-ups` · `/v1/duplicate-suspicions` |
+| Requisitions | `/v1/requisitions` · `/v1/requisitions/:id/hold` · `/revise` · `/close` · `/v1/shift-demand-lines` · `/v1/allocations` |
+| Candidates | `/v1/candidates` · `/v1/candidates/:id/credentials` · `/v1/verification-cases` · `/v1/category-attribute-sets` · `/v1/duplicates` |
+| Candidate app | `/v1/app/*` — profile, jobs, shifts, applications, **check-in**, availability, documents |
+| Engagement | `/v1/segments` · `/v1/cadence-rules` · `/v1/cadence-runs` · `/v1/voice-campaigns` · `/v1/availability-responses` |
+| Matching | `/v1/search/candidates` · `/v1/saved-searches` · `/v1/ranked-sets` · `/v1/weight-sets` · `/v1/shortlists` |
+| Selection | `/v1/interviews` · `/v1/selection-decisions` · `/v1/offers` · `/v1/offers/:id/send` · `/sign` |
+| Placement | `/v1/placements` · `/v1/trial-events` · `/v1/retention-records` |
+| Timesheets | `/v1/shift-attendance` · `/v1/attendance-exceptions` · `/v1/timesheets` · `/v1/timesheets/:id/send-for-approval` |
+| Billing | `/v1/invoices` · `/v1/billing-triggers` · `/v1/receivables` · `/v1/billing-evidence` |
+| Reporting | `/v1/reports/*` · `/v1/reports/monthly-pack` |
+| Messaging | `/v1/templates` · `/v1/triggers` · `/v1/messages` · `/v1/contact-preferences` |
+| Client links | `/v1/client-links` · `/v1/link-types` · `/v1/link-recipients` — **plus the separate public link surface** |
+| Portal | `/v1/portal/*` — requisitions, shortlists, timesheets, invoices, hard-scoped to the caller's client |
+| Workforce and payroll | `/v1/workforce-requests` · `/v1/salary-revisions` · `/v1/payroll-cycles` · `/v1/payslips` |
+| Collections | `/v1/payments` · `/v1/credit-notes` · `/v1/dunning` |
+
+## 9. Versioning and generated artefacts
+
+- **Additive changes** — a new optional field, a new endpoint, a new enum value a client may ignore —
+  go into `v1`.
+- **Breaking changes** create a `v2` for that resource, with `v1` kept for one release behind a
+  deprecation header.
+- **Integration contracts are versioned independently**: the registry adapters, the finance export and
+  the payroll interface have counterparties who are not on Apollo's release train.
+
+| Generated | From | Used by |
+|---|---|---|
+| The OpenAPI document | Route schemas, at build time | Documentation, the client generator, **the technical documentation deliverable** |
+| Contract types | The shared schema package | Console, link pages, portal, mobile |
+| A typed API client | The OpenAPI document | All four clients |
+
+**The technical documentation under `D11` is generated from this, not written by hand**, and is
+versioned alongside the release.

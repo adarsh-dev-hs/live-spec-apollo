@@ -1,0 +1,115 @@
+---
+title: "Deliverable matrix"
+description: "All 51 deliverables against the three parts, the 25 that are split across parts, and what each part completes."
+icon: Table2
+---
+
+One row per deliverable, one column per part. **●** means work on that deliverable falls in that
+part; where a row carries more than one **●**, the deliverable is split and each part takes a slice.
+
+## 1. The matrix
+
+| Ref | Deliverable | Part 1 | Part 2 | Part 3 |
+|---|---|:---:|:---:|:---:|
+| `F01` | Login and session handling | ● | | |
+| `F02` | User management | ● | | |
+| `F03` | Roles and permissions | ● | | |
+| `F04` | Audit trail | ● | | |
+| `F05` | Settings and lists administration | ● | | |
+| `F06` | Document and file storage | ● | | |
+| `F07` | Message sending infrastructure | ● | | |
+| `F08` | Lists, search, filters and export | ● | | |
+| `F10` | Environments, pipeline and monitoring | ● | | |
+| `F12` | Design system and component library | ● | | |
+| `F13` | Data protection | ● | | |
+| `F14` | Event recording for reporting | ● | | |
+| `D1` | Client and contract management | ● | ● | |
+| `D2` | Demand management | ● | ● | |
+| `D3` | Candidate mobile app | ● | ● | ● |
+| `D4` | Candidate verification (KYC) | ● | | ● |
+| `D5` | Matching and shortlisting | ● | ● | ● |
+| `D6` | Interview and selection | ● | ● | |
+| `D7` | Onboarding and joining | ● | ● | |
+| `D8` | Billing and receivables | ● | ● | |
+| `D9` | Intelligence and analytics | | | ● |
+| `D10` | Notifications and alerts | | ● | |
+| `D11` | Foundations and documentation | ● | | ● |
+| `D12` | Client portal | | ● | |
+| `D13` | Contract creation and versioning | ● | ● | ● |
+| `D14` | Prioritisation and allocation | | ● thin | ● full |
+| `D16` | Verification — extended | ● | ● | ● |
+| `D18` | Matching and shortlisting (AI) | ● | ● | ● |
+| `D20` | Offer management | ● | ● | ● |
+| `D21` | Associate onboarding | | ● | ● |
+| `D22` | Time and attendance | | ● thin | ● full |
+| `D23` | Workforce operations | | | ● |
+| `D24` | Payroll | | | ● |
+| `D25` | Billing — auto-invoice and collections | | ● thin | ● full |
+| `D28` | Analytics — performance and MIS | | | ● |
+| `D29` | Reminders, nudges and preferences | | ● | |
+| `D30` | Foundations and documentation (R2) | | | ● |
+| `A1` | Multi-channel demand ingestion | | ● | ● |
+| `A2` | Two supply bases | ● | ● | |
+| `A3` | Availability decay | | ● | |
+| `A4` | Re-contact cadence engine | | ● | |
+| `A5` | Outbound voice with response capture | | ● | |
+| `A6` | Trial period tracking | ● | ● | ● |
+| `A7` | Retention-linked invoicing | ● | ● | |
+| `A8` | Outcome write-back to ranking | | | ● |
+| `A9` | Specialty and acuity capture | ● | ● | |
+| `A10` | Legacy migration (CPAL) | | | ● |
+| `A11` | Rate variance instrumentation | | | ● |
+| `A12` | Configurable market layer | ● | ● | |
+| `A13` | Client link surfaces | ● | ● | |
+| `A14` | Candidate response capture | | ● | ● |
+
+| | Part 1 | Part 2 | Part 3 |
+|---|---:|---:|---:|
+| Deliverable references | 31 | 29 | 23 |
+| Delivered in full in this part and no other | 12 | 6 | 8 |
+
+## 2. The 25 split deliverables
+
+Twenty-five of the fifty-one are delivered across more than one part. **Seven of them span all
+three.**
+
+### Across all three parts
+
+`D3` candidate mobile app · `D5` matching and shortlisting · `D13` contract creation and versioning ·
+`D16` verification extended · `D18` matching and shortlisting (AI) · `D20` offer management ·
+`A6` trial period tracking
+
+### Across two parts
+
+| Parts 1 and 2 | Parts 1 and 3 | Parts 2 and 3 |
+|---|---|---|
+| `D1` · `D2` · `D6` · `D7` · `D8` · `A2` · `A7` · `A9` · `A12` · `A13` | `D4` · `D11` | `D14` · `D21` · `D22` · `D25` · `A1` · `A14` |
+
+### The three that appear twice in the deliverable list
+
+`D14`, `D22` and `D25` are each carried partly under one reference and partly under another. The
+thin slice and the remainder are separate rows in the SOW, built in different places, and released
+in different parts.
+
+| Ref | Thin slice — Part 2 | Remainder — Part 3 |
+|---|---|---|
+| `D14` | Owner field and capture of the morning-call allocation | The prioritisation engine, recruiter suggestion with load balancing, requisition approval workflow |
+| `D22` | Attendance by app check-in with location stamp and geo-fencing; timesheet with client approval state | Leave categorisation, overtime treatment, internal approval routing |
+| `D25` | Shift invoice from a client-approved timesheet | Payment receipt, reconciliation with part-payments and TDS, ageing, dunning, credit and debit notes |
+
+## 3. Reading the matrix as a build instruction
+
+**A row with three dots is not three builds.** It is one component built once, released in slices.
+The component is designed for its final shape from the start — the Part 1 slice of `D16` still has
+the credential object with issuer, validity period and verification method, because retrofitting
+that in Part 2 costs more than building it once.
+
+What the slice controls is **what is switched on and put in front of a user**, not what the data
+model can express. Two consequences follow, and they are the difference between the plan holding and
+not:
+
+1. **Build the final data shape, release the current slice.** `A2` models supply-base membership as
+   membership in Part 1 even though only Base A is populated, because the SOW says explicitly it is
+   not a status flag.
+2. **Do not build past the slice.** Finishing `D22` in Part 2 because the module is open costs Part
+   2's schedule for capability nobody asked for until Part 3.

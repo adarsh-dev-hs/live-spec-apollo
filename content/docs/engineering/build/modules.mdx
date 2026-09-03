@@ -1,0 +1,528 @@
+---
+title: "Modules"
+description: "The twenty business modules: what each is for, what functionality it covers, what it deliberately leaves to another module, and which release part switches it on."
+icon: Package
+---
+
+One module is one implementable unit of business capability. Each entry below answers the same four
+questions: **what it is for**, **what it covers**, **what it deliberately does not cover**, and
+**when it ships**.
+
+**A module is not a release.** Where the release column names more than one part, the module is
+designed once for its finished shape and switched on in slices — see the
+[deliverable matrix](/docs/release-plan/scope/matrix).
+
+| Module | Delivers | Released |
+|---|---|---|
+| [Clients, contracts and rate cards](#clients-contracts-and-rate-cards) | `D1` `D13` | 1, 2, 3 |
+| [Demand intake](#demand-intake) | `A1` | 2, 3 |
+| [Requisitions and allocation](#requisitions-and-allocation) | `D2` `D14` thin | 1, 2 |
+| [Candidate record and credentials](#candidate-record-and-credentials) | `D4` `D16` `A2` `A9` | 1, 2, 3 |
+| [Candidate app](#candidate-app) | `D3` | 1, 2, 3 |
+| [Engagement and availability](#engagement-and-availability) | `D29` `A3` `A4` `A5` `A14` | 2, 3 |
+| [Matching and ranking](#matching-and-ranking) | `D5` `D18` `A8` | 1, 2, 3 |
+| [Selection and offers](#selection-and-offers) | `D6` `D20` | 1, 2, 3 |
+| [Placement and trial](#placement-and-trial) | `D7` `A6` | 1, 2, 3 |
+| [Attendance and timesheets](#attendance-and-timesheets) | `D22` thin | 2 |
+| [Billing and receivables](#billing-and-receivables) | `D8` `A7` `D25` thin | 1, 2 |
+| [Analytics and reporting](#analytics-and-reporting) | `D9` `D28` `A11` | 3 |
+| [Legacy migration](#legacy-migration) | `A10` | 3 |
+| [Client portal](#client-portal) | `D12` | 2 |
+| [Associate onboarding](#associate-onboarding) | `D21` | 2, 3 |
+| [Workforce operations](#workforce-operations) | `D23` | 3 |
+| [Payroll](#payroll) | `D24` | 3 |
+| [Demand prioritisation and approval](#demand-prioritisation-and-approval) | `D14` full | 3 |
+| [Timesheet extensions](#timesheet-extensions) | `D22` full | 3 |
+| [Collections](#collections) | `D25` full | 3 |
+
+---
+
+### Clients, contracts and rate cards
+
+**Delivers** `D1`, `D13` · **Released** Parts 1, 2, 3 · **Screens** `/clients`, `/clients/:id`,
+`/contracts`, `/contracts/:id`
+
+**Purpose.** The client side of the business: the hospital or home healthcare provider, its sites and
+departments, the rates agreed with it, and the signed contract. Two things here matter more than they
+look. The list of email addresses and WhatsApp numbers belonging to each client is what the inbound
+pipeline checks every incoming message against to work out who sent a requisition. And the contract
+terms are read **at the moment billing decides to raise an invoice** — with no fallback.
+
+**Functionality.** Client entity with legal name, tax details, billing address, service lines and
+**care setting** · locations and departments, home healthcare sites having no departments · client
+contacts, including who receives which type of tokenised link · **sender identities** — email
+addresses, WhatsApp numbers and client system tenants, each mapped to exactly one client · rate cards
+by role, skill and location, versioned by effective date, carrying a **baseline rate** and the
+placement fee percentage · contracts with versioning, renewal alerts and history · the three
+per-client waiting periods, each with a platform default fallback · the two lookup services billing
+depends on: rate resolution and contract terms in force.
+
+**Not here.** Client login and self-service (client portal) · issuing links and rendering link pages
+(client link surfaces — this module holds the contacts, that one holds the links) · invoicing.
+
+**Not built at all.** Drafting contracts from a template — contracts are **recorded, not drafted**.
+Credit limits and credit control. Electronic signature of the client contract: the signed document is
+attached, and signing happens outside the platform.
+
+---
+
+### Demand intake
+
+**Delivers** `A1` · **Released** Parts 2, 3 · **Screens** `/inbound`, `/inbound/unmatched`,
+`/inbound/manual-entry`, `/duplicates`, `/admin/channels`
+
+**Purpose.** Clients tell Apollo about vacancies in whatever way suits them — an email, a spreadsheet
+in their own format, a WhatsApp message, a WhatsApp voice note, a feed from their own HR system, or
+by telling a recruiter who sits in their hospital. This module turns all of them into one standard
+requisition payload, scores it against what *complete* means for that candidate category, chases the
+client **on the channel they used** for anything missing, and gives a person a queue for everything
+the machine could not do.
+
+**Functionality.** Four operational queues: inbound list, unmatched senders, manual entry, suspected
+duplicates · channel configuration for six channels · per-client spreadsheet column mapping,
+configurable without a deployment · required-field sets per candidate category, which define what
+*complete* means · follow-up configuration — message per channel, window, escalation target · parser
+dispatch and field extraction to the requisition schema · completeness scoring and the chase loop.
+
+**Not here.** The shared receive-resolve-classify stack, which is
+[inbound pipeline](/docs/engineering/build/platform-services#inbound-pipeline) — this module owns the
+demand half: the parsers, the completeness rules, the chase and the human queues.
+
+**Release shape.** Email, WhatsApp and the portal in Part 2; spreadsheets, client HRMS and voice
+notes in Part 3.
+
+---
+
+### Requisitions and allocation
+
+**Delivers** `D2`, `D14` (thin slice) · **Released** Parts 1, 2 · **Screens** `/requisitions`,
+`/requisitions/new`, `/requisitions/:id`, `/board`
+
+**Purpose.** The requisition: the single structured record every channel normalises to, and the
+object every module downstream quotes. It tracks the vacancy through its life — open, in fulfilment,
+paused, revised, partly filled, filled, closed — counts how long it has been open **excluding held
+days**, and records who owns it and which recruiters were put on it at the daily morning call.
+
+**Functionality.** The requisition form, including the verbal-capture entry point · the record view,
+carrying its source evidence so a disputed requirement traces back · version history — **a revision
+is a versioning event, not an edit** · the fulfilment board showing live demand, aging and fill in
+one view · shift templates and the shift demand lines they generate · hold, revise and close, each
+with distinct rules about the aging clock and mandatory reasons · owner and allocation, append-only ·
+the requisition state machine and its append-only status-change log.
+
+**Not here.** The allocation half is deliberately **a record, not an assignment engine**. The morning
+call already makes the decision; this module writes it down. Prioritisation, recruiter suggestion and
+approval are [demand prioritisation and approval](#demand-prioritisation-and-approval) in Part 3.
+
+**Release shape.** Permanent requisitions in Part 1; shift templates, shift demand lines and the
+`D14` owner and allocation capture in Part 2.
+
+---
+
+### Candidate record and credentials
+
+**Delivers** `D4`, `D16`, `A2`, `A9` · **Released** Parts 1, 2, 3 · **Screens** `/candidates`,
+`/candidates/:id`, `/verification`, `/verification/pendency`, `/learner-matches`
+
+**Purpose.** Everything Apollo holds about a healthcare professional: who they are, which of the two
+supply bases they belong to, the extra fields that differ by candidate category, their credentials
+with issuer, validity period and verification method, and the verification team's work queue. **One
+candidate record spans both supply bases against one shared credential object** — not a duplicated
+record with a status flag.
+
+**Functionality.** Candidate list and record, with availability confidence and last-confirmed time
+visible · supply base membership — permanent pool, shift pool, or both — modelled explicitly ·
+credentials with issuer, validity period and verification method, shared across both bases · the
+verification queue with **pendency tracked by cause**, and the verification detail view · document
+review against extracted text, with corrections retained so extraction accuracy can be measured ·
+certification records and the learner-match queue · **the single definition of the per-category
+attribute set**, served to the app, the console, demand and ranking so the two sides cannot drift
+apart · duplicate detection and merge — the single merge implementation in the platform · check
+orchestration through the market adapter layer, and credential expiry tracking.
+
+**Not here.** The registry adapters themselves
+([market adapter layer](/docs/engineering/build/platform-services#market-adapter-layer)) · consent, which
+is verified before any check is dispatched
+([data protection](/docs/engineering/build/platform-services#data-protection)).
+
+**Release shape.** Scan-based Aadhar, PAN and certificate capture for one category in Part 1;
+third-party verified checking and the remaining categories in Part 2; document extraction at width,
+duplicates and expiry across the whole base in Part 3.
+
+---
+
+### Candidate app
+
+**Delivers** `D3` · **Released** Parts 1, 2, 3 · **Screens** `/app/signup`, `/app/home`, `/app/jobs`,
+`/app/shifts`, `/app/applications`, `/app/check-in`, `/app/availability`, `/app/documents`,
+`/app/profile`, `/app/payslips`
+
+**Purpose.** The React Native app healthcare professionals use: sign up with a phone number, build a
+profile from a CV, find permanent jobs and shifts, apply and accept, track what is happening, upload
+documents, answer availability questions, and **check in and out of a shift**.
+
+**Functionality.** Sign-up by phone and OTP, category selection, consent · profile building from a CV
+with review-and-correct, or by hand · category-specific attribute capture · job discovery and
+application for Base A · shift discovery, acceptance and clash prevention for Base B · application
+and shift tracking, interview confirmation, offer acceptance · **shift check-in and check-out with an
+offline queue** · document upload for verification · notification settings and the per-user message
+log · the in-app availability answer, **on the same schema as WhatsApp** · the app shell: navigation,
+offline handling, push, release pipeline, help content · the configurable set of basic screening
+questions asked at application, with answers collected against the candidate.
+
+**Plan it against all three consumers.** `D3` is a shared build. Shift discovery, acceptance and
+check-in serve attendance, and the app is one of the two channels candidate responses arrive on.
+**Shift attendance is captured by app check-in with no alternative route: no app means no attendance,
+no timesheet and no shift invoice.**
+
+**Release shape.** Sign-up, profile, screening questions, jobs and documents in Part 1; shifts,
+check-in and availability in Part 2; CV parsing at width and payslips in Part 3.
+
+---
+
+### Engagement and availability
+
+**Delivers** `D29`, `A3`, `A4`, `A5`, `A14` · **Released** Parts 2, 3 · **Screens**
+`/engagement/review`, `/engagement/calls`, `/engagement/runs`, `/segments`, `/admin/cadence`
+
+**Purpose.** Apollo needs to know which professionals are actually available right now. This module
+decides **who** to contact, **how often**, on **which channel** and with **which question set**,
+delivers through outbound messaging, captures the answer on one structured schema whichever channel
+it arrived on, writes it back to the candidate record, and **resets a freshness score that otherwise
+decays**. If nobody hears from a candidate, the score falls and ranking places them lower.
+
+**Functionality.** Segments and contact schedules — **six segments**, three categories against two
+bases, each with its own cadence, channel, question set and staleness threshold · send windows and
+frequency caps, with a projected volume and cost preview before a cadence is enabled · voice
+campaigns: segment, question set, call window, retry policy · the review queue for free-text replies
+the platform was not confident about, and the call log · availability confidence decaying on six
+schedules and resetting on a confirmed response · cadence selection applying opt-outs and send windows
+**at selection, not at send** · candidate response capture across WhatsApp, app and voice on one
+schema · registration of the candidate-response intent set against the inbound pipeline · write-back
+to the availability field, reconciling a response that arrived on two channels.
+
+**Build the four together.** `A3`, `A4`, `A5` and `A14` form a closed loop and **none of the four is
+independently operable**. Build any three and none does anything useful.
+
+**Cost note.** Base B is contacted every 3–4 days across the whole base. This module is the largest
+driver of metered provider spend in the platform, which is why the volume projection exists before a
+cadence can be switched on.
+
+---
+
+### Matching and ranking
+
+**Delivers** `D5`, `D18`, `A8` · **Released** Parts 1, 2, 3 · **Screens** `/search`, `/segments`,
+`/requisitions/:id/ranking`, `/requisitions/:id/shortlist`, `/shortlists`,
+`/admin/ranking-weights`
+
+**Purpose.** Given a vacancy, produce a ranked list of candidates, best first, with a plain
+explanation of why each ranked where they did and which requirements they do not meet. Weights differ
+per candidate category and per supply base, so there are **at least six sets**. Recruiters can search
+manually and can move someone up or down, and every override is recorded. When a client or interviewer
+rejects someone with a structured reason, that reason feeds back and affects later rankings.
+
+**Functionality.** Advanced candidate search on skill, location, experience and status, with saved
+searches · talent segments, **shared with the engagement cadence model rather than duplicated** · the
+ranked set: score, rationale, met / partly met / unmet criteria, staleness · recruiter override with
+a mandatory reason, append-only · weight sets per category and base, versioned by effective date ·
+the ranking engine, producing rationale **as part of scoring, not reconstructed afterwards** ·
+feature extraction from credentials, category attributes, availability, certifications and outcomes ·
+shift-level ranking against a shift demand line · outcome write-back from selection · shortlist
+assembly and submission, which issues the client link.
+
+**One design, not two.** The rejection taxonomy in [selection and offers](#selection-and-offers) and
+the features this engine reads are agreed in a joint session **before either module is built**. If
+the ranking model has no slot for outcome data, feeding rejections back later means rebuilding it.
+
+**Release shape.** One weight set in Part 1; per-category and shift-level ranking in Part 2; tuning
+and `A8` write-back in Part 3.
+
+---
+
+### Selection and offers
+
+**Delivers** `D6`, `D20` · **Released** Parts 1, 2, 3 · **Screens** `/interviews`, `/offers`
+
+**Purpose.** Interviews, the decision, and the offer. Propose slots to a candidate and a client
+neither of whom has a login, handle reschedules and cancellations, capture structured feedback, then
+accept, hold or reject with **a mandatory reason from a configured taxonomy** — which is what feeds
+back into ranking. If accepted, generate the offer from a template selected by state, role and skill,
+deliver it, track it to expiry, get it signed, and map it to the contract version whose terms billing
+will read at day 90.
+
+**Functionality.** Interview slot proposal to both sides, confirmation, reschedule, cancellation with
+a reason · an interview list showing what is awaiting feedback, so the pipeline does not stall
+silently · structured interview feedback that can feed the outcome write-back · accept / hold /
+reject with a mandatory structured reason and a full selection audit trail · offer templates by
+state, role and skill · offer generation, preview, delivery, tracking, expiry, reminders, and decline
+with a reason · **offer-to-contract mapping, capturing the placement fee billing will read**.
+
+**Why it is load-bearing.** Without offer management there is no offer acceptance and no joining
+event, and joining, trial tracking, the retention link and retention-linked invoicing all stall
+behind it.
+
+**Release shape.** Generation, issue, tracking and acceptance in Part 1; templates by state, role and
+skill plus reschedule handling in Part 2; digital signature in Part 3.
+
+---
+
+### Placement and trial
+
+**Delivers** `D7`, `A6` · **Released** Parts 1, 2, 3 · **Screens** `/placements`, `/placements/:id`,
+`/trial`
+
+**Purpose.** Once someone accepts an offer, this module tracks them joining and then checks in on
+them at **day 0, 7, 30, 60 and 90**. The candidate is asked whether they are being paid on time,
+whether they have a preceptor and whether their accommodation is sorted. The client is asked at day
+30 and 60 how it is going, and at day 90 **whether the person is still there** — that last answer is
+what lets Apollo invoice.
+
+**Functionality.** Joining confirmation, opening the placement and starting the 90-day clock · the
+placement list with trial stage and billing-trigger visibility for finance · drop-out capture with a
+reason, returning the position to the requisition · **privileging for doctors** — a hospital-granted
+permission separate from council registration · the trial dashboard: which check-ins are done, due or
+missed · check-in configuration: which events, which questions, **per candidate category and per care
+setting** · candidate answers with escalation on a negative response · trial outcome and the visible
+deemed-confirmation countdown · check-in scheduling on both sides, and question rendering across app,
+WhatsApp and voice · **the immutable day-90 record**.
+
+**The most consequential object in the platform.** The day-90 record must still make sense to someone
+querying a charge a year later, so it is immutable, it snapshots the terms in force, and it records
+whether the client acknowledged or the window simply expired.
+
+**Care-setting difference.** Home healthcare has neither a preceptor nor accommodation, so its
+question set differs — which is why the question sets are configuration and not a form.
+
+---
+
+### Attendance and timesheets
+
+**Delivers** `D22` (thin slice) · **Released** Part 2 · **Screens** `/attendance`, `/timesheets`,
+`/timesheets/:id`
+
+**Purpose.** The contractual invoice chain. Shift attendance arrives from app check-ins — **there is
+no other route** — exceptions are resolved by a person, and the period is compiled into a timesheet
+priced against the contract version in force. The client approves it through a tokenised link, or it
+is deemed approved when the window expires, and billing invoices against the **approved** timesheet
+rather than raw attendance.
+
+**Functionality.** Shift attendance — expected, checked in, checked out, no-show — with the location
+stamp recorded · **geo-fencing set to allow, warn or block a check-in outside the boundary**, the
+boundary being the site for facility work and the visit address for home visits · exception
+resolution before a timesheet is compiled, including bulk resolution of a systemic cause · manual
+time correction with a mandatory reason, audited because it changes an invoice · timesheet
+compilation, pricing against the contract version, and reissue after correction · sending for
+approval, which issues the timesheet link · timesheet tracking with the **visible deemed-approval
+countdown** · the check-in receiver, including offline check-ins synced later · the approved-timesheet
+export for the manual payroll process that runs until Part 3.
+
+**Not here.** Leave categorisation, overtime treatment and internal approval routing —
+[timesheet extensions](#timesheet-extensions), Part 3.
+
+---
+
+### Billing and receivables
+
+**Delivers** `D8`, `A7`, `D25` (thin slice) · **Released** Parts 1, 2 · **Screens** `/invoices`,
+`/invoices/:id`, `/billing/evidence`, `/receivables`
+
+**Purpose.** Two invoice paths and the evidence behind each. A **permanent placement** invoices once
+the client confirms at day 90 that the person is still there — not at placement. A **contractual
+engagement**, including a locum doctor paid per session, invoices from a client-approved timesheet.
+**The trigger follows the service line, not the candidate category.**
+
+**Functionality.** Invoice list across both types, each linked to the evidence that allowed it ·
+billing evidence: who confirmed, when, against which contract terms, and whether the client
+acknowledged or the window expired · receivables, with ageing displayed · permanent invoice
+generation from the day-90 record, at the terms in force at the trigger · the immutable day-90 record
+store with snapshotted terms · contract-terms resolution at the trigger event, recorded on the
+invoice · shift invoice generation from an approved or deemed-approved timesheet · duplicate
+prevention on both paths.
+
+**No fallback.** No contract terms in force at the trigger means permanent billing does not run at
+all. That is not a defect to work around; it is the designed behaviour, and it is why contracts are
+recorded before the first placement.
+
+**Not here.** Payments, TDS, ageing chases and credit notes — [collections](#collections), Part 3. The
+chain here ends at *invoice raised, receivable open*.
+
+---
+
+### Analytics and reporting
+
+**Delivers** `D9`, `D28`, `A11` · **Released** Part 3 · **Screens** `/reports/funnel`,
+`/reports/fill`, `/reports/trial-survival`, `/reports/stage-loss`, `/reports/performance`,
+`/reports/rate-variance`, `/reports/monthly-pack`
+
+**Purpose.** How many vacancies get filled, how fast, where candidates drop out, how each recruiter
+and each intake channel performs, how many placements survive to day 90, and how the rate agreed
+compares to the standard rate.
+
+**Functionality.** Funnel and stage conversion · fill rate and time-to-fill, showing distribution
+rather than only an average · trial survival across the full day 0–90 curve · stage-level conversion
+loss by client and by recruiter · channel and recruiter performance · the monthly MIS pack, generated
+on a schedule · rate agreed against baseline by client, role, specialty and acuity · **the mart layer
+that makes all of the above possible**.
+
+**Everything here reads marts built from the event spine, never operational tables.** And every one
+of these reports depends on events having been written **when the work happened** — which is why the
+event spine ships in Part 1 with nothing yet reading it.
+
+**Dependency.** Stage-level loss by recruiter needs the `D14` owner field, captured from Part 2.
+
+---
+
+### Legacy migration
+
+**Delivers** `A10` · **Released** Part 3
+
+**Purpose.** Move Apollo's existing candidate data out of CPAL and the current tooling into the
+platform, after which **the platform becomes the system of record and the old tool is switched off**.
+
+**Functionality.** Data profiling: volume, completeness, duplicate rate, and a mapping feasibility
+assessment · the migration pipeline — extract, map, load, resumable and re-runnable without creating
+duplicates · delta runs picking up source changes between the main load and cutover · duplicate
+resolution within the migrated base **and between the migrated base and app registrations** · the
+operational screens: batch status, failed records, correction and rejection · reconciliation against
+the source total, which is what permits cutover.
+
+**The item with the least known about it.** Nobody has seen the data: how many records, how complete,
+how many duplicates, whether fields map cleanly. **Its effort basis awaits joint data profiling**, so
+profiling is the first task and belongs much earlier than the rest of the module.
+
+---
+
+### Client portal
+
+**Delivers** `D12` · **Released** Part 2 · **Screens** `/portal`, `/portal/requisitions`,
+`/portal/requisitions/new`, `/portal/shortlists`, `/portal/timesheets`, `/portal/invoices`
+
+**Purpose.** A logged-in website for clients. Until Part 2 clients have only had one-off links with
+no password; this gives them accounts so they can raise vacancies themselves, see how their vacancies
+are progressing, review shortlists, approve timesheets and download invoices. Once it exists the
+portal also becomes the **sixth intake channel**.
+
+**Functionality.** Raise a requisition, producing **the same record as one arriving by email**, marked
+as sourced from the portal · my requisitions, with client-appropriate status and fill · shortlists:
+the logged-in version of the shortlist link, same decisions and same taxonomy · timesheets: the
+logged-in version of the approval link, same state and same window rule · invoices: download their
+own, and view rate card and contract read-only · enabling the portal channel in demand intake as
+configuration.
+
+**This module adds screens and a tenancy boundary, not new business logic.** Everything it shows
+already exists. The one thing that is genuinely new is **hard row scoping** — a portal user reaches
+their own client and sites and nothing else, and a new endpoint fails closed.
+
+---
+
+### Associate onboarding
+
+**Delivers** `D21` · **Released** Parts 2, 3 · **Screens** `/workforce/onboarding`,
+`/app/onboarding`
+
+**Purpose.** The paperwork side of someone joining as a shift worker. Today it is collected and
+stored outside the platform; this module brings it in.
+
+**Functionality.** Associate profile: employment details, bank details, statutory identifiers,
+completeness · statutory forms including PF/UAN transfer and gratuity nomination, each with its own
+completion state and returnable with a reason · a document checklist differing by role and by state ·
+the guided in-app onboarding flow · **the onboarding gate that blocks a pay run for an associate whose
+paperwork is incomplete**.
+
+That gate is the operational reason the module exists.
+
+---
+
+### Workforce operations
+
+**Delivers** `D23` · **Released** Part 3 · **Screens** `/workforce/requests`
+
+**Purpose.** The day-to-day changes that happen once people are working: salary revisions for one
+person or in bulk, salary advances, and putting a salary on hold or releasing it. Each needs two
+people — one to request and one to approve — **so nobody can change their own pay**.
+
+**Functionality.** The maker-checker request engine, with request types as configuration, thresholds
+by value, and raiser never equal to approver · salary revision, individual and bulk · salary advances
+with a recovery plan, and holds with release · attendance upload from outside, paired against app
+check-ins with mismatch resolution · geo-fence configuration and enforcement, for both a fixed site
+and a per-visit address.
+
+**Build it before timesheet extensions.** The request-and-approve engine here is reused for internal
+timesheet approval; built the other way round, it gets built twice.
+
+---
+
+### Payroll
+
+**Delivers** `D24` · **Released** Part 3 · **Screens** `/workforce/payroll`, `/app/payslips`
+
+**Purpose.** Paying the shift workers. This connects the platform to a **third-party payroll engine —
+the platform does not build a payroll calculator**. It assembles the inputs the engine needs,
+configures the pay cycle, takes the results back, produces the PF and ESIC reports and challans, and
+delivers payslips in the app and over WhatsApp.
+
+**Functionality.** The pay run: open a cycle, lock inputs, send, receive results, issue payslips,
+close · payroll settings: cycle frequency, cut-off dates, field mapping to the engine, deduction
+rates · statutory reports: PF and ESIC reports and challans for a period · payslips in the app and
+over WhatsApp · the engine integration boundary: assemble inputs, take back outputs, report
+exceptions.
+
+**Start it in Quarter 1 even though it ships in Quarter 3.** Engine selection, contract and field
+mapping are client dependencies, and the module sits behind associate onboarding, attendance and
+workforce operations. Until it exists payroll is done by hand, which puts a hard ceiling on how many
+shift workers Apollo can take on.
+
+**Not built.** Statutory filing. Reports and challans are produced; filing is outside the scope.
+
+---
+
+### Demand prioritisation and approval
+
+**Delivers** `D14` (remainder) · **Released** Part 3
+
+**Purpose.** [Requisitions and allocation](#requisitions-and-allocation) records which recruiter was
+put on which vacancy, as decided on the morning call. This module makes the system do the deciding:
+score which vacancies matter most, suggest which recruiter should take each one, and add an approval
+step before a vacancy goes live.
+
+**Functionality.** Priority scoring per requisition on urgency, value and age, with the reasoning
+shown · the priority board, and manual override of a priority with a reason · suggested recruiter,
+with current load shown against the operating norm · the requisition approval workflow — a new state
+between created and open · the scoring and load-balancing engine.
+
+**The system suggests; a person still decides.** Nothing here writes an allocation directly.
+
+**Why Part 3 rather than next to the requisition.** Priority scoring and recruiter suggestion read
+performance data that [analytics and reporting](#analytics-and-reporting) produces. Building this
+earlier means building a suggestion engine against data that does not exist yet.
+
+---
+
+### Timesheet extensions
+
+**Delivers** `D22` (remainder) · **Released** Part 3
+
+**Purpose.** The three things the thin-slice timesheet deliberately left out.
+
+**Functionality.** Leave types and leave records · overtime rules, varying by client and by state ·
+internal timesheet approval routing, **reusing the workforce-operations approval engine** · the full
+timesheet calculation applying leave and overtime **on top of** the Part 2 attendance data.
+
+The same timesheet then feeds both the client invoice and the payroll input, **with no second
+calculation**.
+
+---
+
+### Collections
+
+**Delivers** `D25` (remainder) · **Released** Part 3 · **Screens** `/receivables`
+
+**Purpose.** The money coming back in. Billing ends at *invoice raised, receivable open*; this module
+records whether Apollo actually got paid.
+
+**Functionality.** Payments received, matched across several invoices, with part-payments and
+unmatched payments queued · TDS recorded separately so gross and net are both visible · an overdue
+report with ageing **calculated from the contract payment terms**, not a flat rule · chase history, so
+a client is not chased twice · automatic dunning on a schedule, stopping the moment payment arrives ·
+credit and debit notes, approved before issue and exported alongside invoices.

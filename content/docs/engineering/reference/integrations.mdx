@@ -1,0 +1,86 @@
+---
+title: "Integrations"
+description: "Every external system the platform touches, what it is used for, who supplies it, and what the platform does when it fails."
+icon: PlugZap
+---
+
+Fifteen external systems. **Only a third have a named supplier.** Each unnamed supplier is an
+unpriced integration and a failure mode nobody can test against, which is why every one of them sits
+behind an interface with a manual fallback.
+
+## 1. The register
+
+| System | Used for | Supplier | Used by | Needed by |
+|---|---|---|---|---|
+| **WhatsApp Business Platform** | Inbound text and voice notes · demand follow-up · notifications · offer delivery · client links · trial check-ins · payslips | **Not named.** One registered number and template set shared across all uses — not two | Messaging, demand intake, engagement, selection, links, placement, payroll | Part 1 for sending |
+| **SMS**, DLT-registered | OTP, cadence fallback, alerts | Aggregator not named. **DLT registration is a regulator lead time** | Identity, messaging, engagement | Part 1 |
+| **Email** | Requisition capture · follow-up · offer and link delivery · internal alerts | Amazon SES. **Mailbox model undecided** — one address with sender routing, or per-client addresses | Inbound pipeline, messaging, demand intake | Part 1 |
+| **Outbound voice** | Re-contacting the passive base · escalated trial check-ins | **Not named.** What is in scope is the integration and the response extraction schema, not the voice service | Engagement, placement | Part 2 |
+| **Speech-to-text** | Transcribing WhatsApp voice notes to the requisition schema | **Not named.** Language coverage must be proven against **field-captured audio**, not studio samples | Inbound pipeline, demand intake | Part 3 |
+| **AI parsing and intent classification** | Separating demand from candidate-response intents · field extraction · CV parsing · free-text and voice answer extraction | **Not named.** Threshold, fallback and retraining path agreed **once**, across both intent sets | Inbound pipeline, demand intake, candidate app, engagement | Part 2 |
+| **Client HRMS / ATS** | Structured requisition payloads from client systems, bypassing parsing | **Number and identity of client systems not specified.** Each is a separate connector | Demand intake | Part 3 |
+| **Client spreadsheet formats** | Per-client column mapping to the requisition schema | **Number of distinct formats not specified** | Demand intake | Part 3 |
+| **Credential registries and aggregator** | Nursing councils, the NMC and state medical councils, allied health councils, the Pharmacy Council · Aadhaar via DigiLocker, PAN, EPFO, court checks | **Aggregator not selected.** Several registries have no API and resolve to document plus manual verification behind the same interface | Market adapter layer, candidates | Part 1 |
+| **Document reading** | Credential and identity document extraction | **Not named.** Sits behind the adapter interface | Candidates | Part 1 |
+| **Electronic signature** | Offer signature and offer-to-contract mapping | **Not named** | Selection | Part 3 |
+| **Apple App Store and Google Play** | Publishing the candidate app — **the only route by which shift attendance reaches the platform** | Accounts must be **in Apollo's name**. First submission is reviewed more slowly | Candidate app, timesheets | Part 1 |
+| **Finance system** | Destination for raised invoices, credit notes and open receivables | **Not named.** The invoice object is built addressable by API or file export so a target attaches later | Billing, collections | Part 2 |
+| **Payroll engine** | Payroll inputs and outputs — **the platform does not calculate pay** | **Not chosen.** Selection is needed in Quarter 1 even though payroll ships in Quarter 3 | Payroll | Part 3 |
+| **Legacy CPAL** | Source system for the migration | **Joint data profiling has not run.** Volume, quality and duplicate rate all unknown | Legacy migration | Part 3 |
+
+## 2. The rules every integration obeys
+
+1. **Behind an interface.** No provider name appears in domain logic. Replacing a supplier is a new
+   adapter, not a change to a module.
+2. **A manual fallback exists.** Every path degrades to something a person can work with. **No
+   provider failure is allowed to fail a candidate, lose a payload, or silently stop a business
+   chain.**
+3. **The raw payload is written down first.** Whatever arrives is persisted before anything tries to
+   understand it, and it is kept.
+4. **Redelivery is normal.** Every inbound path deduplicates on the provider's message id.
+5. **Cost is attributed.** Every provider call records its consumption units against a cause, because
+   the running-cost figure Apollo has asked for cannot be reconstructed afterwards.
+6. **A contract test per adapter.** A core change that breaks an existing adapter fails the build.
+7. **Where no supplier is named**, the integration ships with a stub adapter plus a contract test, and
+   the missing fixture set is recorded as a named gap rather than assumed away.
+
+## 3. What happens when one fails
+
+| Failure | What the platform does |
+|---|---|
+| WhatsApp provider down | Sends queue and retry; **the inbound webhook still records the payload** |
+| WhatsApp template not yet approved | **The send is refused, not attempted** — the template carries its approval state |
+| SMS template rejected by the registry | Falls back to the next channel in the trigger's order |
+| Email service still sandboxed | Only verified addresses receive mail. **Looks like a product failure, is a configuration one** |
+| Voice call unanswered | Retries per campaign policy, inside the call window and frequency caps |
+| Voice or text extraction below the confidence threshold | Review queue. **Never a silent confidence reset** |
+| Transcription fails, or the note is over length | Manual entry, **with the audio retained and playable** — not rejected |
+| AI provider outage | Inbound records still written, classification retried, nothing discarded |
+| Client system tenant unresolvable | Unmatched queue, for manual selection |
+| A spreadsheet row fails mapping | **Named row-level error; the valid rows still produce requisitions** |
+| A council has no API | **Document plus manual verification behind the same interface** |
+| Verification aggregator outage | Manual fallback — **never fails the candidate**; surfaces as awaiting-registry pendency |
+| Document reading fails | Manual entry, with the document retained |
+| E-signature provider down | The offer stays sent; signature status updates when the provider returns |
+| App store rejection | **Calendar risk no team size removes.** A placeholder build goes through review early |
+| Finance system not yet named | Generic API and file export; **a re-export does not duplicate in the target** |
+| Payroll engine rejects a person | Reported with the engine's reason, correctable and resendable |
+| A legacy record will not map | Exception queue; corrected or rejected **with a reason, never lost** |
+
+## 4. Metered cost
+
+Apollo has asked for consumption volumes per requisition across messaging, email and transcription so
+running costs can be modelled.
+
+| Metered | Unit | Set by |
+|---|---|---|
+| WhatsApp | Per conversation | Cadence configuration and follow-up frequency |
+| Voice | Per minute | Campaign window and retry policy |
+| Transcription | Per minute | How many clients send voice notes |
+| Document reading | Per page | Candidate intake volume |
+| Verification | Per check | Which attributes are configured per category |
+| AI inference | Per inbound message | Intake volume, and classification accuracy |
+
+**The answer runs both ways.** Apollo needs a cost figure from the Service Provider, and the Service
+Provider needs Apollo's expected base size and contact frequency to produce one. Until both exist,
+every cadence screen shows a projected volume and cost before the cadence can be enabled.

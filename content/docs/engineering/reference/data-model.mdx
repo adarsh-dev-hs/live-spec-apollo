@@ -1,0 +1,173 @@
+---
+title: "Data model"
+description: "The core entities, who owns each one, how they relate, and the three lifecycles that cross module boundaries."
+icon: Database
+---
+
+One PostgreSQL database, **one schema per module**, and one rule that everything else follows.
+
+> **Exactly one component writes an entity. Everything else reads it through that component's
+> service or a view.**
+
+That rule is enforced twice — in the repository by the project graph, and in the database by one role
+per schema. It is what keeps a modular monolith modular.
+
+## 1. Shared platform entities
+
+| Entity group | Owner | Notes |
+|---|---|---|
+| Users, roles, permissions, site assignments | Identity | Three separate identity realms: staff, candidate, client user |
+| Audit entries | Audit trail | **Append-only.** Written by every component, inside its own transaction |
+| Settings, reference lists, categories, care settings | Settings | Editable data, never code |
+| Documents and their versions | File storage | Every uploaded file in the platform |
+| Inbound records and intent registrations | Inbound pipeline | The **raw payload is retained forever** |
+| Templates, triggers, delivery log, preferences, opt-outs | Outbound messaging | One log per message and per candidate |
+| Jobs, runs, dead letters | Job runtime | Every non-interactive execution |
+| Platform events — outbox and log | Event spine | **Append-only**, partitioned by month |
+| Consent, retention policies, erasure requests | Data protection | Consent is checked before any verification dispatch |
+| Adapters and adapter calls | Market adapter layer | Each call records its cost |
+| Client links, link types, recipients, responses | Client link surfaces | One mechanism, four configured types |
+
+## 2. Business entities, by module
+
+| Entity group | Owner | Read by |
+|---|---|---|
+| Client, location, department, contact | Clients | Demand, requisitions, selection, billing, portal |
+| **Sender identity** | Clients | Inbound pipeline — every inbound message resolves here |
+| Rate card and its versions and lines | Clients | Requisitions, timesheets, billing, reporting |
+| Contract and its versions | Clients | Selection, placement, timesheets, billing |
+| Per-client waiting periods | Clients | Demand, placement, timesheets, billing |
+| Channel, spreadsheet mapping, required-field set, follow-up config | Demand intake | Inbound pipeline |
+| Parse result, completeness score, follow-up thread, duplicate suspicion | Demand intake | Requisitions |
+| **Requisition and its versions** | Requisitions | Matching, selection, placement, billing, reporting, portal |
+| Shift demand line | Requisitions | Matching, timesheets |
+| Allocation record, status transition | Requisitions | **Append-only.** Reporting, prioritisation |
+| **Candidate**, category attributes | Candidates | App, engagement, matching, selection, placement, onboarding |
+| Supply base membership | Candidates | Engagement, matching |
+| Credential, verification case | Candidates | Matching |
+| Category attribute set *(the definition)* | Candidates | Demand, requisitions, app, matching |
+| Duplicate candidate | Candidates | Legacy migration |
+| Application, shift acceptance | Candidate app | Matching, selection, timesheets |
+| Segment, cadence rule, cadence run | Engagement | Matching — segments are shared, not duplicated |
+| **Availability confidence** | Column on the candidate, **written by engagement** | Matching |
+| Availability response, voice campaign, call, transcript | Engagement | Candidates, placement |
+| Weight set, ranked set, rank entry, recruiter override | Matching | Selection, reporting |
+| Saved search, talent segment, shortlist | Matching | Client links, selection |
+| Outcome signal | Matching | Matching — the write-back loop |
+| Interview, feedback, selection decision | Selection | Matching, placement |
+| Offer and its versions, offer-to-contract mapping | Selection | Placement, billing |
+| **Placement**, drop-out, privileging record | Placement | Requisitions, timesheets, billing, reporting, onboarding |
+| Trial event, trial response | Placement | Reporting |
+| **Retention record** | Placement | Billing — **immutable once written** |
+| Shift attendance, attendance exception | Timesheets | Workforce, payroll |
+| **Timesheet** and its lines | Timesheets | Client links, billing, payroll, extensions |
+| Invoice and its lines, billing trigger, receivable | Billing | Reporting, portal, collections |
+| Rate baseline, rate variance, reporting marts | Reporting | Rebuilt from the event log |
+| Migration batch, record, exception | Legacy migration | Candidates |
+| Associate profile, statutory form, checklist | Associate onboarding | Payroll |
+| Workforce request, salary revision, advance, hold | Workforce operations | Payroll |
+| Attendance upload, geo-fence | Workforce operations | Timesheets |
+| Payroll cycle, inputs, outputs, statutory reports | Payroll | Candidate app — payslips |
+| Priority score, allocation suggestion, recruiter capacity, approval request | Prioritisation | Requisitions |
+| Leave type and record, overtime rule, approval route | Timesheet extensions | Payroll |
+| Payment, allocation, credit note, debit note, dunning schedule | Collections | Reporting |
+
+## 3. How the core entities relate
+
+```
+ Client ─┬─ Location ─── Department
+         ├─ ClientContact ──── LinkRecipient ──── ClientLink ──── LinkResponse
+         ├─ SenderIdentity     ◀── every inbound message resolves here
+         ├─ RateCard ─── RateCardVersion ─── RateCardLine
+         ├─ Contract ─── ContractVersion   ──▶ read at every billing trigger
+         ├─ WaitingPeriods     (retention · timesheet · follow-up, with platform defaults)
+         │
+         └─ Requisition ─── RequisitionVersion (current)
+              │   category: nurse | doctor | allied        care setting: hospital | home
+              ├─ ShiftDemandLine        contractual only; carries the visit address for home care
+              ├─ AllocationRecord · StatusTransition       append-only
+              ├─ RankedSet ─── RankEntry ─── Candidate
+              ├─ Shortlist ─── ShortlistEntry  ──▶ ClientLink (shortlist)
+              │
+              └─ Application ─── Candidate
+                   ├─ Interview ─── InterviewFeedback
+                   ├─ SelectionDecision  ──▶ OutcomeSignal ──▶ the next RankedSet
+                   ├─ Offer ─── OfferVersion ─── OfferContractMapping ─── ContractVersion
+                   └─ Placement
+                        ├─ TrialEvent ─── TrialResponse       day 0 · 7 · 30 · 60 · 90
+                        ├─ RetentionRecord (immutable) ──▶ Invoice (permanent)
+                        └─ DropOut  ──▶ the position returns to the requisition
+
+ Candidate ─┬─ Credential ─── VerificationCase ─── AdapterCall
+            ├─ CandidateDocument ─── Document
+            ├─ SupplyBaseMembership        Base A and / or Base B
+            ├─ AvailabilityConfidence      a column here, written by engagement
+            ├─ ShiftAcceptance ─── ShiftDemandLine
+            ├─ ShiftAttendance ─── TimesheetLine ─── Timesheet ──▶ Invoice (shift)
+            └─ AssociateProfile ─── StatutoryForm ──▶ PayrollInput ─── PayrollCycle
+```
+
+## 4. The lifecycles that cross modules
+
+Every state machine lives in the module that owns it. These three cross enough boundaries to belong
+here.
+
+### Requisition
+
+```
+incomplete → awaiting_client → complete → open → in_fulfilment → partially_filled → filled
+                   │                                    ▲   │
+                   │  escalates to the owner on          │   └─▶ on_hold  (the aging clock stops)
+                   │  window expiry                      └────── release  (aging resumes from held)
+                   │
+   revise at any point creates a new version and re-scores
+   any state → closed, with a mandatory reason from the configured list
+```
+
+**Aging excludes held days.** A revision is a new version, not an edit. `awaiting_approval` is added
+by [demand prioritisation](/docs/engineering/build/modules#demand-prioritisation-and-approval) in Part 3.
+
+### Placement and the day-90 trigger
+
+```
+offered → joined → in_trial ─┬─▶ trial_survived   client confirms at day 90, or the window expires
+                             └─▶ trial_ended      drop-out, with a reason
+                                     │
+        RetentionRecord written, immutable, snapshotting the terms in force
+                                     │
+                             BillingTrigger ──▶ Invoice (permanent)
+```
+
+The retention record records **whether the client acknowledged or the window simply expired**, and
+both are valid invoice inputs. Only the day-90 link type can carry the billing-trigger flag.
+
+### Timesheet
+
+```
+building → built → sent_for_approval ─┬─▶ approved           client answers the link
+                                      └─▶ deemed_approved    the window expired
+                                                │
+                                        Invoice (shift)
+```
+
+## 5. Append-only, and why
+
+Five things are append-only, with no `UPDATE` or `DELETE` granted at all: **audit entries, status
+transitions, retention records, allocation records and ranking overrides**.
+
+The reason is a single scenario. Apollo raises an invoice at day 90; months later the client queries
+it. The answer has to be a record of who confirmed what, when, against which contract terms, that
+nobody could have edited in between. If any link in that chain is mutable, the invoice cannot be
+defended — and permanent placement is the whole of Part 1's revenue.
+
+## 6. Conventions
+
+| | |
+|---|---|
+| Schema | One per module. No module reads another module's tables directly. |
+| Migrations | Numbered plain-SQL files, **forward-only**. Never rewrite an append-only table. |
+| Money | Stored as a decimal amount with an explicit currency. Never a float. |
+| Time | Timestamps in UTC. Business dates mean `Asia/Kolkata`. |
+| Reference data | Categories, care settings and service lines are rows, not enums in code. |
+| Settings versioning | Changing a setting does not retrospectively alter records created under the old value. |
+| Deletion | Candidates, requisitions, invoices and any audited record are never deleted. |

@@ -1,0 +1,139 @@
+---
+title: "Product context"
+description: "The business the platform serves, the people who use it, the two ways money reaches Apollo, and the dimensions that cut across everything."
+icon: Building2
+---
+
+Read this once. Everything else assumes it.
+
+## 1. Two lines of business, behaving differently
+
+Apollo Knowledge Services places healthcare professionals into hospitals and home healthcare
+providers. It runs two lines of business at once, and they behave completely differently.
+
+| | Permanent placement | Contractual (shift) staffing |
+|---|---|---|
+| What is sold | A person, hired by the client | Hours worked, invoiced by the shift |
+| Supply base | **Base A** — the permanent pool | **Base B** — the shift pool |
+| Availability means | A notice period | Time windows within a travel radius |
+| How Apollo is paid | A percentage of CTC, invoiced **at day 90** once the client confirms the person is still there | Shift-level invoice from a **client-approved timesheet** |
+| Billing trigger | The immutable retention record, written when a client answers a link | A timesheet in state `approved` or `deemed_approved` |
+| Attendance | Not tracked — the person is the client's employee | App check-in, the **only** route |
+| Payroll | Not Apollo's | Apollo's, run through a third-party engine from Part 3 |
+| Released in | Part 1 | Part 2 |
+
+**A locum doctor is a contractual engagement even though the candidate category is doctor.** The
+billing trigger follows the service line, not the candidate category. Getting this wrong invoices
+the wrong way for a whole class of placement.
+
+## 2. The two value flows
+
+### Permanent — Part 1
+
+```
+client onboarded → contract signed, with terms and waiting periods
+  → requisition created → owner set, recruiters allocated on the morning call
+  → ranked shortlist produced → sent to the client as a tokenised link
+  → client answers yes, no or with comments → interview held, structured feedback captured
+  → accept / hold / reject with a mandatory structured reason
+  → offer generated from a template, delivered, signed, mapped to a contract version
+  → joining confirmed → placement opens, the 90-day clock starts
+  → check-ins at day 0, 7, 30, 60 and 90, candidate side and client side
+  → day 90: the client confirms, or the deemed-confirmation window expires
+  → immutable retention record  →  permanent invoice raised, receivable opened
+```
+
+### Contractual — Part 2
+
+```
+client onboarded → contract with shift rates and a deemed-approval window
+  → shift requisition and shift template → one demand line per shift
+  → candidates ranked against the shift line, Base B weights, travel radius, no clash
+  → candidate accepts the shift in the app
+  → candidate checks in and out in the app, location stamped, geo-fence applied
+  → exceptions resolved → timesheet compiled and priced against the contract version
+  → timesheet sent to the client as a link → approved, or deemed approved on expiry
+  → shift invoice raised, receivable opened
+```
+
+Both chains stop dead without the tokenised link. The contractual chain stops dead without the
+mobile app.
+
+## 3. Who uses it
+
+### Apollo internal — the only people with a login before Part 2
+
+| Role | What they do |
+|---|---|
+| Recruiter | Work requisitions, search and shortlist, run interviews, capture verbal demand at the hospital |
+| Fulfilment lead | Runs the daily morning call, allocates recruiters, watches the fulfilment board and trial dashboard |
+| Business development | Clients, contracts, rate cards, client contacts and link recipients |
+| Verification and quality | Work the verification queue, review document extraction, resolve credential checks |
+| Finance | Invoices, billing evidence, receivables, timesheet tracking |
+| Platform administrator | Settings, reference lists, channels, templates, weights, adapters |
+| Leadership | Read reporting, attend gates |
+
+Around twenty-two recruiters, most of them resident inside client hospitals. **Verbal capture of a
+vacancy is a normal path, not an edge case.**
+
+### External
+
+| Actor | Reaches the platform by | From |
+|---|---|---|
+| Candidate | React Native app, phone and OTP | Part 1 |
+| Candidate | WhatsApp templates and automated voice calls | Part 2 |
+| Client contact | **Tokenised link, no login** — shortlist, day 30/60/90 check-in, timesheet approval | Part 1 |
+| Client system | HRMS/ATS push, email, spreadsheet, WhatsApp | Part 2 and Part 3 |
+| Client user | Logged-in portal | Part 2 |
+
+## 4. Surfaces
+
+| Surface | Auth | First shipped |
+|---|---|---|
+| Ops/Admin console | Apollo staff, email and password | Part 1 |
+| Candidate app | Phone and OTP, a separate identity realm | Part 1 |
+| Client link pages | Unguessable expiring token, **no account** | Part 1 |
+| WhatsApp templates | Sender number resolved to a candidate or client | Part 2 |
+| Outbound voice scripts | Called number resolved to a candidate | Part 2 |
+| Client portal | Client user, email and password, hard row scoping | Part 2 |
+
+## 5. Category and care setting are dimensions, not releases
+
+The SOW is explicit: **category is a dimension across the deliverables rather than a separate
+deliverable.** Three categories against two supply bases gives **six supply segments**, each with
+its own acquisition motion, decay schedule, contact cadence and ranking weight set.
+
+| Category | Attribute set (`A9`) |
+|---|---|
+| Nurse | Specialty, acuity |
+| Doctor | Specialty, case-mix, grade |
+| Allied health | Discipline, equipment, technique competency |
+
+| Care setting | Consequences |
+|---|---|
+| Hospital | Has departments, a preceptor, a fixed site; the geo-fence reference is the site |
+| Home healthcare | **No department, no preceptor, no accommodation.** The workplace is a patient residence that changes between shifts, so the visit address sits on the shift line and is the geo-fence reference |
+
+Both are held as editable reference data in [settings](/docs/engineering/build/platform-services#settings-and-reference-data),
+and **nothing anywhere hardcodes a category**.
+
+## 6. Operating facts that change the design
+
+| Fact | Where it lands |
+|---|---|
+| The daily morning call already allocates recruiters — the platform **records the decision, it does not make it** until Part 3 | [Requisitions and allocation](/docs/engineering/build/modules#requisitions-and-allocation) |
+| Base B is contacted **every 3–4 days across the whole base** | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) — and it is the main metered-provider cost driver |
+| Most recruiters sit inside hospitals, so verbal capture is routine | [Demand intake](/docs/engineering/build/modules#demand-intake) |
+| WhatsApp template approval takes weeks and is outside Apollo's control | [Integrations](/docs/engineering/reference/integrations) — gates cadence go-live |
+| App store review adds calendar time no team size removes | [Integrations](/docs/engineering/reference/integrations) — gates all shift attendance |
+| Payroll runs by hand until Part 3, which caps contractual volume | [Attendance and timesheets](/docs/engineering/build/modules#attendance-and-timesheets) carries a timesheet export for it |
+
+## 7. What the platform is not
+
+- **Not the accounting system of record.** The chain ends at *invoice raised, receivable open* until
+  Part 3 adds collections.
+- **Not a payroll calculator.** A third-party engine calculates; the platform sends inputs and stores
+  outputs.
+- **Not a filing agent.** PF and ESIC reports and challans are produced; filing is outside the scope.
+- **Not an LMS.** Certification records are held and can be received; the LMS is Apollo's own build.
+- **Not a client-facing analytics product.** Clients see links, and from Part 2 a portal.

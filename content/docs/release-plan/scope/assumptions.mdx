@@ -1,0 +1,103 @@
+---
+title: "Assumptions and dependencies"
+description: "The assumptions the scope rests on, the client dependencies the dates rest on, and what happens when one of them is late."
+icon: Handshake
+---
+
+SOW §3, reproduced. **The functional boundary is the scope in
+[Scope and deliverables](/docs/release-plan/scope/deliverables) and the corresponding
+conditions in the agreed scenario catalogue. Anything else is a Change.**
+
+## 1. Assumptions
+
+- **The platform is operated by the Client's internal teams.** External client-portal users for
+  hospitals and home healthcare providers are onboarded when `D12` is delivered — in **Part 2**.
+- **Candidate categories in scope are nurses, doctors and allied health professionals.** Category is
+  a dimension across the deliverables rather than a separate deliverable; the speciality taxonomy is
+  absorbed into `A9`.
+- **The payroll engine is a third-party product integrated by the Service Provider.** Its licence,
+  statutory updates and configuration for additional states are the Client's responsibility.
+- **The functional boundary** is the scope set out in SOW §1.1 and the corresponding conditions in
+  the agreed scenario catalogue; anything else is a Change.
+- **Detailed user interface design, workflow rules and rate-card structures** are confirmed during
+  design and shared with the Client.
+
+### What each assumption means for the build
+
+| Assumption | Engineering consequence |
+|---|---|
+| Apollo's own teams operate the platform | Only Apollo staff have a login before Part 2. Every client interaction in Part 1 is a tokenised link with no account — see [Client link surfaces](/docs/engineering/build/platform-services#client-link-surfaces). |
+| Category is a dimension, not a deliverable | Categories and care settings are **editable reference data from day one**, never code. A core built to nurses alone makes doctors a migration rather than a configuration change. |
+| Payroll is third-party | The platform assembles inputs and stores outputs. **It does not calculate pay.** |
+| Design is confirmed during design | Screen-level detail is agreed inside the part it ships in, against the design system rather than per screen. |
+
+## 2. Client dependencies
+
+Four groups. Each is something only Apollo can provide, and each has a lead time that is not
+recoverable by adding people.
+
+### Third-party services and credentials
+
+Timely provision of, and payment for:
+
+| Service | Needed for | Needed by |
+|---|---|---|
+| Identity and credential checking — Aadhaar via DigiLocker, PAN, EPFO, court records | `D4`, `D16`, `A12` | Part 1 |
+| Document reading | `D4`, `D3` | Part 1 |
+| Messaging — WhatsApp Business Platform, SMS with **DLT registration**, email | `F07`, `D10`, `A1`, `A13` | Part 1 for sending; Part 2 for intake and cadence |
+| Outbound voice and transcription | `A5`, `A1` | Part 2 |
+| Electronic signature | `D20` | Part 3 |
+| Background verification aggregator | `D16` third-party verified checking | Part 2 |
+| Third-party payroll engine | `D24` | Selection needed in Part 1; live in Part 3 |
+
+**WhatsApp template approval and DLT registration are regulator and platform lead times outside
+anyone's control.** They are started early or they gate the part that needs them.
+
+### Environment and accounts
+
+- The **AWS Mumbai environment**, access and security tooling.
+- **Apple and Google developer accounts** required to publish the candidate application.
+
+The developer accounts must be in Apollo's name, and first submission is reviewed more slowly than
+subsequent ones. **The candidate app is the only route by which shift attendance reaches the
+platform**, so a store delay is a Part 2 delay, and no amount of engineering removes it.
+
+### Decisions, content and people
+
+- Design decisions.
+- Notification template content.
+- Acceptance testing resources, and approvals within the Acceptance Period.
+
+Named recruiters carry 15–16 vacancies each. **UAT needs protected time booked in advance**, not
+goodwill on the day.
+
+### Legacy access
+
+- Access to the **legacy candidate system** for profiling and migration.
+- **A named person who can answer questions on its data.**
+
+`A10` cannot be sized at all until profiling has run. It is a Part 3 deliverable whose first task
+belongs much earlier than Part 3.
+
+## 3. When a dependency is late
+
+> Where a Client dependency is delayed and directly causes the Service Provider to be delayed or
+> incur additional cost, the timeline and Fees shall be equitably adjusted through a Change under the
+> master services agreement, provided the Service Provider promptly notifies the Client and uses
+> reasonable efforts to mitigate.
+
+Two obligations sit on the Service Provider in that sentence, and both are operational, not legal:
+**notify promptly**, and **mitigate**. In practice that means every dependency above is tracked with
+a needed-by date against the part it gates, and a delay is raised when it is observed rather than
+when it bites.
+
+## 4. The dependencies most likely to hurt
+
+| Dependency | Why it is the one to watch |
+|---|---|
+| WhatsApp Business Platform registration and template approval | Gates intake, cadence, offer delivery, trial check-ins and payslips. Weeks of external lead time, no workaround. |
+| Apple and Google developer accounts | Gate the candidate app, which gates all shift attendance, all timesheets and all shift invoices. |
+| Verification aggregator selection | Several councils have no API and resolve to document plus manual verification; without the aggregator the rest is manual too. |
+| Payroll engine selection | Field mapping cannot start until the engine is chosen, and payroll sits behind three other deliverables. |
+| Legacy system access and a named data owner | Until profiling runs, `A10` has no credible effort basis. |
+| Contract terms recorded before the first day-90 trigger | **Permanent billing has no fallback.** No terms in force means no invoice. |

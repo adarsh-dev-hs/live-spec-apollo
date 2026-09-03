@@ -1,0 +1,133 @@
+---
+title: "Architecture"
+description: "A modular monolith with a separate worker, seven deployables, one Postgres database with a schema per module, and the boundaries that must not be crossed."
+icon: Blocks
+---
+
+## 1. Shape
+
+**One API process, one worker process, one PostgreSQL database with a schema per module, and Redis
+for queues and cache.** Not microservices.
+
+The couplings decide it. Ranking cannot run without demand, candidates and engagement all present.
+An invoice cannot be raised without reading the contract version in force at the trigger date. The
+day-90 retention record must be written in the same transaction as the client's link response.
+Splitting those into services would replace transactions with sagas on a nine-month timeline.
+
+**Module boundaries are enforced in the repository and in the database — a project graph and one
+Postgres role per schema — not by a network hop.**
+
+**Why a separate worker.** Cadence runs, escalation windows, deemed-approval countdowns, credential
+expiry, check-in generation, dunning, retries and migration batches are all timers or queues. Running
+them in the API process makes a cadence run across the whole of Base B compete with an interactive
+fulfilment board. Same code, same database, different process, different scaling.
+
+## 2. Deployables
+
+| Deployable | Runtime | Serves |
+|---|---|---|
+| **API** | Fastify 5 · Node 22, Docker on EC2 | Console, portal, mobile, link pages |
+| **Worker** | Node 22 · BullMQ, Docker on EC2 | Queues, schedules, batch jobs |
+| **Edge functions** | Node 22, AWS Lambda | Inbound webhooks, email, object triggers, cron — **enqueue only** |
+| **Console** | React 19 · Vite, SPA | Apollo staff |
+| **Link pages** | React 19 · Vite, SPA | Public tokenised client pages |
+| **Portal** | React 19 · Vite, SPA | Client users, from Part 2 |
+| **Mobile** | React Native · Expo | Candidates |
+
+Shared packages carry the things that must not diverge: the API contract schemas and their inferred
+types, the design system, the database pool and SQL helpers, the event definitions, and typed
+environment configuration.
+
+## 3. Stack, and the reason for each choice
+
+| Layer | Choice | Reason |
+|---|---|---|
+| Language | **TypeScript everywhere** | One contracts package types the API and all four clients. Six surfaces cannot afford a type boundary per surface. |
+| HTTP | **Fastify 5** | Schema-first routes: the schema that validates a request also generates the OpenAPI document, so the contract cannot drift from the handler. |
+| Persistence | **PostgreSQL 16, hand-written SQL, no ORM** | Client directive. Every query is visible — which matters for the append-only tables where dirty-tracking would be actively wrong, and for the set-based reporting marts. |
+| Migrations | Numbered plain-SQL files, **forward-only** | No ORM means no migration generator. Forward-only because audit entries and retention records must never be rewritten. |
+| Cache and queue | **Redis + BullMQ** | One dependency covers the job runtime, the rate limiters and the idempotency keys. |
+| Object store | **S3**, Mumbai, encrypted, versioned | Versions, virus scanning, expiring links and residency are all required. |
+| Web | React 19 · Vite · TanStack Query · shadcn/ui · Tailwind | Client directive. The design system builds on these primitives so console, portal and link pages share one visual language. |
+| Mobile | React Native · Expo · EAS | Offline check-in queue, push, and over-the-air updates for non-native fixes. |
+| Monorepo | **Nx + npm workspaces** | Client directive. The project graph enforces module boundaries. |
+| Region | AWS **`ap-south-1` (Mumbai)**, Apollo-owned account | No personal data leaves the region, backups included. |
+
+## 4. The four paths a request can take
+
+### Authenticated request
+
+Client → CloudFront → ALB → API. The route resolves a principal, checks a permission, applies a data
+scope, runs the service inside one transaction that also writes the audit entry and the outbox event,
+and returns.
+
+### Public tokenised link
+
+A client contact opens a link with no account. The token is exchanged for a **single-record,
+single-action session** — no collection endpoints exist on that surface at all, and a duplicate
+submission returns the original answer rather than creating a second one.
+
+### Inbound message
+
+Provider → Lambda → raw payload written and enqueued → worker. The Lambda verifies the signature,
+deduplicates on the provider's message id, writes the payload down, and returns. **No business logic
+runs in a Lambda.** The worker resolves the sender, classifies the intent, and hands it to whichever
+consumer registered for that intent.
+
+### Job
+
+A schedule or an event enqueues onto a queue class. The worker runs it with a retry policy, a
+dead-letter an operator can see and re-queue, and a run record.
+
+## 5. Deployment topology
+
+```
+              ap-south-1 · Apollo-owned AWS account
+ ┌─────────────────────────────────────────────────────────────┐
+ │  CloudFront ── S3   console · link pages · portal bundles    │
+ │       │                                                      │
+ │       └──▶ ALB ──▶ EC2 Auto Scaling Group  ── api            │
+ │                    EC2 Auto Scaling Group  ── worker         │
+ │                          │                                   │
+ │   Lambda edges           │   each does one thing:            │
+ │   ├─ inbound email ──────┤   verify, persist raw, enqueue    │
+ │   ├─ provider webhook ───┤                                   │
+ │   ├─ object created ─────┤                                   │
+ │   └─ scheduler ──────────┤                                   │
+ │                          ▼                                   │
+ │                   ├──▶ RDS PostgreSQL 16, Multi-AZ, PITR     │
+ │                   ├──▶ ElastiCache Redis — queues, limiters  │
+ │                   ├──▶ S3 documents, encrypted, versioned    │
+ │                   ├──▶ Secrets Manager                       │
+ │                   └──▶ CloudWatch + traces                   │
+ │                                                              │
+ │  Environments: dev · qa · uat · prod, non-prod anonymised    │
+ └─────────────────────────────────────────────────────────────┘
+```
+
+**Why EC2 for API and worker.** Both hold long-lived database pools and Redis connections, and the
+worker runs cadence batches and resumable migration batches that last minutes, not seconds.
+
+**Why Lambda at the edges.** Four inbound paths are bursty, externally triggered and must never lose
+a payload. A provider retry storm hits Lambda, not the instances serving the console, and
+deduplication happens at the cheapest possible place before anything expensive runs.
+
+## 6. Boundaries that must not be crossed
+
+| Rule | Enforced by | Because |
+|---|---|---|
+| No module reads another module's tables directly | Project graph rules + one database role per schema | Otherwise the monolith becomes a ball of mud by month three |
+| Every external provider sits behind an interface | Contract tests | Half the suppliers are unnamed and must be replaceable without domain change |
+| Audit entries, status transitions, retention records, allocations and overrides are **append-only** | Table grants with no `UPDATE` or `DELETE`, plus tests | The day-90 invoice depends on it |
+| Personal data never leaves `ap-south-1` | Bucket policy, database and backup region, provider selection | Indian data protection law, backups included |
+| Staff, candidate and client-user identity are **three separate realms** | Identity service | A portal leak between two hospitals is the worst outcome available |
+| Anything measurable is emitted as an event, never scraped later | Event spine | Build it after the first requisition and the Part 3 reports cannot cover that period |
+
+## 7. Deliberately not in the architecture
+
+| Not built | Why |
+|---|---|
+| Microservices, service mesh, per-module deploy | The couplings above, on a nine-month timeline |
+| Event sourcing as the write model | The event spine is a **reporting** spine. Operational tables stay relational. |
+| An ORM | Client directive, and the append-only tables make dirty-tracking wrong |
+| A second inbound stack for candidate responses | One stack, two registered intent sets. Building a second is the failure mode the design exists to prevent. |

@@ -1,0 +1,281 @@
+---
+title: "Deliverables"
+description: "All 51 deliverables in the signed scope, with provenance, surface, the parts each falls in, and where each one is built."
+icon: ClipboardList
+---
+
+Every deliverable in scope, as listed in SOW §1.1. A deliverable carried partly under one reference
+and partly under another appears twice, once for each, marked **(thin)** and **(full)**.
+
+**D15, D17, D19, D26 and D27 are descoped from this SOW and do not appear.**
+
+- **Provenance** — where the deliverable came from: the client's original R1 list, moved or deferred
+  from R2, a thin slice taken out of R2, or defined by Hiresense because the client's list assumes it
+  without naming it.
+- **Surface** — where a user meets it: the Ops/Admin console, the candidate app, a tokenised client
+  link, the client portal, WhatsApp, voice, or all of them.
+- **Parts** — which of the three release parts work on it falls in. More than one part means the
+  deliverable is split.
+
+---
+
+## 1. Platform prerequisites
+
+Twelve capabilities the client's deliverable list assumes but never names. Each is a shared floor:
+built once, in Part 1, used by everything after it.
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `F01` | Login and session handling | Hiresense-defined | All | 1 | [Identity and access](/docs/engineering/build/platform-services#identity-and-access) |
+| `F02` | User management | Hiresense-defined | All | 1 | [Identity and access](/docs/engineering/build/platform-services#identity-and-access) |
+| `F03` | Roles and permissions | Hiresense-defined | All | 1 | [Identity and access](/docs/engineering/build/platform-services#identity-and-access) |
+| `F04` | Audit trail | Hiresense-defined | All | 1 | [Audit trail](/docs/engineering/build/platform-services#audit-trail) |
+| `F05` | Settings and lists administration | Hiresense-defined | All | 1 | [Settings and reference data](/docs/engineering/build/platform-services#settings-and-reference-data) |
+| `F06` | Document and file storage | Hiresense-defined | All | 1 | [File storage](/docs/engineering/build/platform-services#file-storage) |
+| `F07` | Message sending infrastructure | Hiresense-defined | All | 1 | [Outbound messaging](/docs/engineering/build/platform-services#outbound-messaging) |
+| `F08` | Lists, search, filters and export | Hiresense-defined | All | 1 | [List engine](/docs/engineering/build/platform-services#list-engine) |
+| `F10` | Environments, pipeline and monitoring | Hiresense-defined | All | 1 | [Environments and observability](/docs/engineering/build/platform-services#environments-and-observability) |
+| `F12` | Design system and component library | Hiresense-defined | All | 1 | [Design system](/docs/engineering/build/platform-services#design-system) |
+| `F13` | Data protection: consent, residency, retention | Hiresense-defined | All | 1 | [Data protection](/docs/engineering/build/platform-services#data-protection) |
+| `F14` | Event recording for reporting | Hiresense-defined | All | 1 | [Event spine](/docs/engineering/build/platform-services#event-spine) |
+
+## 2. Clients, contracts and demand
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D1` | Client and contract management | Original R1 | Ops/Admin | 1, 2 | [Clients, contracts and rate cards](/docs/engineering/build/modules#clients-contracts-and-rate-cards) |
+| `D13` | Contract creation and versioning | Moved from R2 | Ops/Admin | 1, 2, 3 | [Clients, contracts and rate cards](/docs/engineering/build/modules#clients-contracts-and-rate-cards) |
+| `D2` | Demand management | Original R1 | Ops/Admin | 1, 2 | [Requisitions and allocation](/docs/engineering/build/modules#requisitions-and-allocation) |
+| `A1` | Multi-channel demand ingestion | New addition | Ops/Admin | 2, 3 | [Demand intake](/docs/engineering/build/modules#demand-intake) |
+| `D14` | Prioritisation and allocation **(thin)** | Thin slice from R2 | Ops/Admin | 2 | [Requisitions and allocation](/docs/engineering/build/modules#requisitions-and-allocation) |
+| `D14` | Prioritisation and allocation **(full)** | Later release | Ops/Admin | 3 | [Demand prioritisation and approval](/docs/engineering/build/modules#demand-prioritisation-and-approval) |
+
+## 3. Candidates, verification and the market layer
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D3` | Candidate mobile app | Original R1 | Candidate app | 1, 2, 3 | [Candidate app](/docs/engineering/build/modules#candidate-app) |
+| `D4` | Candidate verification (KYC) | Original R1 | Ops/Admin | 1, 3 | [Candidate record and credentials](/docs/engineering/build/modules#candidate-record-and-credentials) |
+| `D16` | Verification — extended | Moved from R2 | Ops/Admin | 1, 2, 3 | [Candidate record and credentials](/docs/engineering/build/modules#candidate-record-and-credentials) |
+| `A2` | Two supply bases | New addition | Ops/Admin, Candidate app | 1, 2 | [Candidate record and credentials](/docs/engineering/build/modules#candidate-record-and-credentials) |
+| `A9` | Specialty and acuity capture | New addition | Ops/Admin, Candidate app | 1, 2 | [Candidate record and credentials](/docs/engineering/build/modules#candidate-record-and-credentials) |
+| `A12` | Configurable market layer | New addition | Ops/Admin | 1, 2 | [Market adapter layer](/docs/engineering/build/platform-services#market-adapter-layer) |
+
+## 4. Messaging and engagement
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D10` | Notifications and alerts | Original R1 | All | 2 | [Outbound messaging](/docs/engineering/build/platform-services#outbound-messaging) |
+| `D29` | Reminders, nudges and preferences | Moved from R2 | All | 2 | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| `A3` | Availability decay | New addition | Ops/Admin | 2 | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| `A4` | Re-contact cadence engine | New addition | Ops/Admin | 2 | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| `A5` | Outbound voice with response capture | New addition | Voice | 2 | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| `A14` | Candidate response capture | New addition | WhatsApp, Candidate app | 2, 3 | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+
+## 5. Matching, selection, offer and placement
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D5` | Matching and shortlisting | Original R1 | Ops/Admin | 1, 2, 3 | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| `D18` | Matching and shortlisting (AI) | Moved from R2 | Ops/Admin | 1, 2, 3 | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| `A8` | Outcome write-back to ranking | New addition | Ops/Admin | 3 | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| `D6` | Interview and selection | Original R1 | Ops/Admin | 1, 2 | [Selection and offers](/docs/engineering/build/modules#selection-and-offers) |
+| `D20` | Offer management | Moved from R2 | Ops/Admin, WhatsApp | 1, 2, 3 | [Selection and offers](/docs/engineering/build/modules#selection-and-offers) |
+| `A13` | Client link surfaces | New addition | Client link | 1, 2 | [Client link surfaces](/docs/engineering/build/platform-services#client-link-surfaces) |
+| `D7` | Onboarding and joining | Original R1 | Ops/Admin | 1, 2 | [Placement and trial](/docs/engineering/build/modules#placement-and-trial) |
+| `A6` | Trial period tracking | New addition | Ops/Admin, Client link, Voice/WhatsApp | 1, 2, 3 | [Placement and trial](/docs/engineering/build/modules#placement-and-trial) |
+
+## 6. Attendance, billing and analytics
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D22` | Time and attendance **(thin)** | Thin slice from R2 | Candidate app, Ops/Admin | 2 | [Attendance and timesheets](/docs/engineering/build/modules#attendance-and-timesheets) |
+| `D22` | Time and attendance **(full)** | Later release | Ops/Admin | 3 | [Timesheet extensions](/docs/engineering/build/modules#timesheet-extensions) |
+| `D8` | Billing and receivables | Original R1 | Ops/Admin | 1, 2 | [Billing and receivables](/docs/engineering/build/modules#billing-and-receivables) |
+| `A7` | Retention-linked invoicing | New addition | Ops/Admin | 1, 2 | [Billing and receivables](/docs/engineering/build/modules#billing-and-receivables) |
+| `D25` | Billing — auto-invoice **(thin)** | Thin slice from R2 | Ops/Admin | 2 | [Billing and receivables](/docs/engineering/build/modules#billing-and-receivables) |
+| `D25` | Billing — remainder and collections **(full)** | Later release | Ops/Admin, Client link | 3 | [Collections](/docs/engineering/build/modules#collections) |
+| `D9` | Intelligence and analytics | Original R1 | Ops/Admin | 3 | [Analytics and reporting](/docs/engineering/build/modules#analytics-and-reporting) |
+| `D28` | Analytics — performance and MIS | Moved from R2 | Ops/Admin | 3 | [Analytics and reporting](/docs/engineering/build/modules#analytics-and-reporting) |
+| `A11` | Rate variance instrumentation | New addition | Ops/Admin | 3 | [Analytics and reporting](/docs/engineering/build/modules#analytics-and-reporting) |
+
+## 7. Later capability, migration and delivery
+
+| Ref | Deliverable | Provenance | Surface | Parts | Where it is built |
+|---|---|---|---|---|---|
+| `D12` | Client portal | Deferred to R2 | Client portal | 2 | [Client portal](/docs/engineering/build/modules#client-portal) |
+| `D21` | Associate onboarding | Deferred to R2 | Candidate app, Ops/Admin | 2, 3 | [Associate onboarding](/docs/engineering/build/modules#associate-onboarding) |
+| `D23` | Workforce operations | Deferred to R2 | Ops/Admin, Candidate app | 3 | [Workforce operations](/docs/engineering/build/modules#workforce-operations) |
+| `D24` | Payroll | Deferred to R2 | Ops/Admin, Candidate app, WhatsApp | 3 | [Payroll](/docs/engineering/build/modules#payroll) |
+| `A10` | Legacy migration (CPAL) | New addition | Ops/Admin | 3 | [Legacy migration](/docs/engineering/build/modules#legacy-migration) |
+| `D11` | Foundations and documentation | Original R1 | Ops/Admin | 1, 3 | [Delivery and quality](/docs/engineering/delivery-and-quality) |
+| `D30` | Foundations and documentation (R2) | Deferred to R2 | Ops/Admin | 3 | [Delivery and quality](/docs/engineering/delivery-and-quality) |
+
+---
+
+## 8. Scope notes
+
+The SOW's own note against each deliverable. These are the boundary: where a note says a thing is
+carried, it is in scope; where it says a thing is not, it is a Change.
+
+### Platform prerequisites
+
+- **F01 · Login and session handling** — How an Apollo user gets into the platform and stays in.
+  D11 asks for role-based access but never says how anyone signs in.
+- **F02 · User management** — Creating and managing the Apollo staff who use the platform. Demand
+  management requires a requisition owner from *the Apollo internal user list*; nothing else creates
+  that list.
+- **F03 · Roles and permissions** — What each role can see and do. D11 says *role-based access
+  control* as a phrase; the actual permission model, and whether a recruiter sees only their own
+  site, is not specified anywhere.
+- **F04 · Audit trail** — One place that records who did what and when. Several deliverables need
+  this — requisition status changes, selection decisions, client link responses — and building it
+  six times would be six different answers.
+- **F05 · Settings and lists administration** — One admin area for every configurable list and
+  waiting period. There are at least nine of them; without a shared home they become nine separate
+  screens.
+- **F06 · Document and file storage** — Where every uploaded file lives: CVs, certificates, ID
+  scans, WhatsApp voice notes, signed offers, invoices.
+- **F07 · Message sending infrastructure** — The plumbing underneath every message the platform
+  sends. D10 covers templates and preferences; the queue, retries and delivery receipts underneath
+  are assumed.
+- **F08 · Lists, search, filters and export** — The shared table component every Ops screen uses.
+  Around twenty screens in this plan are lists; building filtering and paging separately in each is
+  the same work twenty times.
+- **F10 · Environments, pipeline and monitoring** — Four environments, a way to move code between
+  them, and enough monitoring to know when something has broken.
+- **F12 · Design system and component library** — The shared visual language and the components
+  built from it. Five different surfaces in this plan; if each is designed separately the work is
+  done five times and looks like it.
+- **F13 · Data protection: consent, residency, retention** — Handling personal and health-related
+  data about candidates in a way that meets Indian data protection law.
+- **F14 · Event recording for reporting** — Every module writes an event as things happen, and the
+  reports read those events later. **This is the one prerequisite that cannot be added afterwards.**
+
+### Clients, contracts and demand
+
+- **D1 · Client and contract management** — Client entity, locations, departments, rate cards by
+  role, skill and location. Care setting held on the client and on the site, distinguishing hospital
+  from home healthcare. Sender resolution in A1 matches against this base.
+- **D13 · Contract creation and versioning** — Contract record with versioning, renewal alerts,
+  history; the deemed-confirmation and deemed-approval windows the billing triggers read.
+- **D2 · Demand management** — Requisition object and lifecycle: creation, versioning, hold, revise,
+  close; shift templates; fulfilment board and aging. Care setting held on the requisition, with a
+  per-visit address on the shift line where the workplace changes between shifts.
+- **A1 · Multi-channel demand ingestion** — Five live channels plus verbal capture, all normalising
+  to one requisition schema. Owns the inbound stack consumed by A14.
+- **D14 (thin) · Prioritisation and allocation** — Owner field and capture of the allocation made on
+  the daily morning call. **No engine, no approval workflow.**
+- **D14 (full) · Prioritisation and allocation — remainder** — The prioritisation engine, suggested
+  recruiter allocation with load balancing, and the requisition approval workflow.
+
+### Candidates, verification and the market layer
+
+- **D3 · Candidate mobile app** — Three-way shared build. Self-registration, resume parsing, dedupe,
+  job and shift discovery, application tracking, shift check-in. Carries a configurable set of basic
+  screening questions asked at application, with the answers collected against the candidate.
+  **Hard dependency of the contractual invoice chain.**
+- **D4 · Candidate verification (KYC)** — Scan-based capture and identity verification: Aadhar, PAN
+  and certificates read from a scan behind the A12 adapter layer. Which attributes are verified is
+  configurable by candidate category, by destination taken from the demand, and by the regulatory
+  requirements of the placement and supply locations.
+- **D16 · Verification — extended** — Credential object with issuer, validity period and
+  verification method; verification queue with pendency tracking. Resolves against the council
+  appropriate to the candidate category through the A12 interfaces. Third-party verified checking is
+  delivered in Part 2.
+- **A2 · Two supply bases** — Base A and Base B as separate supply bases against a shared credential
+  record, **not a status flag**.
+- **A9 · Specialty and acuity capture** — Per-category attribute set on both requisition and
+  candidate record. Requisition-side ownership is open item 1.
+- **A12 · Configurable market layer** — Adapter interfaces behind identity, certification and
+  qualification, selected by market and by candidate category. The India adapter set is in scope and
+  covers the nursing councils, the NMC and state medical councils, the allied health councils and
+  the Pharmacy Council. A further category is added by writing an adapter behind the same interface,
+  not by changing core logic. **Must accept the US, Germany and Ireland later.**
+
+### Messaging and engagement
+
+- **D10 · Notifications and alerts** — Template management, trigger configuration, delivery status,
+  retry, opt-out, preference management, per-user notification log.
+- **D29 · Reminders, nudges and preferences** — Scheduling layer the cadence engine executes through.
+- **A3 · Availability decay** — Availability confidence value decaying on a configurable schedule
+  per base; reset on confirmed response.
+- **A4 · Re-contact cadence engine** — Selects who to contact on confidence, configurable per
+  segment. Base B runs every 3–4 days across the whole base.
+- **A5 · Outbound voice with response capture** — Integration and response extraction schema. Voice
+  provider not named.
+- **A14 · Candidate response capture** — Consumes the A1 inbound stack with a candidate-response
+  intent schema. Structured payload across WhatsApp template and app.
+
+### Matching, selection, offer and placement
+
+- **D5 · Matching and shortlisting** — Advanced search, saved searches, talent segments, recruiter
+  override. Whether hand-assembly survives is open.
+- **D18 · Matching and shortlisting (AI)** — Ranked set with rationale and unmet criteria, weighted
+  per category and supply base. Weight model not specified.
+- **A8 · Outcome write-back to ranking** — Selection outcomes and rejection reasons feed subsequent
+  ranking. **Schema must be agreed with D6 before either is built.**
+- **D6 · Interview and selection** — Slot proposal, reschedule, feedback, accept/hold/reject with
+  mandatory structured rejection reasons and audit trail.
+- **D20 · Offer management** — Offer generation, delivery, tracking, expiry, digital signature,
+  offer-to-contract mapping. Without it the permanent chain stops after selection.
+- **A13 · Client link surfaces** — One tokenised mechanism, four link types: shortlist response,
+  day 30/60/90 check-in, timesheet approval. **Only day-90 is a billing trigger.** Carries client
+  feedback as yes, no or with comments, verification of details, and configured reminders warning of
+  auto-accept after the client waiting period.
+- **D7 · Onboarding and joining** — Joining confirmation with date tracking; drop-out capture with
+  reason returning the position to fulfilment.
+- **A6 · Trial period tracking** — Check-ins at day 0, 7, 30, 60 and 90 capturing attendance, salary
+  timeliness, preceptor and accommodation. Question sets differ by candidate category and by care
+  setting, home healthcare having neither preceptor nor accommodation.
+
+### Attendance, billing and analytics
+
+- **D22 (thin) · Time and attendance** — Shift attendance by app check-in with a location stamp, and
+  geo-fencing to set whether a check-in outside the boundary is allowed, warned or blocked. The
+  boundary is the site for facility work and the visit address for home visits. Timesheet with
+  client approval state. **No leave or overtime treatment.**
+- **D22 (full) · Time and attendance — remainder** — Leave categorisation, overtime treatment and
+  internal timesheet approval routing.
+- **D8 · Billing and receivables** — Permanent placement invoice fired on the day-90
+  client-acknowledged retention record, against contract terms in force.
+- **A7 · Retention-linked invoicing** — The trigger record held as auditable evidence capable of
+  supporting a billing query.
+- **D25 (thin) · Billing — auto-invoice** — Shift-level invoice from the client-approved timesheet
+  and contract. **No debit or credit notes, no dunning.**
+- **D25 (full) · Billing — remainder and collections** — Payment receipt, reconciliation including
+  part-payments and TDS, ageing, reminders and dunning, credit and debit notes.
+- **D9 · Intelligence and analytics** — Funnel and conversion, fill rate, time-to-fill, trial
+  survival.
+- **D28 · Analytics — performance and MIS** — Stage-level conversion loss by client and recruiter,
+  channel and recruiter performance, monthly MIS pack. Requires the D14 owner field.
+- **A11 · Rate variance instrumentation** — Rate agreed against baseline by client, role, specialty
+  and acuity.
+
+### Later capability, migration and delivery
+
+- **D12 · Client portal** — Logged-in website for clients: raise vacancies, track them, review
+  shortlists, approve timesheets, download invoices. Becomes the sixth A1 intake channel.
+- **D21 · Associate onboarding** — Associate profile, statutory forms including PF/UAN transfer and
+  gratuity nomination, document checklist, app-guided onboarding.
+- **D23 · Workforce operations** — Maker-checker request engine, attendance upload and verification
+  pairing, salary revision individual and bulk, advance, hold and release.
+- **D24 · Payroll** — Third-party engine integration, payroll inputs and cycle configuration, PF and
+  ESIC reports and challans, payslips in-app and over WhatsApp.
+- **A10 · Legacy migration (CPAL)** — Migration of CPAL and current tooling so the platform becomes
+  system of record. **Effort basis awaits joint data profiling.**
+- **D11 · Foundations and documentation** — Deployment to the client-hosted AWS Mumbai account,
+  technical and user documentation, UAT support and go-live. Access control, environments and audit
+  are delivered once under the foundation deliverables rather than separately here.
+- **D30 · Foundations and documentation (R2)** — The Release 2 half of D11: documentation,
+  acceptance testing and cutover for everything released after the first go-live.
+
+---
+
+## 9. Outside the scope
+
+| | |
+|---|---|
+| **Descoped deliverables** | D15, D17, D19, D26, D27 — removed from this SOW; they do not appear anywhere above |
+| **Not in scope** | AI technical screening · VMS integration of clients |
+| **The functional boundary** | The scope set out above and the corresponding conditions in the agreed scenario catalogue. **Anything else is a Change.** |

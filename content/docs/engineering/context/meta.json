@@ -1,0 +1,7 @@
+{
+  "title": "Context",
+  "description": "The business the platform serves, and the shape of the system.",
+  "icon": "Compass",
+  "defaultOpen": true,
+  "pages": ["product-context", "architecture"]
+}

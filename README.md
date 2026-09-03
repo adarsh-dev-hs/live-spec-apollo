@@ -1,127 +1,159 @@
 # Apollo Knowledge GWD — documentation site
 
-A [Fumadocs](https://fumadocs.dev) site that renders `../docs`.
+A [Fumadocs](https://fumadocs.dev) site presenting the Apollo Knowledge GWD platform in **four tabs**.
 
 ```bash
 npm install
-npm run dev     # syncs, then serves on http://localhost:3000
+npm run dev     # http://localhost:3000
 ```
 
-## `../docs` is the source of truth
+## The four tabs
 
-**`../docs/**/*.md` is the single source of truth and is never modified by this site.**
+| Tab | Route | What it is |
+|---|---|---|
+| **Original Plan** | `/original-plan` | The client's original delivery plan, framed verbatim from `public/requirement-doc.html` — its own tabs, filters and styling intact |
+| **Live POC App** | external | The running POC (`live_app_apollo`). Every screen reference in the docs links straight into it |
+| **Release Plan** | `/docs/release-plan` | The Statement of Work signed **3 September 2026**, reproduced: 51 deliverables, three parts, assumptions and client dependencies. **The authority on scope.** |
+| **Engineering Documentation** | `/docs/engineering` | How the platform is built: architecture, platform services, the twenty modules with scope and purpose, data model, APIs, infrastructure, security, integrations, delivery |
 
-`content/docs/**/*.mdx` is **generated** by `scripts/sync-docs.mjs` and **wiped and regenerated on
-every run whenever `../docs` is present**. Never edit anything in `content/docs` — the next sync
-deletes it. It is committed all the same, because the deployed site builds without `../docs`
-alongside it; see [Generated files](#generated-files).
+The tabs are declared once in `lib/layout.shared.tsx` and rendered by both the home layout and the
+docs layout, so they are present on every page.
 
-To change the documentation, edit the markdown in `../docs`.
+## Content lives in `content/docs`, and is hand-authored
+
+`content/docs/**/*.mdx` is **the source of truth** and is edited directly. Two folders carry
+`"root": true` in their `meta.json`, which is what makes them the two docs tabs and what scopes the
+sidebar to whichever one you are inside. Folders one level down are **collapsible sidebar groups**,
+each with its own title, icon and `defaultOpen`.
+
+```
+content/docs/
+  index.mdx                    /docs — "Start here"
+  meta.json                    root: true
+
+  release-plan/                root: true  →  the Release Plan tab
+    index.mdx                  Overview
+    parts/                     group: "The three parts"
+      part-1.mdx  part-2.mdx  part-3.mdx
+    scope/                     group: "Scope"
+      deliverables.mdx  matrix.mdx  assumptions.mdx
+
+  engineering/                 root: true  →  the Engineering Documentation tab
+    index.mdx                  Overview
+    context/                   group: "Context"
+      product-context.mdx  architecture.mdx
+    build/                     group: "What gets built"
+      platform-services.mdx  modules.mdx
+    reference/                 group: "Technical reference"
+      data-model.mdx  api-design.mdx  infrastructure.mdx  security.mdx  integrations.mdx
+    delivery-and-quality.mdx
+```
+
+Order comes from each `meta.json` `pages` array, not from filenames, so files carry no numeric
+prefixes. Every page sets a Lucide `icon` in its frontmatter and every folder sets one in its
+`meta.json`.
+
+`content/_archive/` holds the previous 121-page specification set (foundation, standards, platform,
+modules, integrations, delivery, source plan, phases). It is outside `content/docs`, so it is not
+built and not routed — kept on disk because it is where much of the current content was distilled
+from.
+
+### Where the tabs come from
+
+`lib/tabs.tsx` declares the four tabs once. Three surfaces consume it:
+
+| Surface | How |
+|---|---|
+| Home page header | `baseOptions().links`, rendered by fumadocs' `HomeLayout` |
+| Docs sidebar | `components/tab-bar.tsx` as the sidebar **banner**, with `links={[]}` and `tabs={false}` on `DocsLayout` |
+| `/original-plan` header | the same `TabBar`, horizontal — that page is outside both fumadocs layouts |
+
+The docs layout needs the banner rather than plain `links` because fumadocs' docs header is
+mobile-only: nav links fall through into the sidebar and render with page-tree styling, so four
+top-level destinations end up reading as siblings of "Overview" and "Context".
+
+### Where scope comes from
+
+`Apollo_SOW_Final_03_09_2026_Engineering.pdf` (one directory up) is the signed document. The
+`release-plan/` pages reproduce it — deliverable register, part contents, assumptions, dependencies.
+**Where the engineering documentation and the release plan disagree, the release plan wins.**
 
 ## Scripts
 
 | Script | Does |
 |---|---|
-| `npm run import:prd` | **Writes into `../docs`.** Converts the client's requirement HTML into `../docs/06-source-plan/`. Manual, never a lifecycle hook — see below |
-| `npm run sync` | Mirror `../docs` into `content/docs`. Idempotent — wipes and regenerates. |
-| `npm run dev` | `predev` syncs, then Next.js dev server |
-| `npm run build` | `prebuild` syncs, then a production build |
+| `npm run dev` | Next.js dev server |
+| `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run types:check` | `next typegen && tsc --noEmit` |
 | `npm run lint` | ESLint |
+| `npm run import:prd` | Regenerates `public/requirement-doc.html` (and `../docs/06-source-plan/`) from the client's requirement HTML. Manual, run only when the client reissues the plan |
+| `npm run sync` | **Destructive, and no longer automatic.** Mirrors `../docs/**/*.md` into `content/docs`, wiping it first |
 
-`predev` and `prebuild` are npm lifecycle hooks, so the site can never be built against stale content.
-`import:prd` is deliberately **not** one — it is the single script that writes into `../docs`, and it
-runs only when someone asks for it.
+`sync` used to be a `predev` / `prebuild` lifecycle hook, back when `content/docs` was a generated
+mirror of `../docs`. It is not one any more: `content/docs` is hand-authored, and the script now
+**refuses to run without `--force`** when `content/docs` exists, so a stray `npm run dev` cannot
+delete the only copy. `scripts/sync-docs.mjs` is kept, with its MDX-escaping and link-rewriting
+logic intact, for the day a markdown source is reintroduced.
 
-## The original requirement document
+## Screen references link to the live POC
 
-The client's plan lives at `../requirement_doc/Apollo_Delivery_Plan_6Month_v0.4.html`. It reaches the
-site two ways, both produced by `npm run import:prd`:
+Any inline code span that names a route the POC actually serves is rendered as a link into the live
+app — `` `/board` ``, `` `/requisitions/:id` ``, `` `/app/check-in` ``. The list of real routes is
+`lib/poc-routes.ts`, and anything absent from it (API paths like `/v1/invoices`, health endpoints)
+stays plain code. That is what keeps the linking honest: a link exists only where a screen does.
 
-| Where | What it is |
-|---|---|
-| `/docs/06-source-plan/…` | 25 markdown pages in `../docs/06-source-plan/`, converted from the HTML — searchable, cross-linkable, and rendered like any other section |
-| `/requirement-doc` | The HTML itself, copied verbatim to `public/requirement-doc.html` and framed by `app/requirement-doc/page.tsx`, so its tabs, filters and styling still work |
-
-The converter (`scripts/import-requirement-doc.mjs`) reproduces, it does not rewrite: `<details class="item">`
-blocks become nested headings, gantt cells become `●`, `.srcbox` quotes stay quotes, `.legend` entries
-stay definitions, and HTML entities are decoded. The `Milestone detail` tab is split into one page per
-milestone (`06-07-m0` … `06-22-m15`) because a single page of sixteen milestones is unreadable in a
-sidebar. Every generated page carries a banner saying it is a reproduction and linking to the original.
-
-**`../docs/06-source-plan/` is generated — do not hand-edit it.** Re-run `npm run import:prd` when the
-client issues a new version of the plan, and bump `srcFile` in the script if the filename changes.
-
-## What the sync does, and why each step is needed
-
-| # | Step | Why |
-|---|---|---|
-| 0 | **Pass through frontmatter the source already has**, and skip steps 1–3 for that file | `06-source-plan/` is machine-generated and states its own title and description. Deriving a second block would emit two, and the page would render its own frontmatter as body text |
-| 1 | **Derive `title`** from the first `#` heading, then strip that heading from the body | Fumadocs renders the title from frontmatter; leaving the H1 in the body would render it twice |
-| 2 | **Derive `description`** from the opening paragraph of the `## Purpose` section (`## 1. Purpose` matches too), falling back to the first real prose paragraph | Every spec opens with a bold metadata row and many open with tables. Without skipping headings, rules, tables, lists, quotes and metadata rows, the description would be `**Package** \`@apollo/…\`` |
-| 3 | **Truncate** the description to ~180 chars on a sentence boundary, else a word boundary | Sidebar cards, search results, OG images and `llms.txt` all use it |
-| 4 | **Write `meta.json` per folder** — sidebar title, Lucide icon and explicit page order — from the `SECTIONS` array at the top of the script | Without it the sidebar sorts alphabetically and shows raw folder names. A folder in `../docs` that is **not** in `SECTIONS` still syncs, appended at the end under a title derived from its own name — **adding docs must never require editing the site** |
-| 5 | **Write a root `meta.json`** with `root: true` | Makes `/docs` the tree root rather than a nested folder |
-| 6 | **Rewrite cross-links**: `](03-modules/03-01-clients.md#anchor)` → `](/docs/03-modules/03-01-clients#anchor)`, resolved relative to the containing file | The docs use relative markdown links so they work in an editor and on GitHub; the site needs routes. Absolute, `http(s):`, `mailto:` and bare `#` links are left alone. `README.md` maps to `/docs` |
-| 7 | **Escape for MDX** — `<` → `&lt;`, `{` → `&#123;`, `}` → `&#125;`, **in prose only** | **This is where it breaks.** The docs use `<n>`, `<entity>` and `{…}` as notation. Unescaped, MDX parses them as JSX and expressions, and they *silently vanish* from the rendered page rather than failing the build |
-| 7b | **`<details>`, `<summary>`, `<ul>` and `<li>` pass through step 7 unescaped** | [05-01](../docs/05-delivery/05-01-build-sequence.md) puts collapsible task lists inside table cells. They are the one place the docs use real HTML rather than notation, so they are allow-listed by name — everything else still escapes |
-| 8 | Escaping **never touches fenced code blocks or inline code spans** — it is a fence-splitter plus a prose-mapper, not a blanket regex | A blanket regex would corrupt every SQL snippet, TypeScript interface and ASCII diagram in the docs |
-| 9 | **Escape unescaped `\|` inside inline code spans on table rows** | In a GFM table a `\|` inside a code span splits the cell and leaves the span unterminated — a separate failure from step 7 |
-| 10 | **Generate a section landing page** (`index.mdx`) per folder — a `<Cards>` grid of that section's documents with their descriptions | Folder links would otherwise 404, and sections would be dead ends rather than browsable. `../docs/README.md` becomes the docs landing page at `/docs` |
-| 11 | **Wipe `content/docs` and regenerate on every run**, then log the page count | Idempotent. A renamed or deleted source file leaves no orphan page |
-
-## Adding a new section
-
-1. Create the folder in `../docs` with your `.md` files.
-2. Run `npm run sync`. **It already works** — the section appears at the end of the sidebar with a
-   title derived from the folder name.
-3. To give it a position, a title and an icon, add one line to `SECTIONS` at the top of
-   `scripts/sync-docs.mjs`:
-
-```js
-{ dir: '07-operations', title: 'Operations', icon: 'Wrench' },
-```
-
-`icon` is any [Lucide](https://lucide.dev) icon name, resolved by Fumadocs' `lucideIconsPlugin`.
+`NEXT_PUBLIC_POC_APP_URL` overrides the target — set it to `http://localhost:5173` to point the docs
+at a local Vite dev server.
 
 ## Site features
 
-- **Search** (⌘K) — Orama, built from the synced content at `/api/search`
+- **Search** (⌘K) — Orama, at `/api/search`
 - **Table of contents, breadcrumbs, prev/next** — Fumadocs defaults
 - **Light and dark themes**
 - **`/llms.txt`** and **`/llms-full.txt`** for LLM consumption
-- **Copy as markdown** on every page, plus a **view options** popover
-- **Markdown content negotiation** — `proxy.ts` rewrites so that both
-  `GET /docs/<path>.md` and `GET /docs/<path>` with `Accept: text/markdown` return raw markdown for
-  the same URL
+- **Copy as markdown** on every page, plus a view-options popover
+- **Markdown content negotiation** — `proxy.ts` rewrites so that both `GET /docs/<path>.md` and
+  `GET /docs/<path>` with `Accept: text/markdown` return raw markdown for the same URL
 - **OG images** generated per page at `/og/docs/<path>/image.png`
-- **A home page at `/`** stating what the docs are, the reading order, and links into each section
-- **`/requirement-doc`** — the client's original plan, framed and reachable from the top nav
+- **`/requirement-doc`** redirects to `/original-plan`, so older links still resolve
 
 ## Configuration
 
 | File | Holds |
 |---|---|
-| `lib/shared.ts` | `appName`, `appDescription`, and the docs route constants |
-| `lib/layout.shared.tsx` | Nav configuration shared by the home and docs layouts |
-| `app/layout.tsx` | Root metadata: title template `%s · Apollo Knowledge GWD`, `metadataBase` from `NEXT_PUBLIC_SITE_URL ?? http://localhost:3000` |
+| `lib/shared.ts` | `appName`, `appDescription`, the docs and original-plan routes, and the POC app URL |
+| `lib/tabs.tsx` | **The four tabs** — the single definition all three surfaces read |
+| `lib/layout.shared.tsx` | Turns `TABS` into fumadocs `links` for the home layout |
+| `components/tab-bar.tsx` | The tab block rendered in the docs sidebar and on `/original-plan` |
+| `lib/poc-routes.ts` | Every route the live POC serves — the allow-list for screen links |
 | `lib/source.ts` | The Fumadocs source loader |
-| `scripts/sync-docs.mjs` | `SECTIONS`, and everything in the table above |
-| `scripts/import-requirement-doc.mjs` | `srcFile`, the tab→page mapping, and the HTML→markdown rules |
+| `app/layout.tsx` | Root metadata: title template, `metadataBase` from `NEXT_PUBLIC_SITE_URL ?? http://localhost:3000` |
+| `app/docs/layout.tsx` | `links={[]}`, `tabs={false}`, and the `TabBar` as the sidebar banner |
+| `content/docs/**/meta.json` | Sidebar title, icon, `defaultOpen` and page order per root and group |
 
 Set `NEXT_PUBLIC_SITE_URL` when deploying so OG images and canonical URLs resolve absolutely.
+
+## Adding a page
+
+1. Create the `.mdx` file inside the group folder it belongs to, with `title`, `description` and
+   `icon` frontmatter. `icon` is any [Lucide](https://lucide.dev) name in PascalCase.
+2. Add its slug to that folder's `meta.json` `pages` array, in the position you want it — a page
+   missing from `pages` is still routed, it just sorts last.
+
+To add a whole group, create the folder with a `meta.json` carrying `title`, `icon`,
+`defaultOpen` and `pages`, then list the folder name in its parent's `pages`.
+
+Two things worth knowing when writing:
+
+- **MDX parses `<` and `{`.** Write `&lt;` and `&#123;` in prose, or keep the notation inside a code
+  fence or a code span.
+- **A `|` inside an inline code span inside a table cell** splits the cell. Escape it as `\|`.
 
 ## Generated files
 
 `.source` is generated by Fumadocs on every build and is git-ignored.
 
-`content/docs` is generated too, but **is** committed. `../docs` lives outside this repo, so a fresh
-clone — Vercel's included — has no source to sync from. The committed mirror is what those builds
-render, and `sync-docs` detects the missing source and leaves it alone rather than wiping it. Keep
-editing `../docs` and re-running `npm run sync`; commit the resulting `content/docs` diff along with
-the change.
-
-`public/requirement-doc.html` and `../docs/06-source-plan/` are also generated, but **are** committed —
-they are the reproduction of a client deliverable, and the repo should read correctly without anyone
-having to run the importer first.
+`public/requirement-doc.html` is generated by `npm run import:prd` but **is** committed — it is the
+reproduction of a client deliverable, and the repo should read correctly without anyone having to run
+the importer first.

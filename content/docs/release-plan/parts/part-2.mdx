@@ -1,0 +1,125 @@
+---
+title: "Part 2 — Quarter 2"
+description: "All remaining capability opened: shift staffing and shift billing, the client portal, multi-channel intake, notifications, verified checking and third-party sourcing."
+icon: Network
+---
+
+**Due: end of Quarter 2.** All remaining capability opened.
+
+Part 1 finished one line of business. Part 2 opens every other thread — a second line of business,
+every intake channel, every category, the client's own login, and the machinery that contacts
+candidates without a recruiter doing it by hand.
+
+## 1. What becomes available
+
+As the SOW states it.
+
+| Capability | What Part 2 carries |
+|---|---|
+| **Contractual placement** | Shift attendance and shift billing, including geo-location tracking. |
+| **Client portal** | Client portal live. |
+| **Multi-channel intake** | Email, WhatsApp and the client portal. |
+| **Notifications** | Candidate, client and internal user. |
+| **Verification** | True verified, third party. |
+| **3rd party sourcing channel** | WhatsApp and phone calls, carrying the basic screening questions from Quarter 1. |
+
+## 2. The second chain
+
+The contractual line of business runs alongside the permanent one and behaves differently at every
+step. Part 2 is where it becomes real.
+
+```
+contract carries shift rates and a deemed-approval window
+  → shift requisition and shift template  →  one demand line per shift
+  → candidates ranked against the shift line, Base B weights
+  → candidate accepts the shift in the app
+  → candidate checks in and out in the app, with a location stamp and geo-fencing
+  → attendance exceptions resolved  →  timesheet compiled and priced against the contract version
+  → timesheet sent to the client on a tokenised link  →  approved, or deemed approved on expiry
+  → shift invoice raised  →  receivable opened
+```
+
+**The app is the only route by which attendance reaches the platform.** No app, no attendance, no
+timesheet, no shift invoice. That single dependency sets the sequence for the whole of Part 2.
+
+## 3. Deliverables in Part 2
+
+`D1` (partial) · `D2` (partial) · `D3` (partial) · `D5` (partial) · `D6` (partial) · `D7` (partial) ·
+`D8` (partial) · `D10` · `D12` · `D13` (partial) · `D14` (partial) · `D16` (partial) ·
+`D18` (partial) · `D20` (partial) · `D21` (partial) · `D22` (partial) · `D25` (partial) · `D29` ·
+`A1` (partial) · `A2` (partial) · `A3` · `A4` · `A5` · `A6` (partial) · `A7` (partial) ·
+`A9` (partial) · `A12` (partial) · `A13` (partial) · `A14` (partial)
+
+**Twenty-nine deliverable references.** `D10`, `D12`, `D29`, `A3`, `A4` and `A5` are delivered in
+full here and appear in no other part.
+
+### The slice each deliverable contributes
+
+| Ref | Deliverable | The Part 2 slice |
+|---|---|---|
+| `A1` | Multi-channel demand ingestion | Email, WhatsApp and the portal as live intake channels, all normalising to the one requisition schema. Spreadsheets, client HRMS and voice notes wait for Part 3. |
+| `D2` | Demand management | Shift templates and the shift demand lines they generate. |
+| `D14` | Prioritisation and allocation **(thin)** | The owner field and capture of the allocation made on the daily morning call. **No engine, no approval workflow.** |
+| `D1` | Client and contract management | Sender identities put to work — every inbound message resolves to exactly one client — and shift rate cards. |
+| `D13` | Contract creation and versioning | The deemed-approval window the timesheet path reads. |
+| `D3` | Candidate mobile app | Shift discovery, acceptance and clash prevention; **check-in and check-out with an offline queue**; the in-app availability answer. |
+| `D16` | Verification — extended | **Third-party verified checking**, resolving against the council appropriate to the candidate category. |
+| `A2` | Two supply bases | Base B populated and worked as a separate base against the shared credential record. |
+| `A9` | Specialty and acuity capture | Doctors and allied health attribute sets; home healthcare as a care setting, with the visit address on the shift line. |
+| `A12` | Configurable market layer | The remaining India adapters: the NMC and state medical councils, the allied health councils, the Pharmacy Council. |
+| `D10` | Notifications and alerts | Templates, triggers, delivery status, retry, opt-out, preferences and the per-user notification log — candidate, client and internal user. |
+| `D29` | Reminders, nudges and preferences | The scheduling layer the cadence engine executes through. |
+| `A3` | Availability decay | Confidence decaying per base on a configurable schedule, reset on a confirmed response. |
+| `A4` | Re-contact cadence engine | Who to contact next, per segment. Base B runs every 3–4 days across the whole base. |
+| `A5` | Outbound voice with response capture | The voice integration and its response extraction schema. |
+| `A14` | Candidate response capture | WhatsApp and app responses on one structured schema, carrying the Quarter 1 screening questions. |
+| `D5` `D18` | Matching and shortlisting | Ranking per category and per supply base; shift-level ranking against a demand line. |
+| `D6` `D20` | Interview, selection and offer | Offer templates by state, role and skill; reschedule and cancellation handling. |
+| `A13` | Client link surfaces | The remaining link types: day 30/60 trial check-in and timesheet approval. |
+| `D7` `A6` | Onboarding, joining and trial | Privileging for doctors; question sets differing by category and care setting — home healthcare having neither preceptor nor accommodation. |
+| `D22` | Time and attendance **(thin)** | Attendance by app check-in with a location stamp and geo-fencing set to allow, warn or block. Timesheet with client approval state. **No leave or overtime.** |
+| `D25` | Billing — auto-invoice **(thin)** | The shift invoice, from an approved or deemed-approved timesheet. **No credit or debit notes, no dunning.** |
+| `D8` `A7` | Billing and receivables | Both invoice paths visible in one place, each against the evidence that allowed it. |
+| `D12` | Client portal | Clients raise vacancies, track them, review shortlists, approve timesheets and download invoices — logged in. The portal becomes the sixth intake channel. |
+| `D21` | Associate onboarding | The associate profile and the statutory forms, so paperwork stops living outside the platform. |
+
+## 4. Screens Part 2 adds
+
+Intake — `/inbound`, `/inbound/unmatched`, `/inbound/manual-entry`, `/duplicates`,
+`/admin/channels`.
+Engagement — `/engagement/review`, `/engagement/calls`, `/engagement/runs`, `/admin/cadence`,
+`/segments`.
+Messaging — `/admin/templates`, `/messaging/delivery-log`.
+Shift work — `/attendance`, `/timesheets`.
+Client portal — `/portal`, `/portal/requisitions`, `/portal/shortlists`, `/portal/timesheets`,
+`/portal/invoices`.
+Candidate app — `/app/shifts`, `/app/check-in`, `/app/availability`, `/app/onboarding`.
+Onboarding — `/workforce/onboarding`.
+
+## 5. Deliberately absent from Part 2
+
+| Absent | Arrives in |
+|---|---|
+| Intake by spreadsheet, client HRMS and WhatsApp voice note | Part 3 (`A1`) |
+| Reporting, MIS and rate variance | Part 3 (`D9`, `D28`, `A11`) |
+| Payroll, and the payslips that come with it | Part 3 (`D24`) |
+| Salary revisions, advances, holds, attendance upload | Part 3 (`D23`) |
+| Leave, overtime and internal timesheet approval routing | Part 3 (`D22` full) |
+| Payments, TDS, ageing, dunning, credit and debit notes | Part 3 (`D25` full) |
+| The prioritisation engine, recruiter suggestion and requisition approval | Part 3 (`D14` full) |
+| Outcome write-back into ranking | Part 3 (`A8`) |
+| Migration off CPAL — the platform is not yet system of record | Part 3 (`A10`) |
+
+## 6. Part 2 is done when
+
+1. A requisition arrives by email, by WhatsApp and through the portal, and the three produce records
+   differing only in source channel and raw payload.
+2. A candidate accepts a shift in the app, checks in inside the geo-fence, and the shift reaches a
+   timesheet.
+3. A client approves that timesheet on a link — or the window expires and it is deemed approved —
+   and a shift invoice is raised against the contract version in force.
+4. A client user signs in to the portal and sees only their own sites and requisitions.
+5. The cadence engine contacts Base B on its own schedule, over WhatsApp and voice, and an answer
+   arriving on either channel reconciles to one record.
+6. A credential is verified by a third party rather than by a person reading a document.
+7. Doctors, allied health and home healthcare are configuration, not code.

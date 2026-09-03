@@ -2,10 +2,15 @@
 /**
  * Mirror ../docs/**\/*.md into content/docs/**\/*.mdx.
  *
- * ../docs is the single source of truth and is NEVER modified by this script.
- * content/docs is generated, git-ignored, and wiped on every run.
+ * NO LONGER A LIFECYCLE HOOK. `content/docs` is now hand-authored — the four-tab
+ * structure (release plan, engineering documentation) is written directly there and
+ * has no upstream `../docs` mirror. This script is kept for the day one is
+ * reintroduced, and it now REFUSES to wipe an existing `content/docs` unless run
+ * with `--force`, because doing so would delete the only copy.
  *
- * What it does, and why each step is needed, is documented in README.md.
+ *     node scripts/sync-docs.mjs --force
+ *
+ * What each transformation step does, and why, is documented in README.md.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -311,11 +316,21 @@ async function main() {
      bail out BEFORE the wipe rather than destroying the only copy. */
   if (!(await exists(SOURCE))) {
     if (!(await exists(TARGET))) {
-      console.error(`sync-docs: no source at ${SOURCE} and no content/docs mirror to build from`);
+      console.error(`sync-docs: no source at ${SOURCE} and no content/docs to build from`);
       process.exit(1);
     }
-    console.warn(`sync-docs: no source at ${SOURCE} — building from the committed content/docs mirror`);
+    console.warn(`sync-docs: no source at ${SOURCE} — leaving the hand-authored content/docs alone`);
     return;
+  }
+
+  /* content/docs is hand-authored. Overwriting it from ../docs is a deliberate act,
+     not something a `npm run dev` should do behind someone's back. */
+  if ((await exists(TARGET)) && !process.argv.includes('--force')) {
+    console.error(
+      `sync-docs: refusing to overwrite the hand-authored ${TARGET}.\n` +
+        '           Re-run with --force if you really mean to replace it from ../docs.',
+    );
+    process.exit(1);
   }
 
   await fs.rm(TARGET, { recursive: true, force: true });

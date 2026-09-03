@@ -1,0 +1,125 @@
+---
+title: "Infrastructure"
+description: "Four environments in Apollo's own AWS Mumbai account, EC2 for the long-running processes, Lambda at the edges, one pipeline, and a rehearsed restore."
+icon: Server
+---
+
+Everything runs in **`ap-south-1` (Mumbai), in Apollo's own AWS account**. No personal data leaves
+the region — backups included. This satisfies `F10` and the deployment half of `D11`.
+
+## 1. Environments
+
+| Environment | Purpose | Data | Deploy |
+|---|---|---|---|
+| `dev` | Integration of merged work | Anonymised | Automatic on merge |
+| `qa` | Test team | Anonymised | Automatic after `dev` smoke passes |
+| `uat` | Apollo acceptance | Anonymised, refreshed on request | Manual promote, with approval |
+| `prod` | Live | Real | Manual promote, approved release |
+
+Four environments provisioned **from the same infrastructure-as-code modules with different variable
+files**. A build moves from `dev` to `prod` without hand-editing configuration. Non-production
+environments carry anonymised data only, and **the anonymiser is a pipeline stage, not a manual
+step**.
+
+## 2. Compute
+
+| Workload | Runs on | Why |
+|---|---|---|
+| API | **Docker on EC2**, auto-scaling behind a load balancer, at least two instances in production across availability zones | A long-lived database pool, and predictable latency for the fulfilment board |
+| Worker | **Docker on EC2**, a separate group, one service per queue class | Batches run for minutes — a cadence run across the whole of Base B, a resumable migration batch. A function timeout is the wrong shape. |
+| Edge handlers | **AWS Lambda**, container images | Bursty, externally triggered, must never drop a payload |
+| Static front-ends | Object storage behind a CDN | Console, link pages, portal |
+
+### The four edge handlers
+
+Each does exactly one thing — **verify, persist the raw payload, enqueue** — and returns. No business
+logic, and no transaction spanning more than the raw write.
+
+| Handler | Trigger | Does |
+|---|---|---|
+| Inbound email | Email service delivery | Writes the record with the raw message and attachments, enqueues parsing |
+| Provider webhook | API gateway — WhatsApp, voice, e-signature, verification callbacks | Verifies the signature, deduplicates on the provider's message id, writes the raw payload, enqueues |
+| Object created | Documents bucket | Starts the virus scan and marks the document available or quarantined |
+| Scheduler | Scheduled events | Enqueues scheduled jobs — **a thin trigger; the work runs on the worker** |
+
+**Why the split matters.** A provider retry storm hits Lambda, not the instances serving the console.
+Deduplication happens at the cheapest possible place, before anything expensive runs. And because the
+handler only enqueues, the transaction, the audit write and the event emit still happen together on
+the worker.
+
+**Lambda is never used for** anything holding a database transaction beyond a single insert, anything
+calling a third party and waiting, anything that must resume from a checkpoint, or anything needing
+the full permission and scope stack.
+
+## 3. Pipeline
+
+```
+ pull request  ──▶  lint · typecheck · test · build, on what the diff touches
+       │
+     merge      ──▶  build container images tagged with the commit
+                     publish to the registry
+                     deploy to dev  ──▶  smoke  ──▶  qa
+                                                       │
+                                          manual promote with approval
+                                                       │
+                                                 uat  ──▶  prod
+```
+
+One artefact is promoted through all four environments. **Nothing is rebuilt per environment**, and
+rollback is a redeploy of the previous release.
+
+The mobile app ships on its own track through the managed build and submit service to the Apple and
+Google stores, on **Apollo-owned developer accounts**.
+
+## 4. What is watched, and what pages someone
+
+| Signal | Response |
+|---|---|
+| API error rate, latency, healthy instance count | **Page** |
+| Edge handler error rate and throttles | **Page** — a throttled webhook silently loses inbound demand |
+| Queue depth and oldest job age per class | **Page** — a stalled cadence queue silently stops candidate contact |
+| Outbox lag | **Page** — reporting correctness depends on it |
+| A deemed-window job not running | **Page** — a stalled expiry job silently stops invoicing |
+| Dead-letter count | Ticket; the operator screen lists them re-queueable |
+| Provider error rate per integration | Ticket; an outage routes to the manual fallback rather than failing candidates |
+| Verification pendency by cause | Dashboard — a registry outage must surface as a spike, not as silence |
+| Per-provider consumption units | Dashboard — this is the running-cost figure Apollo has asked for |
+
+**"A failure in production raises an alert rather than being found by a user" is an acceptance
+criterion, not an aspiration.**
+
+## 5. Backup and recovery
+
+| Item | Policy |
+|---|---|
+| Database | Automated snapshots and point-in-time recovery |
+| Objects | Versioning, with lifecycle rules following the retention policy |
+| Restore rehearsal | **Rehearsed and evidenced before go-live**, as a scripted workflow so it is repeatable |
+| Backup residency | Mumbai only, snapshots included — data protection law applies to backups |
+
+**Recovery targets are an open decision.** Until agreed, the restore rehearsal has no pass condition;
+it is carried with a working assumption and an explicit acceptance criterion rather than left
+unstated. Backup retention and the erasure policy can conflict, and that conflict is reconciled
+deliberately rather than by whichever job runs last.
+
+## 6. Configuration and secrets
+
+- All configuration is environment variables **validated at boot** — a missing variable fails the
+  container start rather than surfacing at three in the morning.
+- Provider credentials live in a secrets manager, fetched at boot by instance and function roles.
+  **Rotation does not require a code change**, and nothing is baked into an image.
+- **Business configuration is not environment configuration.** Windows, cadences, thresholds, weights
+  and lists live in [settings](/docs/engineering/build/platform-services#settings-and-reference-data) and
+  are edited by Apollo, not by a deploy.
+
+## 7. Cost posture
+
+| Driver | Note |
+|---|---|
+| Compute | Small. Around twenty-two recruiters and a candidate base in the tens of thousands. Two modest instance groups cover it. |
+| **Metered providers** | The real cost: WhatsApp per conversation, voice per minute, transcription per minute, document reading per page, verification per check, AI inference per inbound message. |
+| Who owns the provider accounts | Apollo's or the Service Provider's, recharged at cost either way — decided deliberately rather than discovered at the first invoice. |
+
+**Metered volume is set by configuration, not by traffic.** A cadence rule contacting the whole of
+Base B every three days is a cost decision made in an admin screen, which is why the platform shows a
+projected volume and cost **before** a cadence can be enabled.

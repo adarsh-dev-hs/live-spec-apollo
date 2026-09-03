@@ -1,0 +1,288 @@
+---
+title: "Platform services"
+description: "The fifteen shared components every module depends on: what each is for, what it covers, which deliverable it satisfies and when it ships."
+icon: Component
+---
+
+A platform service is depended on by two or more modules and is therefore **built once**. Twelve of
+the fifteen satisfy a platform prerequisite (`F01`–`F14`) — the capabilities the client's deliverable
+list assumes without naming.
+
+Almost all of them land in **Part 1**. That is deliberate: they are the floor the first line of
+business stands on, and there is no thinner version of them worth building.
+
+| Service | Delivers | Released |
+|---|---|---|
+| [Identity and access](#identity-and-access) | `F01` `F02` `F03` | Part 1 · client realm Part 2 |
+| [Audit trail](#audit-trail) | `F04` | Part 1 |
+| [Settings and reference data](#settings-and-reference-data) | `F05` | Part 1 |
+| [File storage](#file-storage) | `F06` | Part 1 |
+| [Design system](#design-system) | `F12` | Part 1 |
+| [Console shell](#console-shell) | `D11` | Part 1 |
+| [List engine](#list-engine) | `F08` | Part 1 |
+| [Inbound pipeline](#inbound-pipeline) | `A1` shared stack | Part 2 |
+| [Outbound messaging](#outbound-messaging) | `F07` `D10` | Part 1 · `D10` Part 2 |
+| [Job runtime](#job-runtime) | *engineering addition* | Part 1 |
+| [Event spine](#event-spine) | `F14` | Part 1 |
+| [Data protection](#data-protection) | `F13` | Part 1 |
+| [Market adapter layer](#market-adapter-layer) | `A12` | Part 1, 2 |
+| [Client link surfaces](#client-link-surfaces) | `A13` | Part 1, 2 |
+| [Environments and observability](#environments-and-observability) | `F10` `D11` | Part 1 |
+
+---
+
+### Identity and access
+
+**Purpose.** How anyone gets into the platform and what they are allowed to reach, for three separate
+populations: Apollo staff, candidates and — from Part 2 — client users. The client's list asks for
+*role-based access control* as a phrase but never says how anyone signs in, and requires a
+requisition owner drawn from *the Apollo internal user list* without anything creating that list.
+This service creates both.
+
+**Scope.** Staff sign-in, sign-out, password reset, session and idle timeout · staff user
+administration with role and site assignment, deactivation and bulk import · the role and permission
+model · candidate identity by phone and OTP with rate limiting and account recovery · client user
+invite, sign-in and client-admin management · **portal data scoping**, so every portal request is
+limited to the signed-in user's own client and sites and fails closed on a new endpoint · the
+principal resolution and permission guard every route in the platform uses.
+
+**Not here.** Which data a *staff* user may see beyond their permissions — whether a site-resident
+recruiter is scoped to their own site is an open decision that touches every list in the platform.
+
+**Screens.** `/login`, `/forgot-password`, `/admin/users`, `/admin/roles`.
+
+---
+
+### Audit trail
+
+**Purpose.** One place that records who did what and when. Requisition status changes, ranking
+overrides, selection decisions, link responses and manual corrections all need it, and building it
+six times would be six different answers. It is also the evidence layer behind the day-90 billing
+trigger: without a defensible record, an invoice cannot be justified in a billing query.
+
+**Scope.** An append-only entry per audited action carrying actor, timestamp, entity, action, and
+before and after values · the record call every service makes **inside its own transaction** · the
+shared activity timeline rendered on the requisition, candidate and placement screens · export of
+everything touching one record for a period.
+
+---
+
+### Settings and reference data
+
+**Purpose.** One admin area for every configurable list and waiting period. There are at least nine;
+without a shared home they become nine separate screens built by five different people. It also holds
+the three candidate categories and the two care settings **as data rather than code** — the client's
+explicit condition for the platform being category-aware.
+
+**Scope.** The settings register · reference data: candidate categories, care settings, service lines
+· editable lists with add, rename, reorder and deactivate · waiting periods with a **platform default
+and a per-client override**, so invoicing never stalls on an unconfigured client · versioning, so
+changing a setting does not retrospectively alter records created under the old value.
+
+**Screens.** `/admin/settings`.
+
+---
+
+### File storage
+
+**Purpose.** Where every uploaded file in the platform lives: CVs, registration certificates, ID
+scans, WhatsApp voice notes, signed offers, statutory forms, invoices and payslips. One store, one
+upload control, one viewer, one retention rule — and one guarantee that nothing leaves the Mumbai
+region.
+
+**Scope.** Versioned storage of every uploaded file · virus scanning before a file becomes available,
+with quarantine on failure · the shared upload control and file viewer · **expiring** download links
+· Mumbai-only residency including backups · a retention rule per document type.
+
+---
+
+### Design system
+
+**Purpose.** The shared visual language and the components built from it. There are five surfaces in
+this platform — Ops console, candidate app, WhatsApp templates, voice scripts and client link pages.
+If each is designed separately the work is done five times and looks like it.
+
+**Scope.** Design tokens consumed by both web and native · the web component library · the native
+component library sharing the same tokens · **the standard empty, loading, error, no-permission and
+partial-failure states every screen must have** · inline validation and form-error patterns · the
+accessibility baseline and the tests that hold it · content patterns for the two non-visual surfaces.
+
+**Sequencing note.** It must be **complete before screen design is finalised**, not developed
+alongside it.
+
+---
+
+### Console shell
+
+**Purpose.** The page frame every Ops screen sits inside: navigation, header, global search, user
+menu, and the application of role-based access to every route. Around thirty screens across nine
+modules render inside it.
+
+**Scope.** The application frame · navigation rendered from the signed-in user's **permissions**, not
+hardcoded · route-level permission enforcement with a no-permission page for a direct URL · the
+global search entry point · session expiry handling that preserves unsaved form state · filter-state
+preservation across module switches.
+
+**Screens.** `/showcase`.
+
+---
+
+### List engine
+
+**Purpose.** The shared table every Ops list screen uses. Around twenty screens are lists; building
+filtering, sorting, paging, column choice, saved views and export separately in each is the same work
+twenty times.
+
+**Scope.** Server-side filtering, sorting and cursor paging · column chooser and ordering, per user
+per list · saved views, owned by their creator and shareable with their team · export of **exactly
+the rows currently filtered**, not the whole table · row selection and bulk actions with
+partial-failure reporting · virtualisation past two hundred rows · the standard list states · the
+server-side query helper every list repository composes, which applies the scope predicate before any
+filter.
+
+---
+
+### Inbound pipeline
+
+**Purpose.** The plumbing under every message that arrives from outside: receive it on any channel,
+write down exactly what was sent, work out which client or candidate sent it, decide what kind of
+message it is, and hand it to whoever registered for that kind — retrying, and never discarding
+anything on the way.
+
+**Scope.** Channel receivers writing one record per message or file, with the **raw payload retained
+forever** · deduplication of redelivered provider messages · sender identity resolution against the
+client sender list — exactly one client, or the unmatched queue · intent classification with a shared
+confidence threshold and a fallback · **the intent-registration contract that lets a second consumer
+attach without modifying the stack** · reclassification between intent sets without re-ingestion ·
+queue, retry and dead-letter behaviour, observable throughout.
+
+**The design rule.** `A1` owns this stack and `A14` consumes it with a candidate-response intent
+schema. It must accept a second kind of message from the start rather than be retrofitted for one.
+
+**Screens.** `/inbound`, `/inbound/unmatched`, `/inbound/manual-entry`.
+
+---
+
+### Outbound messaging
+
+**Purpose.** Everything the platform sends, and the plumbing under it. `D10` covers templates and
+preferences; the queue, retries and delivery receipts underneath are `F07` — assumed by the client's
+list and named nowhere in it.
+
+**Scope.** Message templates per channel and purpose, with variables resolved from the candidate,
+requisition, placement or invoice record · **provider approval state on a template, so an unapproved
+template cannot be sent** · triggers binding an event to a message, channel, recipient and fallback
+order · one sending path across WhatsApp, SMS, email and app push, each provider behind an interface
+· retry, suppression and asynchronous receipt reconciliation · a delivery log with cost attribution
+and per-candidate contact history · contact preferences and opt-out, honoured **at selection, not at
+send**.
+
+**One registration, not two.** The same WhatsApp number and template set serves demand follow-up and
+candidate messaging.
+
+**Screens.** `/admin/templates`, `/messaging/delivery-log`.
+
+---
+
+### Job runtime
+
+**Purpose.** One place that runs deferred work. Everything in the platform that is not an interactive
+request happens here. **This is an engineering addition** — no deliverable names it, and eight
+deliverables are timers or queues that cannot be built without it.
+
+**Scope.** Queues grouped into classes with independent concurrency · retry policy per class, with
+permanent failures going straight to a dead letter · dead-letter visibility and operator re-queue ·
+scheduled jobs triggered from the edge · singleton enforcement · **idempotency keys, so a repeat
+enqueue is a no-op rather than a second send** · resumable batch checkpointing · a run record per
+execution.
+
+**Screens.** `/admin/jobs`.
+
+---
+
+### Event spine
+
+**Purpose.** Every module writes an event as things happen, and the reports read those events later.
+
+**This is the one prerequisite that cannot be added afterwards.** Built after the first requisition
+rather than before it, the Part 3 reports cannot be produced for the earlier period at all — the
+history simply does not exist. That single sentence is the whole justification for building it in
+Part 1, when nothing yet reads it.
+
+**Scope.** The event definition, versioning and validation layer · a transactional outbox writing the
+event row **inside** the business transaction · the publisher moving outbox rows to the append-only
+log · the append-only event log, partitioned by month · subscription dispatch to jobs and to the
+reporting marts · replay, re-deriving a mart from the log without touching operational tables.
+
+---
+
+### Data protection
+
+**Purpose.** Handling personal and health-related data about candidates in a way that meets Indian
+data protection law. First needed the moment candidate personal data is captured — which is candidate
+sign-up in Part 1, not Part 3 when someone remembers compliance.
+
+**Scope.** Consent capture, versioned notices and retrievable evidence · **separate consent for
+verification checks, verified before any adapter call is dispatched** · consent withdrawal, honoured
+forward, distinguishing statutory from contractual messages · residency enforcement and the test
+suite that holds it · a retention policy per data type and the sweep that applies it · erasure
+requests from intake to evidence · the redaction rules every log line and event payload obeys.
+
+---
+
+### Market adapter layer
+
+**Purpose.** Three interfaces — **identity, certification, qualification** — that any country's
+registries fit behind, returning green, amber or red on the same shape whichever registry answered.
+A new market or a new candidate category is added by writing an adapter, not by changing core logic.
+
+**Scope.** The three interface contracts and the common traffic-light response schema · registry
+configuration: which are active, how to reach each, credentials, manual mode · the India adapter set
+— nursing councils, the NMC and state medical councils, the allied health councils, the Pharmacy
+Council · the verification aggregator fronting Aadhaar, PAN, EPFO and court checks as **one
+integration instead of five** · **the manual fallback path: same interface, document plus a person**
+· per-call cost logging and consent verification before every dispatch · contract tests that fail if
+a core change breaks an existing adapter.
+
+**Must accept the US, Germany and Ireland later** without a change to core domain logic. Several
+Indian registries have no API at all and resolve to document plus manual verification behind the same
+interface.
+
+**Screens.** `/admin/registries`.
+
+---
+
+### Client link surfaces
+
+**Purpose.** **The entire client relationship in Part 1.** There is no client login until Part 2, so
+every interaction a hospital has with the platform is a tokenised link sent over the channel they
+already use, reached without a password or an account.
+
+**Scope.** The link mechanism: unguessable expiring tokens, issue, send, open, answer, expire,
+reissue · **four link types as configuration on one mechanism** — shortlist response, day 30/60 trial
+check-in, day-90 retention, timesheet approval · link recipients: who at the client receives which
+type · the three public pages · answer routing to the right consumer, with duplicate-submission
+protection · the link log finance uses to justify an invoice · deemed handling on expiry, **only**
+for the day-90 and timesheet types.
+
+**Only the day-90 instance is a billing trigger.** Day 30 and day 60 capture signal and must not be
+configurable to create a second trigger path. Reminders carry a warning of auto-accept after the
+client's configured waiting period.
+
+**Screens.** `/links`, `/admin/link-types`, and the public pages at `/l`.
+
+---
+
+### Environments and observability
+
+**Purpose.** Four environments, a way to move a release between them, and enough monitoring to know
+something has broken before a user says so — deployed onto **Apollo's own AWS account in Mumbai**.
+
+**Scope.** Infrastructure as code, one stack per environment: `dev`, `qa`, `uat`, `prod` · container
+images for the API, worker and edge handlers · a pipeline that verifies on pull request, builds on
+merge, and promotes with approvals · deployment to Apollo's account with rollback to the prior
+release · monitoring, alerting and on-call routing · backups, point-in-time recovery and a
+**rehearsed and evidenced** restore before go-live · anonymisation of production data for the three
+non-production environments.
+
+Detail in [Infrastructure](/docs/engineering/reference/infrastructure).

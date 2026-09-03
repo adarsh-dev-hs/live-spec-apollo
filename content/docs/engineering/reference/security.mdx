@@ -1,0 +1,112 @@
+---
+title: "Security and data protection"
+description: "Three identity realms, the permission and scope model, what is always audited, and how personal and health data is consented, kept in Mumbai, retained and erased."
+icon: ShieldCheck
+---
+
+Two things drive everything on this page. The platform holds **personal and health-related data about
+healthcare professionals**, which Indian data protection law treats seriously. And it puts a **public
+link surface** in front of clients who have no account, reached by a token that arrives over WhatsApp
+and can be forwarded.
+
+## 1. Three identity realms
+
+| Realm | Who | Credential |
+|---|---|---|
+| **Staff** | Apollo internal users | Email and password, session cookie with sliding idle expiry |
+| **Candidate** | Healthcare professionals in the app | Phone and OTP, rate-limited; short bearer token with a rotating refresh token |
+| **Client user** | Client staff in the portal, from Part 2 | Email and password, **separate cookie name and separate signing key** from staff |
+
+Plus one non-realm: a **link session**, exchanged from an opaque token for a single record and a
+single action.
+
+**Realms never mix.** A candidate token presented to a staff route is rejected as unauthenticated,
+not as forbidden. The worst outcome available in this system is a portal leak between two hospitals,
+and separate realms is the first of three defences against it.
+
+## 2. Permissions and scope
+
+Two different questions, answered in two different places.
+
+**Permission** — may this role do this action? Held in configuration, enforced at the route, and used
+to render navigation so a user never sees a screen they cannot open. A direct URL to a forbidden
+route renders a no-permission page rather than an error.
+
+**Scope** — which rows may this principal see? Applied by the query layer **before any filter the
+caller supplied**, and not expressible as a parameter.
+
+| Principal | Scope |
+|---|---|
+| Staff | All rows, subject to permission. Whether a site-resident recruiter is additionally scoped to their own site is **an open decision that touches every list in the platform** |
+| Candidate | Their own record and nothing else |
+| Client user | **Hard-scoped to their own client and sites.** A new endpoint fails closed |
+| Link session | Exactly one record, one action |
+
+A test suite asserts that every collection route rejects a cross-scope id in every realm, and that a
+new route without a scope predicate fails the build.
+
+## 3. What is always audited
+
+Every action that changes a record writes an audit entry **inside the same transaction as the change
+itself** — actor, timestamp, entity, action, before and after. Five things go further and are
+**append-only**, with no update or delete granted at the database:
+
+**Audit entries · requisition status transitions · retention records · allocation records · ranking
+overrides.**
+
+The reason is one scenario. Apollo raises an invoice at day 90; months later the client queries it.
+The answer must be a record of who confirmed what, when, and against which contract terms, that
+nobody could have edited in between.
+
+## 4. Consent
+
+Consent is captured **before anything is stored**, and a **separate consent covers verification
+checks** — verified before any registry or aggregator call is dispatched, not after.
+
+| | |
+|---|---|
+| Notices | Versioned, with retrievable evidence of what was agreed and when |
+| Withdrawal | Honoured going forward, distinguishing statutory and contractual messages from marketing |
+| Verification consent | Checked at dispatch. **No consent, no adapter call** — this is enforced in the adapter layer, not left to callers |
+
+## 5. Residency
+
+**No personal data leaves `ap-south-1`.** Not the database, not object storage, not backups, not
+snapshots, and not a provider endpoint. A test suite asserts that no configured bucket, database,
+backup or provider endpoint sits outside the region, and it runs on every change.
+
+Provider selection is constrained by this. An otherwise attractive supplier that processes outside
+India is not a candidate.
+
+## 6. Retention and erasure
+
+| | |
+|---|---|
+| Retention | A policy per data type, applied by a scheduled sweep — not a documented intention |
+| Erasure | Requests handled end to end: intake, decision, execution, evidence |
+| The conflict | **Backup retention and the erasure obligation can disagree.** It is reconciled explicitly, and deliberately, rather than by whichever job runs last |
+
+## 7. Application security
+
+| Area | Rule |
+|---|---|
+| Files | Virus scanned before becoming available; quarantined on failure. Download links **expire** |
+| Logs and events | **No log line contains a phone number, email, name, government identifier, account number or document text.** A test suite enforces it |
+| Secrets | In a secrets manager, fetched at boot by instance and function roles. Nothing in an image, nothing in the repository |
+| SQL | Hand-written, always parameterised. String concatenation into SQL fails lint |
+| Webhooks | Signature-verified per provider. Unsigned providers are IP-allowlisted and share a secret |
+| Dependencies | Audited continuously; a high-severity finding blocks a release |
+
+## 8. The link surface
+
+The public client pages carry the strictest rules in the platform, because the token is not a secret
+once it has been forwarded.
+
+- **Unguessable, expiring tokens.**
+- **No collection endpoints exist on that surface at all** — a link reaches one record.
+- Rate-limited per token and per IP.
+- Responses omit internal reason codes, scores and notes; a client sees client-appropriate status,
+  never internal reasoning.
+- A duplicate submission returns the **original** answer rather than recording a second one.
+- Only the day-90 link type can carry the billing-trigger flag, enforced in code and asserted by a
+  test — day 30 and day 60 must not be configurable into a second trigger path.

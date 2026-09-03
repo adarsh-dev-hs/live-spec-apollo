@@ -1,28 +1,26 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, pocAppLoginUrl } from './shared';
+import { appName } from './shared';
+import { TABS } from './tabs';
 
+/**
+ * Shared by the home and docs layouts.
+ *
+ * `links` is what the home layout renders as its header nav. The docs layout
+ * passes `links={[]}` and renders the same four tabs as a sidebar banner instead
+ * (`components/tab-bar.tsx`) — its own header is mobile-only, so plain nav links
+ * would otherwise fall into the sidebar list and read as siblings of the page tree.
+ */
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
       title: appName,
     },
-    links: [
-      {
-        text: 'Release parts',
-        url: '/docs/07-phases/07-00-release-model',
-        description: 'The three-part release model: what ships in Part 1, 2 and 3',
-      },
-      {
-        text: 'Original plan',
-        url: '/requirement-doc',
-        description: "The client's delivery plan, exactly as issued",
-      },
-      {
-        text: 'Live POC app',
-        url: pocAppLoginUrl,
-        external: true,
-        description: 'The screens every specification links to',
-      },
-    ],
+    links: TABS.map((tab) => ({
+      text: tab.title,
+      url: tab.url,
+      description: tab.description,
+      icon: tab.icon,
+      ...(tab.external ? { external: true } : { active: 'nested-url' as const }),
+    })),
   };
 }
