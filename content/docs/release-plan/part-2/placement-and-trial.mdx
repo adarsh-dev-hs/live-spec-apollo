@@ -1,0 +1,112 @@
+---
+title: "Placement and trial"
+description: "Phase 2: privileging for doctors, and trial question sets that differ by candidate category and care setting."
+icon: CalendarCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D7` (partial) · `A6` (partial) |
+| **Engineering reference** | [Placement and trial](/docs/engineering/build/modules#placement-and-trial) |
+| **Screens** | `/placements` · `/placements/:id` · `/trial` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+Two additions the new categories and the new care setting force. A doctor cannot work in a hospital
+on council registration alone — the hospital grants **privileging**, which is a separate permission
+and a separate record. And a nurse in a home has neither a preceptor nor accommodation, so asking
+them about either in a trial check-in is asking a question with no answer.
+
+## Release in this phase
+
+1. Privileging for doctors.
+2. Trial question sets by candidate category and care setting.
+
+---
+
+## 1. Privileging for doctors
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/placements/:id` · `/candidates/:id`
+
+### Scenarios to cover
+
+Privileging is granted by the hospital, for a scope of practice, for a period. It is **separate from
+council registration** — a doctor can be fully registered and not privileged at that hospital — and a
+placement that requires it cannot open without it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Privileging record | Record | Yes | Candidate, client, site, scope, valid from and to |
+| 2 | Granting evidence | Document | Yes | Through the shared file store |
+| 3 | Requirement flag | Configuration | Yes | Which category and care setting require it |
+| 4 | Placement gate | Behaviour | Yes | Joining is blocked without a valid record |
+| 5 | Expiry visibility | Derived | Yes | Approaching expiry visible on the placement |
+
+### Flow
+
+1. A doctor placement requires privileging; the record is captured with its evidence.
+2. Joining confirmation checks for a valid record covering the joining date.
+3. Expiry inside a live placement is surfaced ahead of time.
+
+### Scenarios to test
+
+- A doctor placement cannot open without a valid privileging record.
+- Council registration alone does not satisfy the gate.
+- A privileging record for another site does not satisfy the gate.
+- Approaching expiry is visible before it happens, not after.
+
+---
+
+## 2. Trial question sets by category and care setting
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/trial` · `/admin/settings`
+
+### Scenarios to cover
+
+The check-in question sets differ by candidate category and by care setting. **Home healthcare has
+neither a preceptor nor accommodation**, so its set omits both — which is why the sets are
+configuration and not a form.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Question set binding | Configuration | Yes | Category × care setting |
+| 2 | Doctor and allied health sets | Reference data | Yes | Their own questions |
+| 3 | Home healthcare set | Reference data | Yes | No preceptor, no accommodation |
+| 4 | Event definition per binding | Configuration | Yes | Which of day 0/7/30/60/90 apply |
+| 5 | Rendering | Behaviour | Yes | Across app, WhatsApp and the client link |
+
+### Flow
+
+1. Sets are configured per category and care setting.
+2. A placement's schedule uses the set for its combination.
+3. The same set renders on whichever surface asks the question.
+
+### Scenarios to test
+
+- A home healthcare placement is never asked about a preceptor.
+- A doctor placement gets the doctor set at every event.
+- Changing a set changes future check-ins and leaves answered ones untouched.
+- The same question renders consistently in the app, on WhatsApp and on a client link.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| The trial dashboard at width, and escalation on negative responses | [Phase 3 · Placement and trial](/docs/release-plan/part-3/placement-and-trial) |
+| Trial survival reporting | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

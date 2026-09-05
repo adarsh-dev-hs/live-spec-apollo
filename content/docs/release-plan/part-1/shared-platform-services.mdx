@@ -1,0 +1,322 @@
+---
+title: "Shared platform services"
+description: "Phase 1: the audit trail, file storage, message sending, the list engine, the job runtime and the event spine — built once, used by every other feature."
+icon: Boxes
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `F04` · `F06` · `F07` · `F08` · `F14` — **all in full; they appear in no other part.** Item 5 is an engineering addition no deliverable names |
+| **Engineering reference** | [Audit trail](/docs/engineering/build/platform-services#audit-trail) · [File storage](/docs/engineering/build/platform-services#file-storage) · [Outbound messaging](/docs/engineering/build/platform-services#outbound-messaging) · [List engine](/docs/engineering/build/platform-services#list-engine) · [Job runtime](/docs/engineering/build/platform-services#job-runtime) · [Event spine](/docs/engineering/build/platform-services#event-spine) |
+| **Screens** | `/admin/jobs` · the shared list, upload and timeline components rendered inside every other screen |
+| **ClickUp epic** | *link to be added*  |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+Six things that every other feature in the platform depends on and that no single feature owns. Built
+six times they would be six different answers: six audit formats, six upload controls, six list
+behaviours. Built once they are the floor everything else stands on. Two of them are here for reasons
+that are not about efficiency at all — **the event spine cannot be added afterwards**, because a
+report in Phase 3 cannot cover a period for which no history was written; and the job runtime is an
+engineering addition no deliverable names, without which eight deliverables that are timers or queues
+cannot be built.
+
+## Release in this phase
+
+1. Audit trail.
+2. Document and file storage.
+3. Message sending infrastructure.
+4. Lists, search, filters and export.
+5. Job runtime.
+6. Event recording for reporting.
+
+---
+
+## 1. Audit trail
+
+**ClickUp item** — *link to be added* · **Delivers** `F04`
+
+**Screens** — the activity timeline rendered on `/requisitions/:id`, `/candidates/:id` and
+`/placements/:id`
+
+### Scenarios to cover
+
+One place records who did what and when. Requisition status changes, ranking overrides, selection
+decisions, link responses and manual corrections all need it. It is also the evidence layer behind
+the day-90 billing trigger: without a defensible record an invoice cannot be justified in a billing
+query a year later.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Actor | Reference | Yes | Staff user, candidate, client link token or system job |
+| 2 | Timestamp | UTC timestamp | Yes | Business dates read as `Asia/Kolkata` |
+| 3 | Entity and entity id | Reference | Yes | What was acted on |
+| 4 | Action | Code | Yes | From a declared set per module |
+| 5 | Before / after values | JSON | Yes for changes | Redacted per the data-protection rules |
+| 6 | Activity timeline | Component | — | Rendered on the requisition, candidate and placement screens |
+| 7 | Export | Action | — | Everything touching one record for a period |
+
+### Flow
+
+1. A service performs an audited action and calls the audit recorder **inside its own transaction**,
+   so the entry and the change commit together or not at all.
+2. The entry is appended. There is no update and no delete — the table grants neither.
+3. The timeline component reads entries for one entity and renders them in one shared format.
+4. An export produces every entry touching one record over a period, for a billing query or a
+   dispute.
+
+### Scenarios to test
+
+- A business change and its audit entry commit together; a rolled-back change leaves no entry.
+- No code path can update or delete an entry — verified against the database grants, not only the
+  service.
+- The timeline renders identically on requisition, candidate and placement.
+- An export for one record over a period returns every entry and nothing from another record.
+- A redacted field is redacted in the entry as well as in the log line.
+
+---
+
+## 2. Document and file storage
+
+**ClickUp item** — *link to be added* · **Delivers** `F06`
+
+**Screens** — the shared upload control and file viewer, rendered inside candidate, offer and invoice
+screens
+
+### Scenarios to cover
+
+Every uploaded file in the platform lives in one store: CVs, registration certificates, ID scans,
+signed offers and invoices. One store, one upload control, one viewer, one retention rule — and one
+guarantee that nothing leaves the Mumbai region.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Upload control | Component | — | Drag-and-drop and file picker, with progress and per-file errors |
+| 2 | Document type | Single select | Yes | Drives the retention rule |
+| 3 | File version | System | — | A re-upload creates a version; nothing is overwritten |
+| 4 | Scan status | Pending / Clean / Quarantined | Yes | A file is unavailable until it is clean |
+| 5 | Viewer | Component | — | Renders PDF and image types inline |
+| 6 | Download link | Expiring URL | — | Time-limited, never a permanent public URL |
+| 7 | Retention rule | Per document type | Yes | Applied by the sweep in data protection |
+
+### Flow
+
+1. A user or an API uploads a file; it is stored versioned and marked pending.
+2. The file is virus-scanned before it becomes available; a failure quarantines it and notifies the
+   uploader.
+3. A clean file becomes readable through the viewer and through expiring download links only.
+4. A re-upload of the same logical document creates a new version and keeps the old one.
+5. Every object, including backups, stays in the Mumbai region.
+
+### Scenarios to test
+
+- An infected file is quarantined and never becomes downloadable.
+- A download link expires and a stale link is refused.
+- A re-upload preserves the earlier version and the record points at the current one.
+- An unsupported file type is refused at upload with a clear message rather than at view time.
+- Residency: no object and no backup is written outside Mumbai — asserted by test, not by policy.
+
+---
+
+## 3. Message sending infrastructure
+
+**ClickUp item** — *link to be added* · **Delivers** `F07`
+
+**Screens** — none in Phase 1
+
+### Scenarios to cover
+
+The plumbing underneath every message Phase 1 sends: the shortlist link to a client, the day-90
+retention link and its reminder, the offer to a candidate, the password reset. One sending path
+across WhatsApp, SMS, email and app push, each provider behind an interface, with queueing, retry,
+suppression and asynchronous delivery-receipt reconciliation.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Message request | Object | Yes | Recipient, channel, content reference, variables |
+| 2 | Provider interface | Contract | Yes | One per channel: WhatsApp, SMS, email, push |
+| 3 | Send queue | Job class | Yes | Runs on the job runtime, item 5 |
+| 4 | Retry policy | Config | Yes | Per channel, with a permanent failure going to dead letter |
+| 5 | Delivery receipt | Async callback | Yes | Reconciled back onto the message record |
+| 6 | Suppression list | Store | Yes | A hard bounce or a block stops further sends |
+| 7 | Message record | Store | Yes | One row per message with channel, cost and status |
+
+### Flow
+
+1. A Phase 1 feature raises a message request naming recipient, channel and content.
+2. The request is queued and sent through the provider interface for that channel.
+3. The provider's receipt arrives asynchronously and is reconciled onto the message record.
+4. A transient failure retries on the channel's policy; a permanent failure goes to dead letter and
+   is visible on `/admin/jobs`.
+5. A repeat send with the same idempotency key is a no-op rather than a second message.
+
+### Scenarios to test
+
+- A message sends once, and a duplicate enqueue does not produce a second message.
+- A transient provider failure retries and eventually delivers; a permanent one dead-letters visibly.
+- A delivery receipt arriving after the send is reconciled onto the right message.
+- A suppressed recipient is not contacted again.
+- Message cost is attributed per message and readable per recipient.
+
+<Callout type="warn" title="Phase 1 has the sending path, not the template layer">
+Template management, trigger configuration, preferences, opt-out and the per-user notification log
+are `D10` — [Phase 2 · Notifications and alerts](/docs/release-plan/part-2/notifications-and-alerts).
+The Phase 1 messages listed above carry content held with the feature that sends them.
+**WhatsApp template approval and DLT registration are external lead times: they are started in
+Phase 1 or they gate it.**
+</Callout>
+
+---
+
+## 4. Lists, search, filters and export
+
+**ClickUp item** — *link to be added* · **Delivers** `F08`
+
+**Screens** — every list screen in Phase 1: `/requisitions`, `/candidates`, `/clients`,
+`/contracts`, `/interviews`, `/offers`, `/placements`, `/invoices`, `/receivables`, `/links`,
+`/verification`
+
+### Scenarios to cover
+
+Around twenty Phase 1 screens are lists. Building filtering, sorting, paging, column choice, saved
+views and export separately in each is the same work twenty times, and produces twenty behaviours a
+recruiter has to learn separately.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Filter bar | Component | — | Server-side; filters compose rather than replace |
+| 2 | Sort | Column control | — | Server-side, stable across pages |
+| 3 | Paging | Cursor | — | Cursor paging, not offset |
+| 4 | Column chooser | Component | — | Per user, per list |
+| 5 | Saved views | Store | — | Owned by the creator, shareable with their team |
+| 6 | Export | Action | — | **Exactly the rows currently filtered**, never the whole table |
+| 7 | Row selection and bulk actions | Component | — | With partial-failure reporting |
+| 8 | Standard states | Component | — | Empty, loading, error, no-permission, partial failure |
+| 9 | Scope predicate | Query helper | Yes | Applied **before** any filter, by every list repository |
+
+### Flow
+
+1. A list screen composes its query through the shared helper, which applies the scope predicate
+   first and the user's filters second.
+2. Results page by cursor; past two hundred rows the table virtualises.
+3. The user's column choice and saved views persist per list.
+4. An export runs against the current filter set and produces the same rows the user is looking at.
+5. A bulk action reports per-row outcomes; a partial failure is shown as a partial failure.
+
+### Scenarios to test
+
+- A filter plus a sort plus page two returns the same rows as filtering, sorting and scrolling.
+- An export matches the on-screen filtered set exactly — row for row.
+- A saved view is visible to its team and not to another team.
+- Two hundred and one rows render without the browser stalling.
+- A bulk action where one row fails reports that row and completes the rest.
+- The scope predicate cannot be bypassed by a filter parameter.
+
+---
+
+## 5. Job runtime
+
+**ClickUp item** — *link to be added* · **Engineering addition — no deliverable names it**
+
+**Screens** — `/admin/jobs`
+
+### Scenarios to cover
+
+One place runs deferred work. Everything in the platform that is not an interactive request happens
+here: the send queue, the trial check-in scheduler, the day-90 window expiry, the retention sweep.
+Eight deliverables across the three parts are timers or queues and cannot be built without it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Queue class | Config | Yes | Independent concurrency per class |
+| 2 | Retry policy | Config | Yes | Per class; a permanent failure skips retries |
+| 3 | Dead letter | Store and screen | Yes | Visible, with operator re-queue |
+| 4 | Scheduled job | Config | Yes | Triggered from the edge, not from an app instance |
+| 5 | Singleton lock | Mechanism | Yes | One instance of a scheduled job at a time |
+| 6 | Idempotency key | Field | Yes | **A repeat enqueue is a no-op, not a second send** |
+| 7 | Run record | Store | Yes | One per execution: start, end, outcome, error |
+| 8 | Batch checkpoint | Mechanism | — | A resumable batch continues rather than restarts |
+
+### Flow
+
+1. A feature enqueues work with a queue class and an idempotency key.
+2. The runtime executes it, writing a run record, and retries per the class policy on failure.
+3. A permanent failure goes to dead letter, where an operator can inspect and re-queue it.
+4. A scheduled job fires from the edge; the singleton lock prevents two instances overlapping.
+5. A long batch checkpoints and resumes from its checkpoint rather than from the beginning.
+
+### Scenarios to test
+
+- The same job enqueued twice with one key runs once.
+- A scheduled job under two running instances still executes once.
+- A failure retries per policy, then dead-letters, then re-queues successfully from `/admin/jobs`.
+- A batch interrupted mid-run resumes without repeating completed work.
+- Every execution has a run record with an outcome.
+
+---
+
+## 6. Event recording for reporting
+
+**ClickUp item** — *link to be added* · **Delivers** `F14`
+
+**Screens** — none
+
+### Scenarios to cover
+
+Every module writes an event as things happen. **Nothing in Phase 1 reads them.** It is built anyway,
+in Phase 1, because a report built in Phase 3 cannot cover a period for which no history was written
+— the history simply does not exist. That single sentence is the whole justification for this item.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Event definition | Schema | Yes | Named, versioned, validated at write |
+| 2 | Transactional outbox | Table | Yes | The event row is written **inside** the business transaction |
+| 3 | Publisher | Job | Yes | Moves outbox rows to the log, at-least-once |
+| 4 | Event log | Append-only table | Yes | Partitioned by month |
+| 5 | Subscription dispatch | Mechanism | Yes | To jobs, and later to the reporting marts |
+| 6 | Replay | Capability | Yes | Re-derive a consumer from the log without touching operational tables |
+| 7 | Phase 1 event set | Catalogue | Yes | Requisition, candidate, verification, ranking, selection, offer, placement, trial, retention, invoice |
+
+### Flow
+
+1. A module performs a business change and writes its event to the outbox in the same transaction.
+2. The publisher moves outbox rows to the append-only log.
+3. Subscribers receive dispatched events; in Phase 1 the only subscribers are jobs.
+4. A replay re-derives a consumer from the log, which is what makes the Phase 3 reports possible over
+   the Phase 1 period.
+
+### Scenarios to test
+
+- A business change that rolls back writes no event; one that commits always writes one.
+- The publisher is at-least-once and consumers are idempotent — a redelivered event changes nothing.
+- The log rejects an update and a delete.
+- An event whose payload fails schema validation is refused at write, not silently dropped.
+- A replay over a period reproduces a consumer's state exactly.
+- Every Phase 1 business action in the catalogue produces its event, verified module by module.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Message templates, triggers, preferences, opt-out and the delivery log | [Phase 2 · Notifications and alerts](/docs/release-plan/part-2/notifications-and-alerts) |
+| The inbound pipeline — receiving messages from outside | [Phase 2 · Demand intake](/docs/release-plan/part-2/demand-intake) |
+| Anything reading the event log: marts, reports, MIS | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

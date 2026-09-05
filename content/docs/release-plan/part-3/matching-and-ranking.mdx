@@ -1,0 +1,119 @@
+---
+title: "Matching and ranking"
+description: "Phase 3: selection outcomes and rejection reasons feeding subsequent ranking, and weight tuning per category and supply base informed by that data."
+icon: Search
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `A8` in full · `D5` (partial) · `D18` (partial) |
+| **Engineering reference** | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| **Screens** | `/admin/ranking-weights` · `/requisitions/:id/ranking` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+The loop closes. When a client or an interviewer rejects someone with a structured reason, that reason
+comes back into ranking and affects later results; and with outcome data available, the weight sets
+stop being an opening guess and become something tuned against what actually happened.
+
+<Callout type="warn" title="This depends on a decision taken in Phase 1">
+The rejection taxonomy and the features the engine reads were agreed jointly **before either module
+was built**. If the ranking model has no slot for outcome data, feeding rejections back now means
+rebuilding the engine rather than extending it.
+</Callout>
+
+## Release in this phase
+
+1. Outcome write-back to ranking (`A8`).
+2. Weight tuning per category and supply base.
+
+---
+
+## 1. Outcome write-back to ranking
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id/ranking`
+
+### Scenarios to cover
+
+Selection decisions and their structured rejection reasons become **outcome signals** the ranking
+engine reads as features. A candidate repeatedly rejected for a specific, structural reason ranks
+differently on the next comparable requisition — and the rationale says so.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Outcome signal | Record | Yes | Candidate, requisition context, decision, reason, timestamp |
+| 2 | Signal derivation | Mechanism | Yes | From selection decisions and client shortlist responses |
+| 3 | Feature mapping | Definition | Yes | Which signals become which ranking features |
+| 4 | Decay | Rule | Yes | An old outcome weighs less than a recent one |
+| 5 | Rationale exposure | Behaviour | Yes | Outcome influence appears in the rationale, not hidden |
+| 6 | Guardrails | Rules | Yes | A single rejection cannot exclude a candidate outright |
+
+### Flow
+
+1. A selection decision or client response writes an outcome signal.
+2. Feature extraction reads signals within the decay window.
+3. Scoring uses them like any other feature and states their effect in the rationale.
+
+### Scenarios to test
+
+- A rejection with a structured reason produces exactly one outcome signal.
+- Signals age out per the decay rule.
+- The rationale names outcome influence when it applied.
+- No single outcome removes a candidate from a ranked set entirely.
+- Ranked sets produced before write-back are unchanged.
+
+---
+
+## 2. Weight tuning per category and supply base
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/ranking-weights`
+
+### Scenarios to cover
+
+With outcome and performance data available, weight sets are tuned per category and base — and a
+change is published as **a new version with an effective date**, so what a past ranked set was
+produced with is never rewritten.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Tuning workspace | Screen | — | Adjust weights and compare against historical outcomes |
+| 2 | Backtest | Capability | Yes | Replay past ranked sets under a candidate weight set |
+| 3 | Version publication | Action | Yes | Effective-dated, never retrospective |
+| 4 | Comparison report | Output | Yes | Old versus new on the same historical data |
+| 5 | Rollback | Action | Yes | Publish the previous version forward |
+
+### Flow
+
+1. A proposed weight set is backtested against historical ranked sets and outcomes.
+2. The comparison is reviewed before publication.
+3. The new version takes effect from its date; existing ranked sets are untouched.
+
+### Scenarios to test
+
+- A backtest does not alter any stored ranked set.
+- Publishing takes effect only for sets generated after the effective date.
+- A rollback restores the previous behaviour without editing history.
+- Each ranked set names the weight set version that produced it.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Search, saved searches, the ranked set and recruiter override | [Phase 1 · Matching and ranking](/docs/release-plan/part-1/matching-and-ranking) |
+| Per-category and shift-level ranking, and shared talent segments | [Phase 2 · Matching and ranking](/docs/release-plan/part-2/matching-and-ranking) |

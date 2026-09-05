@@ -1,0 +1,236 @@
+---
+title: "Access and administration"
+description: "Phase 1: how an Apollo user gets in, who they are, what they are allowed to do, and the one admin area every configurable list lives in."
+icon: KeyRound
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `F01` · `F02` · `F03` · `F05` — **all four in full; they appear in no other part** |
+| **Engineering reference** | [Identity and access](/docs/engineering/build/platform-services#identity-and-access) · [Settings and reference data](/docs/engineering/build/platform-services#settings-and-reference-data) |
+| **Screens** | `/login` · `/forgot-password` · `/admin/users` · `/admin/roles` · `/admin/settings` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+Every other feature in Phase 1 assumes a signed-in Apollo user with a role, and assumes that the
+lists it renders — candidate categories, rejection reasons, waiting periods — are data someone can
+edit rather than code someone has to deploy. The client's deliverable list asks for *role-based
+access control* as a phrase and requires a requisition owner drawn from *the Apollo internal user
+list*, but nothing in it creates either. This feature creates both, plus the single admin area those
+nine-or-more configurable lists live in.
+
+## Release in this phase
+
+1. Staff sign-in, session and password reset.
+2. Staff user management.
+3. Roles and permissions.
+4. Settings and reference data administration.
+
+---
+
+## 1. Staff sign-in, session and password reset
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/login` · `/forgot-password`
+
+### Scenarios to cover
+
+A member of Apollo staff signs in with an email address and a password and lands on the console home.
+A wrong password is refused without saying which half was wrong. A session that has been idle past
+the configured window ends, and the user is returned to sign-in with whatever they had typed into a
+form preserved. A user who has forgotten their password requests a reset link by email, sets a new
+password, and the old one stops working. A deactivated user cannot sign in at all.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Email address | Text | Yes | The staff identity; also the reset destination |
+| 2 | Password | Password | Yes | Minimum length and complexity from the platform policy |
+| 3 | Sign in | Button | — | Disabled until both fields carry a value |
+| 4 | Forgot password | Link | — | Goes to `/forgot-password` |
+| 5 | Error region | Inline message | — | One generic failure message; never *user not found* |
+| 6 | Idle timeout | Setting | — | Configured once in `/admin/settings`, applied to every session |
+
+### Flow
+
+1. The user opens `/login` and submits email and password.
+2. Credentials are checked, failures are rate-limited per account and per source, and a failed
+   attempt is written to the audit trail.
+3. On success a session is issued, the principal is resolved once, and the user lands on the console
+   home with navigation rendered from their permissions.
+4. Idle past the configured window ends the session; the next request returns the user to `/login`
+   with unsaved form state preserved.
+5. On `/forgot-password` the user submits an email address. The response is the same whether or not
+   the address exists. A valid address receives a single-use expiring link.
+6. Setting a new password invalidates the reset link, ends every other live session for that user,
+   and writes an audit entry.
+
+### Scenarios to test
+
+- Correct credentials sign in; incorrect credentials return the generic message.
+- Repeated failures are throttled, and the throttle is per account and per source.
+- An idle session expires at the configured window, not before, and unsaved form state survives.
+- A reset link works once; a second use is refused; an expired link is refused.
+- A deactivated user is refused sign-in and is refused a reset link.
+- Every sign-in, failed sign-in, sign-out and password change appears on the audit trail.
+
+---
+
+## 2. Staff user management
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/users`
+
+### Scenarios to cover
+
+An administrator creates the Apollo staff who use the platform, assigns each a role and the sites
+they work against, deactivates a leaver without deleting the history they created, and loads an
+initial set of users in bulk rather than one at a time. The list of active users is what the
+requisition owner field reads.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Full name | Text | Yes | |
+| 2 | Email address | Text | Yes | Unique; the sign-in identity |
+| 3 | Mobile number | Text | No | |
+| 4 | Role | Single select | Yes | From the roles defined in item 3 |
+| 5 | Site assignment | Multi select | No | Client sites the user works against |
+| 6 | Status | Active / Inactive | Yes | Defaults to Active on creation |
+| 7 | Bulk import | File upload | — | CSV, with a per-row result and no partial silent failure |
+| 8 | User list | List | — | Uses the shared list engine: filter, sort, page, export |
+
+### Flow
+
+1. An administrator opens `/admin/users` and creates a user, choosing a role and any site assignment.
+2. The new user receives an invitation to set a password; until they do, the account exists and
+   cannot sign in.
+3. Editing a user's role changes what they may reach from their next request, without a redeploy.
+4. Deactivating a user ends their live sessions and removes them from the owner picker; **records
+   they created are untouched and still name them**.
+5. A bulk import validates every row first and reports per-row outcomes; valid rows are created and
+   invalid rows are returned with a reason.
+
+### Scenarios to test
+
+- A created user cannot sign in until they have set a password.
+- A duplicate email address is refused at creation and at import.
+- Deactivation ends live sessions and hides the user from the requisition owner picker.
+- A deactivated user still appears as the author on records they created.
+- A bulk import with some invalid rows creates the valid ones and reports the rest.
+- Create, edit, role change and deactivation each appear on the audit trail.
+
+---
+
+## 3. Roles and permissions
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/roles`
+
+### Scenarios to cover
+
+What each role can see and do, defined as data. Navigation is rendered from the signed-in user's
+permissions rather than hardcoded, a direct URL to a screen the user may not reach returns a
+no-permission page rather than an error, and a permission change takes effect on the next request.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Role name | Text | Yes | Unique |
+| 2 | Description | Text | No | What the role is for, in one line |
+| 3 | Permission matrix | Checkbox grid | Yes | Permission against action, grouped by module |
+| 4 | Users in this role | Read-only list | — | Count and drill-through to `/admin/users` |
+| 5 | System role flag | Read-only | — | Marks roles that cannot be deleted |
+
+### Flow
+
+1. An administrator defines a role and ticks the permissions it carries, module by module.
+2. Assigning the role to a user in item 2 is what grants those permissions.
+3. Every route in the platform passes through one permission guard; a route with no declared
+   permission **fails closed**.
+4. The console shell renders navigation from the permissions the signed-in user actually holds.
+5. Removing a permission from a role takes effect on that role's users at their next request.
+
+### Scenarios to test
+
+- A user without a permission does not see the navigation entry for it.
+- The same user typing the URL directly gets the no-permission page, not a stack trace or a redirect
+  loop.
+- A new route with no declared permission is unreachable rather than public.
+- A permission removed from a role stops working for its users without a sign-out.
+- A role in use cannot be deleted out from under its users.
+
+<Callout title="Open decision — carried, not resolved, in Phase 1">
+Whether a site-resident recruiter is scoped to their own site is unresolved and touches every list in
+the platform. Phase 1 builds the permission model and the list scope predicate so that a scope rule
+can be applied in one place; it does not decide the rule.
+</Callout>
+
+---
+
+## 4. Settings and reference data administration
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/settings`
+
+### Scenarios to cover
+
+One admin area for every configurable list and waiting period in the platform. Candidate categories
+and care settings are held **as data rather than code** — the client's explicit condition for the
+platform being category-aware. Changing a setting does not retrospectively alter records created
+under the old value.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Settings register | Grouped list | — | Every setting in the platform, with its owner module |
+| 2 | Candidate categories | Reference list | Yes | Rows, not enums. Phase 1 populates **nurse** |
+| 3 | Care settings | Reference list | Yes | Rows, not enums. Phase 1 populates **hospital** |
+| 4 | Service lines | Reference list | Yes | Permanent, contractual |
+| 5 | Editable lists | Add / rename / reorder / deactivate | — | Rejection reasons, hold reasons, close reasons, drop-out reasons |
+| 6 | Waiting periods | Number of days | Yes | **Platform default plus per-client override** |
+| 7 | Idle session timeout | Number of minutes | Yes | Read by item 1 |
+| 8 | Version history | Read-only | — | Per setting: value, who changed it, when |
+
+### Flow
+
+1. An administrator opens `/admin/settings` and edits a list or a value.
+2. The change is versioned: the new value applies to records created from now on, and records
+   created earlier keep the value they were created under.
+3. Deactivating a list value hides it from every picker while leaving records that already reference
+   it intact and readable.
+4. A waiting period resolves per client first and falls back to the platform default, **so invoicing
+   never stalls on an unconfigured client**.
+5. Every change writes an audit entry naming the setting, the old value and the new one.
+
+### Scenarios to test
+
+- A category added here appears in the pickers on demand, candidate and matching without a redeploy.
+- A deactivated rejection reason disappears from the picker and still renders on an old decision.
+- A record created before a setting change keeps its original value.
+- A client with no waiting-period override resolves to the platform default.
+- Renaming a list value does not orphan records pointing at it.
+- Every settings change appears on the audit trail with before and after values.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Client user invite, sign-in, client-admin management and portal data scoping | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) |
+| Candidate identity by phone and OTP | [Phase 1 · Candidate app](/docs/release-plan/part-1/candidate-app) — item 1 |

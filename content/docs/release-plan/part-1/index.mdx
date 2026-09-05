@@ -1,0 +1,155 @@
+---
+title: "Phase 1 engineering spec"
+description: "Everything to be built for Phase 1 — permanent placement live end to end for one client — feature by feature, and nothing else."
+icon: Rocket
+---
+
+This document is meant for the engineering team, with complete clarity on what needs to be built for
+**Phase 1**. Every page in this section is focused **only** on Phase 1, and no additional information
+is provided.
+
+**Due: end of Quarter 1.** Permanent placement live end to end for one client: one client, one
+candidate category (nurse), one line of business (permanent), one care setting (hospital), one way in
+(the console) and one way out (a day-90 retention invoice).
+
+## 1. What becomes available in Phase 1
+
+As the SOW states it.
+
+| Capability | What Phase 1 carries |
+|---|---|
+| **Demand management** | The requisition object and its lifecycle — creation, versioning, hold, revise, close — and the fulfilment board with aging. |
+| **Sourcing** | The candidate app asks the relevant basic screening questions, configured, and collects the answers. |
+| **Verification** | Aadhaar, PAN and certificates captured by scan. Configurable identity management and verification attributes, based on candidate category, destination (from the demand) and regulatory requirements (placement location and supply location). |
+| **Matching** | Surfacing from the internal database, ranked. |
+| **Offer** | Offer generation and issue. |
+| **Onboarding** | Onboarding of the placed candidate. |
+| **Day-90 retention invoice** | Raised on the day-90 retention record, configurable. |
+| **Client engagement** | Client feedback as yes, no or with comments; verification of details; configured reminders carrying a warning of auto-accept after 7 days; configurability client by client. |
+
+## 2. The features in this phase
+
+Thirteen feature pages. Each is specified to the same template, and each describes **Phase 1 only**.
+
+| # | Feature | Delivers in Phase 1 | Items |
+|---|---|---|---|
+| 1 | [Access and administration](/docs/release-plan/part-1/access-and-administration) | `F01` `F02` `F03` `F05` | 4 |
+| 2 | [Shared platform services](/docs/release-plan/part-1/shared-platform-services) | `F04` `F06` `F07` `F08` `F14` | 6 |
+| 3 | [Design, environments and deployment](/docs/release-plan/part-1/design-environments-and-deployment) | `F12` `F10` `F13` `D11` | 5 |
+| 4 | [Clients and contracts](/docs/release-plan/part-1/clients-and-contracts) | `D1` `D13` | 5 |
+| 5 | [Demand and requisitions](/docs/release-plan/part-1/demand-and-requisitions) | `D2` | 4 |
+| 6 | [Candidate record and credentials](/docs/release-plan/part-1/candidate-record-and-credentials) | `D4` `D16` `A2` `A9` | 6 |
+| 7 | [Market adapter layer](/docs/release-plan/part-1/market-adapter-layer) | `A12` | 5 |
+| 8 | [Candidate app](/docs/release-plan/part-1/candidate-app) | `D3` | 6 |
+| 9 | [Matching and ranking](/docs/release-plan/part-1/matching-and-ranking) | `D5` `D18` | 4 |
+| 10 | [Selection and offers](/docs/release-plan/part-1/selection-and-offers) | `D6` `D20` | 5 |
+| 11 | [Client link surfaces](/docs/release-plan/part-1/client-link-surfaces) | `A13` | 5 |
+| 12 | [Placement and trial](/docs/release-plan/part-1/placement-and-trial) | `D7` `A6` | 5 |
+| 13 | [Billing and receivables](/docs/release-plan/part-1/billing-and-receivables) | `D8` `A7` | 4 |
+
+**Sixty-four numbered items in total.** Each item is one ClickUp card, one estimate and one set of
+test scenarios.
+
+## 3. The chain Phase 1 has to complete
+
+```
+client and contract recorded, with rate card and waiting periods
+  → requisition created in the console, owner set
+  → candidate signs up in the app, answers the screening questions, uploads documents
+  → Aadhaar, PAN and certificates read from a scan; credential checks run per category
+  → ranked shortlist produced from the internal database
+  → shortlist sent to the client as a tokenised link  →  yes / no / with comments
+  → interview held, structured decision recorded with a mandatory reason
+  → offer generated from a template, issued, accepted
+  → joining confirmed; placement opens and the 90-day clock starts
+  → day 90: the client confirms on a link, or the configured window expires
+  → immutable retention record written  →  permanent placement invoice raised
+```
+
+Both ends of that chain are worth stating plainly:
+
+- **There is no client login in Phase 1.** Every client interaction is a tokenised link sent on a
+  channel the client already uses, opened without a password or an account —
+  [client link surfaces](/docs/release-plan/part-1/client-link-surfaces).
+- **There is no fallback on permanent billing.** No contract terms in force at the trigger moment
+  means the invoice does not run at all —
+  [billing and receivables](/docs/release-plan/part-1/billing-and-receivables).
+
+## 4. Deliverables in Phase 1
+
+`F01` · `F02` · `F03` · `F04` · `F05` · `F06` · `F07` · `F08` · `F10` · `F12` · `F13` · `F14` ·
+`D1` (partial) · `D2` (partial) · `D3` (partial) · `D4` (partial) · `D5` (partial) · `D6` (partial) ·
+`D7` (partial) · `D8` (partial) · `D11` (partial) · `D13` (partial) · `D16` (partial) ·
+`D18` (partial) · `D20` (partial) · `A2` (partial) · `A6` (partial) · `A7` (partial) ·
+`A9` (partial) · `A12` (partial) · `A13` (partial)
+
+**Thirty-one deliverable references. All twelve platform prerequisites are delivered in full here
+and appear in no other part.** Provenance and surface for each are in
+[Scope and deliverables](/docs/release-plan/scope/deliverables); the slice split is in the
+[matrix](/docs/release-plan/scope/matrix).
+
+## 5. Screens Phase 1 puts in front of a user
+
+| Area | Screens |
+|---|---|
+| Sign-in and administration | `/login` · `/forgot-password` · `/admin/users` · `/admin/roles` · `/admin/settings` · `/admin/jobs` · `/showcase` |
+| Clients and contracts | `/clients` · `/clients/:id` · `/contracts` · `/contracts/:id` |
+| Demand | `/requisitions` · `/requisitions/new` · `/requisitions/:id` · `/board` |
+| Candidates | `/candidates` · `/candidates/:id` · `/verification` · `/verification/pendency` |
+| Matching | `/search` · `/requisitions/:id/ranking` · `/requisitions/:id/shortlist` · `/shortlists` |
+| Selection | `/interviews` · `/offers` |
+| Placement and money | `/placements` · `/placements/:id` · `/trial` · `/invoices` · `/invoices/:id` · `/billing/evidence` · `/receivables` |
+| Client links | `/links` · the public pages at `/l` |
+| Candidate app | `/app/signup` · `/app/home` · `/app/profile` · `/app/jobs` · `/app/applications` · `/app/documents` |
+| Registries | `/admin/registries` |
+
+Every screen reference in these pages links straight into the running POC app.
+
+## 6. Deliberately absent from Phase 1
+
+Pointers only. **No Phase 2 or Phase 3 detail appears anywhere in this section** — follow the link.
+
+| Absent from Phase 1 | Specified in |
+|---|---|
+| Demand arriving by email, WhatsApp, spreadsheet or client HRMS — every requisition is keyed in | [Phase 2 · Demand intake](/docs/release-plan/part-2/demand-intake) |
+| Shift staffing: shift lines, shift acceptance, check-in, timesheets, shift invoices | [Phase 2 · Attendance and timesheets](/docs/release-plan/part-2/attendance-and-timesheets) |
+| Doctors and allied health; home healthcare as a care setting | [Phase 2 · Candidate record and credentials](/docs/release-plan/part-2/candidate-record-and-credentials) |
+| A client login of any kind | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) |
+| Notification templates, triggers, preferences and the delivery log | [Phase 2 · Notifications and alerts](/docs/release-plan/part-2/notifications-and-alerts) |
+| Automated candidate contact: cadence, decay, voice, response capture | [Phase 2 · Engagement and availability](/docs/release-plan/part-2/engagement-and-availability) |
+| Third-party verified credential checking | [Phase 2 · Candidate record and credentials](/docs/release-plan/part-2/candidate-record-and-credentials) |
+| Reporting of any kind — events are recorded from day one, nothing reads them yet | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |
+| Payroll, workforce operations, collections, legacy migration | [Phase 3 spec](/docs/release-plan/part-3) |
+
+**`F14` is the exception that proves the rule.** Nothing in Phase 1 reads an event, and the event
+spine is still built and live from the first requisition — because a report in Phase 3 cannot cover a
+period for which no history was written.
+
+## 7. Phase 1 is done when
+
+1. A recruiter signs in, sees only their permitted navigation, and every action they take appears on
+   an audit trail.
+2. A vacancy for one client reaches a ranked shortlist without leaving the console.
+3. A candidate registers in the app, answers the configured screening questions, and has Aadhaar, PAN
+   and a certificate read from a scan.
+4. A client opens a tokenised link with no account and answers yes, no or with comments.
+5. An offer is generated, issued and accepted, and a placement opens with the 90-day clock running.
+6. At day 90 the client confirms — or the configured window expires with the warning already sent —
+   and an immutable retention record produces a permanent placement invoice against the contract
+   terms in force.
+7. The whole of that runs in Apollo's own AWS Mumbai account, with a rehearsed restore evidenced
+   before go-live.
+
+## 8. Phase 1 dependencies that must be in place
+
+From [Assumptions and dependencies](/docs/release-plan/scope/assumptions). Each is a client
+dependency with an external lead time; none is recoverable by adding people.
+
+| Dependency | Gates |
+|---|---|
+| Identity and credential checking — Aadhaar via DigiLocker, PAN | Items 4 and 5 of [candidate record](/docs/release-plan/part-1/candidate-record-and-credentials), item 4 of [market adapter layer](/docs/release-plan/part-1/market-adapter-layer) |
+| Document reading | Item 4 of [candidate record](/docs/release-plan/part-1/candidate-record-and-credentials), item 2 of [candidate app](/docs/release-plan/part-1/candidate-app) |
+| WhatsApp Business Platform, SMS with DLT registration, email — **for sending** | Item 3 of [shared platform services](/docs/release-plan/part-1/shared-platform-services) |
+| AWS Mumbai account and access | Items 3 and 5 of [design, environments and deployment](/docs/release-plan/part-1/design-environments-and-deployment) |
+| Apple and Google developer accounts in Apollo's name | Item 6 of [candidate app](/docs/release-plan/part-1/candidate-app) |
+| Contract terms recorded before the first day-90 trigger | Item 3 of [clients and contracts](/docs/release-plan/part-1/clients-and-contracts) |

@@ -1,0 +1,223 @@
+---
+title: "Collections"
+description: "Phase 3: payments received and reconciled, TDS held separately, ageing from the contract payment terms, chase history and dunning, and credit and debit notes."
+icon: HandCoins
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D25` — **the remainder (full)** |
+| **Engineering reference** | [Collections](/docs/engineering/build/modules#collections) |
+| **Screens** | `/receivables` · `/invoices` · `/invoices/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+The money coming back in. Billing ends at *invoice raised, receivable open*; this feature records
+whether Apollo actually got paid. Its hard parts are not the happy path: a payment covering several
+invoices partly, TDS deducted at source so gross and net both have to be visible, and ageing that
+must run off **the contract's payment terms rather than a flat rule**.
+
+## Release in this phase
+
+1. Payments received and matched.
+2. TDS recorded separately.
+3. Ageing and the overdue report.
+4. Chase history and automatic dunning.
+5. Credit and debit notes.
+
+---
+
+## 1. Payments received and matched
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/receivables`
+
+### Scenarios to cover
+
+A client pays. The payment is recorded and matched across one or more invoices, including
+**part-payments**, and anything that cannot be matched is queued rather than guessed at.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Payment | Record | Yes | Client, amount, date, reference, method |
+| 2 | Allocation | Records | Yes | Payment split across invoices |
+| 3 | Part-payment | Behaviour | Yes | An invoice may be partly settled |
+| 4 | Unmatched queue | Screen | Yes | Payments with no confident allocation |
+| 5 | Manual allocation | Action | Yes | With a reason, audited |
+| 6 | Balance | Derived | Yes | Per invoice and per client |
+
+### Flow
+
+1. A payment is recorded, manually or from a finance import.
+2. Matching proposes allocations; a person confirms or adjusts.
+3. Balances update per invoice; unmatched amounts queue.
+
+### Scenarios to test
+
+- One payment across three invoices allocates to all three, to the decimal.
+- A part-payment leaves the invoice open with the right balance.
+- An unmatched payment queues and never auto-allocates on a guess.
+- Allocation totals never exceed the payment amount.
+
+---
+
+## 2. TDS recorded separately
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/receivables` · `/invoices/:id`
+
+### Scenarios to cover
+
+Tax deducted at source means the amount received is less than the amount invoiced, and the invoice is
+still fully settled. **Gross and net are both visible**, and a settled-with-TDS invoice is not chased.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | TDS amount | Field | Yes | On the payment allocation |
+| 2 | Gross and net | Derived | Yes | Both displayed on the invoice |
+| 3 | Settlement rule | Behaviour | Yes | Net received plus TDS closes the invoice |
+| 4 | TDS report | Output | Yes | By client and period |
+
+### Flow
+
+1. A payment records its TDS component against each allocation.
+2. Settlement compares net plus TDS against the invoice total.
+3. The invoice closes when fully settled.
+
+### Scenarios to test
+
+- An invoice paid net of TDS closes and is not chased.
+- Gross and net both display correctly and reconcile.
+- TDS totals by client and period reconcile with the allocations.
+- A TDS amount cannot exceed the invoice total.
+
+---
+
+## 3. Ageing and the overdue report
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/receivables`
+
+### Scenarios to cover
+
+Overdue is calculated **from the contract payment terms**, not from a flat thirty days, because
+different clients agreed different terms and chasing on the wrong date damages the relationship.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Due date | Derived | Yes | From the contract version's payment terms |
+| 2 | Ageing bands | Configuration | Yes | The agreed bands |
+| 3 | Overdue report | Screen | — | By client, band, invoice type |
+| 4 | Business dates | Behaviour | Yes | `Asia/Kolkata`, with the agreed holiday handling |
+| 5 | Export | Action | — | For the finance pack |
+
+### Flow
+
+1. Each receivable takes its due date from the contract terms in force at invoicing.
+2. Ageing bands are computed daily.
+3. The overdue report drives the chase in item 4.
+
+### Scenarios to test
+
+- Two clients with different terms age differently on the same invoice date.
+- A settled invoice leaves the overdue report immediately.
+- Band boundaries are inclusive exactly as agreed.
+- Export matches the on-screen filter.
+
+---
+
+## 4. Chase history and automatic dunning
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/receivables` · `/messaging/delivery-log`
+
+### Scenarios to cover
+
+Chasing on a schedule, **stopping the moment payment arrives**, and with a history so a client is not
+chased twice by two people for the same invoice.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Dunning schedule | Configuration | Yes | Steps, timing, template, recipient |
+| 2 | Chase record | Record | Yes | Invoice, step, channel, sent at, outcome |
+| 3 | Stop rule | Behaviour | Yes | Payment or credit note halts the schedule immediately |
+| 4 | Manual chase | Action | Yes | Recorded on the same history |
+| 5 | Escalation | Configuration | Yes | To an internal owner after the last step |
+
+### Flow
+
+1. An overdue receivable enters its dunning schedule.
+2. Each step sends through the notification layer and records the chase.
+3. Payment, part-settlement to zero, or a credit note stops the schedule.
+
+### Scenarios to test
+
+- A payment arriving mid-schedule stops the next step, verified at the boundary.
+- A manual chase appears on the same history as automatic ones.
+- No invoice receives two steps on the same day from two sources.
+- Escalation fires once, after the final step.
+
+---
+
+## 5. Credit and debit notes
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices` · `/invoices/:id`
+
+### Scenarios to cover
+
+An invoice was wrong, or a further charge is due. A note is raised, **approved before issue**, and
+exported alongside invoices — the invoice itself is never silently edited.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Credit note | Record | Yes | Against an invoice, with lines and a reason |
+| 2 | Debit note | Record | Yes | Same shape, opposite direction |
+| 3 | Approval | Gate | Yes | **Approved before issue**, through maker-checker |
+| 4 | Numbering | Sequence | Yes | Its own gapless sequence |
+| 5 | Effect on balance | Behaviour | Yes | Adjusts the receivable, not the invoice record |
+| 6 | Export | Action | — | Alongside invoices for the period |
+
+### Flow
+
+1. A note is raised against an invoice with lines and a reason.
+2. It is approved, issued, and the document is generated and stored.
+3. The receivable balance adjusts; the original invoice is unchanged.
+
+### Scenarios to test
+
+- An unapproved note cannot be issued.
+- The original invoice is never edited by a note.
+- The receivable balance reflects the note exactly.
+- Note numbering is gapless and separate from invoice numbering.
+- A credit note taking a balance to zero stops dunning.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Raising the permanent invoice | [Phase 1 · Billing and receivables](/docs/release-plan/part-1/billing-and-receivables) |
+| Raising the shift invoice | [Phase 2 · Billing and receivables](/docs/release-plan/part-2/billing-and-receivables) |

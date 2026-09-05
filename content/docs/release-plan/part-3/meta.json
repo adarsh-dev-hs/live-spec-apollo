@@ -1,0 +1,24 @@
+{
+  "title": "Part 3 — Phase 3 spec",
+  "description": "Full depth, migration and go-live. Every page here describes Phase 3 only.",
+  "icon": "Target",
+  "defaultOpen": false,
+  "pages": [
+    "index",
+    "demand-intake",
+    "demand-prioritisation-and-approval",
+    "candidate-record-and-credentials",
+    "candidate-app",
+    "matching-and-ranking",
+    "selection-and-offers",
+    "placement-and-trial",
+    "timesheet-extensions",
+    "workforce-operations",
+    "payroll",
+    "associate-onboarding",
+    "collections",
+    "analytics-and-reporting",
+    "legacy-migration",
+    "documentation-and-go-live"
+  ]
+}

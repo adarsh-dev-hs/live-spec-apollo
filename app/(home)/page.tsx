@@ -34,19 +34,19 @@ const TABS = [
 
 const PARTS = [
   {
-    href: '/docs/release-plan/parts/part-1',
+    href: '/docs/release-plan/part-1',
     label: 'Part 1 · Quarter 1',
     title: 'Permanent placement, end to end',
     body: 'One client, one category, one line of business — from sign-in to a day-90 retention invoice.',
   },
   {
-    href: '/docs/release-plan/parts/part-2',
+    href: '/docs/release-plan/part-2',
     label: 'Part 2 · Quarter 2',
     title: 'All remaining capability opened',
     body: 'Shift attendance and shift billing, the client portal, multi-channel intake, notifications, verified checking.',
   },
   {
-    href: '/docs/release-plan/parts/part-3',
+    href: '/docs/release-plan/part-3',
     label: 'Part 3 · Quarter 3',
     title: 'Full depth',
     body: 'Payroll, analytics and MIS, workforce operations, collections, the legacy migration, and go-live.',

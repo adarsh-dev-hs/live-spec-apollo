@@ -1,0 +1,297 @@
+---
+title: "Candidate app"
+description: "Phase 1: sign-up by phone, profile from a CV, the configured screening questions, permanent job discovery and application, document upload, and the app shell in the stores."
+icon: Smartphone
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D3` (partial) |
+| **Engineering reference** | [Candidate app](/docs/engineering/build/modules#candidate-app) |
+| **Screens** | `/app/signup` · `/app/login` · `/app/home` · `/app/profile` · `/app/jobs` · `/app/applications` · `/app/documents` · `/app/notifications` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+The React Native app healthcare professionals use. In Phase 1 it is how a nurse enters Apollo's
+supply base at all: sign up with a phone number, build a profile from a CV, answer the basic
+screening questions Apollo configures, find permanent jobs, apply, track what is happening, and
+upload the documents verification needs. **`D3` is a shared build across all three phases** — the
+Phase 1 slice is designed knowing what the later slices will need, and released without them.
+
+## Release in this phase
+
+1. Sign-up by phone and OTP, category selection and consent.
+2. Profile building from a CV, with review and correct.
+3. The configurable basic screening questions.
+4. Permanent job discovery and application.
+5. Document upload for verification.
+6. The app shell, notification settings and the store release pipeline.
+
+---
+
+## 1. Sign-up by phone and OTP, category and consent
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/signup` · `/app/login`
+
+### Scenarios to cover
+
+A nurse installs the app and signs up with a phone number and a one-time password. They choose their
+candidate category and give consent against a versioned notice — including the **separate consent for
+verification checks**, without which no check can ever be dispatched. Someone who reinstalls or
+changes device recovers their account rather than creating a second one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Mobile number | Phone input | Yes | The candidate identity |
+| 2 | OTP | Numeric input | Yes | Rate-limited per number and per device |
+| 3 | Full name | Text | Yes | |
+| 4 | Candidate category | Single select | Yes | Reference data. Phase 1: **nurse** |
+| 5 | Consent — platform notice | Checkbox with notice | Yes | Versioned; evidence retained |
+| 6 | Consent — verification checks | Separate checkbox | Yes | **Gate on every adapter call** |
+| 7 | Account recovery | Flow | Yes | Same number, new device |
+| 8 | Resend OTP | Action | — | With a cooldown |
+
+### Flow
+
+1. The candidate enters a number and receives an OTP through the sending path.
+2. A verified number creates the candidate record and a Base A membership.
+3. Category selection determines the attribute set the profile will render.
+4. Consents are recorded against the notice version, with evidence retrievable later.
+5. A repeat sign-up on an existing number becomes a recovery, not a second record.
+
+### Scenarios to test
+
+- OTP requests are rate-limited per number and per device, and an expired OTP is refused.
+- Sign-up creates exactly one candidate and one Base A membership.
+- Consent evidence records the notice version and the timestamp.
+- Declining the verification consent still permits sign-up, and blocks every later check with a
+  clear reason.
+- Reinstalling and signing in with the same number reaches the same record.
+
+---
+
+## 2. Profile building from a CV
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/profile`
+
+### Scenarios to cover
+
+The candidate uploads a CV and the profile is prefilled from it; they review what was read and
+correct it before it is saved. Someone with no CV fills the profile by hand. The category attribute
+set — specialty and acuity for a nurse — renders from the single definition the console and matching
+also read.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | CV upload | File | No | Through the shared file store |
+| 2 | Parsed fields | Prefilled inputs | — | Name, qualifications, experience, employers |
+| 3 | Review and correct | Interaction | Yes | Nothing is saved without the candidate confirming it |
+| 4 | Manual entry | Alternative path | Yes | Every field is enterable by hand |
+| 5 | Category attributes | Attribute set | Per the set | Specialty, acuity — the shared definition |
+| 6 | Location — current and preferred | Reference | Yes | |
+| 7 | Profile completeness | Indicator | — | What is missing and why it matters |
+
+### Flow
+
+1. The candidate uploads a CV; parsing produces a draft profile.
+2. The candidate reviews field by field and corrects anything wrong; corrections are retained
+   alongside the original.
+3. Saving writes the candidate record fields and the category attributes.
+4. Completeness is shown, naming what is still missing.
+
+### Scenarios to test
+
+- A parsed profile is never saved without the candidate confirming it.
+- A candidate with no CV can complete the profile entirely by hand.
+- Corrections are retained so parse accuracy can be measured.
+- An unreadable CV fails clearly and offers manual entry rather than an empty profile.
+
+---
+
+## 3. The configurable basic screening questions
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/jobs` · `/app/applications` · configuration in `/admin/settings`
+
+### Scenarios to cover
+
+Apollo configures a set of basic screening questions; the app asks them **at application** and
+collects the answers against the candidate. The set is configuration, not a form built into a
+release — and the answers are structured, because Phase 2 reuses the same question set on other
+channels.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Question set | Reference data | Yes | Per candidate category |
+| 2 | Question | Record | Yes | Text, answer type, options, mandatory flag |
+| 3 | Answer capture | App screens | Yes | Rendered from the set, not hardcoded |
+| 4 | Answer store | Structured record | Yes | Against the candidate, with the question version |
+| 5 | Re-ask rule | Configuration | Yes | Whether an answer is reused across applications |
+
+### Flow
+
+1. An administrator configures the question set for the nurse category.
+2. The candidate applying to a job is asked the set.
+3. Answers are stored structured against the candidate with the question version they answered.
+4. A later application reuses or re-asks according to the configured rule.
+
+### Scenarios to test
+
+- Adding a question changes what the app asks without an app release.
+- A mandatory question blocks submission of the application.
+- Answers are readable on the console candidate record.
+- A question edited after answering does not rewrite earlier answers.
+
+---
+
+## 4. Permanent job discovery and application
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/jobs` · `/app/applications` · `/app/home`
+
+### Scenarios to cover
+
+A nurse sees permanent vacancies they are plausibly eligible for, opens one, applies, and can see
+where each application stands — including an interview being proposed and an offer arriving.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Job list | Screen | — | Permanent requisitions open to Base A |
+| 2 | Job detail | Screen | — | Role, site, care setting, experience, qualification, salary range |
+| 3 | Apply | Action | — | Asks the screening questions from item 3 |
+| 4 | Application list | Screen | — | Status per application |
+| 5 | Application status | Derived | — | Applied, shortlisted, interview proposed, offer issued, joined, closed |
+| 6 | Interview confirmation | Action | — | Accept or decline a proposed slot |
+| 7 | Offer acceptance | Action | — | View and accept the issued offer |
+| 8 | Home | Screen | — | What needs the candidate's attention now |
+
+### Flow
+
+1. Open permanent requisitions are surfaced against the candidate's category and location.
+2. Applying creates the application, asks the screening set, and makes the candidate visible to
+   matching for that requisition.
+3. Selection progress is reflected back into the application status.
+4. Interview slots and the offer are actioned in the app.
+
+### Scenarios to test
+
+- A candidate sees only permanent vacancies open to their category.
+- Applying twice to the same requisition is prevented.
+- A shortlisting, an interview proposal and an offer each move the status without a manual step.
+- Declining a slot returns the interview to the recruiter's queue.
+
+---
+
+## 5. Document upload for verification
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/documents`
+
+### Scenarios to cover
+
+The candidate uploads the documents verification needs — Aadhaar, PAN, registration certificate,
+qualification certificates — sees the status of each, and is asked to re-upload when a reviewer
+rejects one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Required document list | Derived | — | From the verification attribute rules for their category |
+| 2 | Capture | Camera or file | Yes | Guidance on a readable scan |
+| 3 | Upload status | Per document | — | Uploaded, in review, accepted, rejected with reason |
+| 4 | Re-upload | Action | — | On a rejection, with the reason shown |
+| 5 | Progress | Indicator | — | Documents outstanding |
+
+### Flow
+
+1. The app lists what is required for this candidate's category and destination.
+2. A capture uploads to the shared file store and opens a verification case.
+3. The reviewer's outcome is reflected back; a rejection shows its reason and asks for a re-upload.
+
+### Scenarios to test
+
+- The required list changes with the candidate's category.
+- A rejected document shows its reason and accepts a re-upload that reopens the case.
+- An oversized or unreadable file fails at capture with guidance, not silently.
+- A candidate cannot see another candidate's documents through any identifier.
+
+---
+
+## 6. The app shell, notification settings and the store release pipeline
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/home` · `/app/notifications`
+
+### Scenarios to cover
+
+Navigation, offline handling, push registration, in-app help, and — the part with an external lead
+time — **publishing to the Apple and Google stores from accounts in Apollo's name**, with a first
+submission reviewed more slowly than the ones after it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Navigation shell | Component | Yes | Built on the native component library |
+| 2 | Offline handling | Behaviour | Yes | A read works offline; a write queues and reports |
+| 3 | Push registration | Capability | Yes | Device token registered against the candidate |
+| 4 | Notification settings | Screen | Yes | What the candidate is willing to receive |
+| 5 | Help content | Screens | Yes | Static, per the content patterns |
+| 6 | Release pipeline | Process | Yes | Build, sign, submit, staged rollout |
+| 7 | Store accounts | Client dependency | Yes | **Apple and Google accounts in Apollo's name** |
+
+### Flow
+
+1. The shell is built on the shared native components and the design tokens.
+2. Push tokens register against the candidate and are used by the sending path.
+3. Builds are produced by the pipeline and submitted to both stores.
+4. A staged rollout is used for each release after the first.
+
+### Scenarios to test
+
+- The app opens and reads cached data with no network, and queued writes flush on reconnect.
+- Push arrives on both platforms against the right candidate.
+- Notification settings are honoured by the sending path.
+- A store build is reproducible from the pipeline rather than from a developer machine.
+
+<Callout type="warn" title="Client dependency with an unrecoverable lead time">
+The developer accounts must be in Apollo's name, and the first submission is reviewed more slowly
+than later ones. From Phase 2 the app is the **only** route by which shift attendance reaches the
+platform, so a store delay is a Phase 2 delay that no amount of engineering removes. Start it in
+Phase 1.
+</Callout>
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Shift discovery, shift acceptance and clash prevention | [Phase 2 · Candidate app](/docs/release-plan/part-2/candidate-app) |
+| Check-in and check-out with an offline queue | [Phase 2 · Candidate app](/docs/release-plan/part-2/candidate-app) |
+| The in-app availability answer | [Phase 2 · Candidate app](/docs/release-plan/part-2/candidate-app) |
+| The app-guided onboarding flow | [Phase 2 · Associate onboarding](/docs/release-plan/part-2/associate-onboarding) |
+| CV parsing at width, and payslips in the app | [Phase 3 · Candidate app](/docs/release-plan/part-3/candidate-app) |

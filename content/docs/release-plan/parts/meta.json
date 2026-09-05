@@ -1,7 +1,0 @@
-{
-  "title": "The three parts",
-  "description": "What becomes available at the end of each quarter.",
-  "icon": "Route",
-  "defaultOpen": true,
-  "pages": ["part-1", "part-2", "part-3"]
-}

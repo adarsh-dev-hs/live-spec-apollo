@@ -1,0 +1,155 @@
+---
+title: "Billing and receivables"
+description: "Phase 2: the shift invoice raised from an approved or deemed-approved timesheet, both invoice paths visible in one place against their evidence, and duplicate prevention on the shift path."
+icon: Receipt
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D25` (**thin slice**) · `D8` (partial) · `A7` (partial) |
+| **Engineering reference** | [Billing and receivables](/docs/engineering/build/modules#billing-and-receivables) |
+| **Screens** | `/invoices` · `/invoices/:id` · `/billing/evidence` · `/receivables` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+The second invoice path. A **contractual engagement** — including a locum doctor paid per session —
+invoices from a client-approved timesheet, where the permanent path invoices from a day-90 retention
+record. **The trigger follows the service line, not the candidate category.** After this phase both
+paths are visible in one place, each against the evidence that allowed it.
+
+## Release in this phase
+
+1. Shift invoice generation from an approved or deemed-approved timesheet.
+2. Both invoice paths in one place, each with its evidence.
+3. Duplicate prevention on the shift path.
+
+<Callout type="warn" title="Thin means thin">
+**No credit notes, no debit notes, no dunning, no payments.** Those are `D25` full —
+[Phase 3 · Collections](/docs/release-plan/part-3/collections).
+</Callout>
+
+---
+
+## 1. Shift invoice generation
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices` · `/invoices/:id`
+
+### Scenarios to cover
+
+An approved or deemed-approved timesheet raises a shift invoice, at the prices already recorded on
+the timesheet lines. Billing invoices from **the approved timesheet, never from raw attendance**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Invoice | Record | Yes | Client, type (shift), period, currency, status |
+| 2 | Invoice lines | Records | Yes | From the timesheet lines, with their rate version ids |
+| 3 | Source timesheet | Reference | Yes | And its approval state |
+| 4 | Contract version | Reference | Yes | Recorded, not resolved at render time |
+| 5 | Invoice document | File | Yes | Generated and stored |
+| 6 | Numbering | Sequence | Yes | The same gapless rule as the permanent path |
+| 7 | Trigger | Event | Yes | Raised on approval or deemed approval |
+
+### Flow
+
+1. Approval or deemed approval raises the billing trigger.
+2. Billing composes the invoice from the timesheet lines as priced.
+3. The invoice document is generated, the invoice is raised and a receivable opens.
+
+### Scenarios to test
+
+- An invoice total equals the sum of its timesheet lines, to the decimal.
+- A timesheet not approved or deemed approved cannot produce an invoice.
+- A reissued timesheet produces a corrected invoice path rather than a silent edit.
+- The recorded contract version resolves later, after newer versions exist.
+
+---
+
+## 2. Both invoice paths in one place
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices` · `/billing/evidence` · `/receivables`
+
+### Scenarios to cover
+
+Finance works one list. A permanent invoice and a shift invoice sit side by side, each linked to the
+evidence that allowed it — a retention record for one, an approved timesheet and its link history for
+the other.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Unified invoice list | Screen | — | Filter by type, client, period, status |
+| 2 | Evidence panel per type | Screen | Yes | Retention record, or timesheet and approval link |
+| 3 | Receivable | Record | Yes | Opened by either path, aged from the contract terms |
+| 4 | Type-specific detail | Rendering | Yes | Each type shows its own line structure |
+| 5 | Export | Action | — | Across both types for a period |
+
+### Flow
+
+1. Both paths write into the same invoice and receivable structures.
+2. The evidence panel renders the evidence appropriate to the invoice's type.
+3. Receivables age from the contract payment terms, whichever path raised them.
+
+### Scenarios to test
+
+- Filtering by type separates the two cleanly, and the unfiltered total is their sum.
+- A shift invoice's evidence reaches the timesheet, its approval link and the attendance behind it.
+- A permanent invoice's evidence is unchanged from Phase 1.
+- Ageing behaves identically for both types.
+
+---
+
+## 3. Duplicate prevention on the shift path
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices`
+
+### Scenarios to cover
+
+One approved timesheet produces **one** invoice, whatever happens to the trigger — a retry, a
+redelivered event, a re-queued dead letter, or an approval arriving twice.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Idempotency key | Field | Yes | Derived from the timesheet and its version |
+| 2 | Uniqueness constraint | Database | Yes | One invoice per timesheet version |
+| 3 | Reissue handling | Behaviour | Yes | A superseding timesheet is a distinct key |
+| 4 | Exception queue | Screen state | — | Triggers that could not invoice, with the reason |
+
+### Flow
+
+1. The trigger carries the timesheet version's idempotency key.
+2. Creation is guarded at the database.
+3. A repeat returns the existing invoice; a reissued timesheet is treated as a new basis.
+
+### Scenarios to test
+
+- The same approval delivered five times produces one invoice.
+- A reissued timesheet does not silently duplicate the original invoice.
+- Concurrent triggers produce one invoice, proven under load.
+- An unpriceable timesheet lands in the exception queue with a reason.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Payments, reconciliation, part-payments and TDS | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |
+| Ageing chases, reminders and dunning | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |
+| Credit and debit notes | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |

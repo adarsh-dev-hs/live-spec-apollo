@@ -1,0 +1,194 @@
+---
+title: "Candidate app"
+description: "Phase 2: shift discovery, shift acceptance with clash prevention, check-in and check-out with an offline queue, and the in-app availability answer."
+icon: Smartphone
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D3` (partial) |
+| **Engineering reference** | [Candidate app](/docs/engineering/build/modules#candidate-app) |
+| **Screens** | `/app/shifts` · `/app/check-in` · `/app/availability` · `/app/home` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+Everything the contractual chain needs from the candidate happens in the app. **Shift attendance is
+captured by app check-in with no alternative route: no app, no attendance, no timesheet, no shift
+invoice.** That makes this the single most load-bearing feature in Phase 2, and it is why the store
+submission belongs in Phase 1 rather than here.
+
+## Release in this phase
+
+1. Shift discovery.
+2. Shift acceptance with clash prevention.
+3. Check-in and check-out with an offline queue.
+4. The in-app availability answer.
+
+---
+
+## 1. Shift discovery
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/shifts` · `/app/home`
+
+### Scenarios to cover
+
+A Base B candidate opens the app and sees shifts they can actually work: their category, their
+location, within travel, and not clashing with something they have already accepted.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Shift list | Screen | — | Date, time band, site or area, role, rate where shown |
+| 2 | Eligibility filter | Behaviour | Yes | Category, credentials, base membership, location |
+| 3 | Shift detail | Screen | — | Full detail including the address rule for home care |
+| 4 | Sort and filter | Controls | — | By date, distance, time band |
+| 5 | Ranking input | Behaviour | Yes | The ranked position from matching informs what is surfaced |
+
+### Flow
+
+1. Open shift demand lines are matched against the candidate's eligibility.
+2. The list surfaces them, ordered by the ranking and the candidate's filters.
+3. Opening a shift shows its full detail before acceptance.
+
+### Scenarios to test
+
+- A candidate without the required credential does not see the shift.
+- A Base A-only candidate sees no shifts.
+- A filled line disappears from discovery immediately.
+- Home care shifts show the area, and the exact address only when acceptance requires it.
+
+---
+
+## 2. Shift acceptance with clash prevention
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/shifts`
+
+### Scenarios to cover
+
+The candidate accepts a shift. Two people cannot take the last slot on one line, and one person
+cannot accept two shifts that overlap — including travel where that is configured.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Accept | Action | — | Against a demand line |
+| 2 | Quantity guard | Constraint | Yes | Enforced at the database, not only in the app |
+| 3 | Clash rule | Behaviour | Yes | Overlapping time bands are refused with an explanation |
+| 4 | Acceptance record | Record | Yes | Candidate, line, accepted at |
+| 5 | Withdrawal | Action | Yes | Before a cut-off, with a reason; the line reopens |
+| 6 | Confirmation | Message | Yes | Through the notification layer |
+
+### Flow
+
+1. Acceptance is attempted against the line and guarded by the remaining quantity.
+2. A clash with an existing acceptance is refused with the clashing shift named.
+3. A successful acceptance reduces the line's remaining quantity and confirms to the candidate.
+4. Withdrawal before the cut-off reopens the slot and notifies the recruiter.
+
+### Scenarios to test
+
+- Two candidates accepting the last slot concurrently produce one acceptance and one clear refusal.
+- An overlapping acceptance is refused and names the clash.
+- Withdrawal reopens the slot and appears on the board.
+- A withdrawn shift cannot later be checked into.
+
+---
+
+## 3. Check-in and check-out with an offline queue
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/check-in`
+
+### Scenarios to cover
+
+The candidate checks in at the start of a shift and out at the end, **with a location stamp**. A
+hospital basement with no signal must not lose an attendance record: the check-in queues locally,
+carries its true timestamp and location, and syncs when the device reconnects.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Check-in | Action | Yes | Against an accepted shift, with a location stamp |
+| 2 | Check-out | Action | Yes | Same, at the end of the shift |
+| 3 | Location capture | Capability | Yes | Coordinates and accuracy recorded |
+| 4 | Geo-fence response | Behaviour | Yes | Allow, warn or block per configuration — the rule lives in [attendance](/docs/release-plan/part-2/attendance-and-timesheets) |
+| 5 | Offline queue | Mechanism | Yes | Retains the **original** timestamp and location |
+| 6 | Sync | Mechanism | Yes | Idempotent, ordered, with conflict reporting |
+| 7 | Permission handling | Behaviour | Yes | Location denied is a recorded exception, not a silent pass |
+
+### Flow
+
+1. The candidate checks in; the app captures time, coordinates and accuracy.
+2. The geo-fence rule for that site or visit address decides allow, warn or block.
+3. Online, the record posts immediately; offline, it queues.
+4. On reconnect the queue syncs idempotently; duplicates are collapsed and conflicts reported.
+
+### Scenarios to test
+
+- A check-in made offline arrives with its original time and location, not the sync time.
+- The same queued check-in synced twice produces one attendance record.
+- A blocked check-in outside the fence is refused with an explanation and recorded as an exception.
+- Denied location permission produces a recorded exception a person can resolve.
+- A check-out without a check-in is refused.
+
+---
+
+## 4. The in-app availability answer
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/availability`
+
+### Scenarios to cover
+
+The candidate says when they are available. The answer uses **the same structured schema as the
+WhatsApp answer**, so an answer arriving on either channel reconciles to one record and resets the
+same availability confidence.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Availability question set | Configuration | Yes | The same set the cadence engine asks |
+| 2 | Answer capture | Screen | Yes | Rendered from the set |
+| 3 | Shared response schema | Schema | Yes | Identical across app, WhatsApp and voice |
+| 4 | Confidence reset | Behaviour | Yes | A confirmed answer resets the decay |
+| 5 | Last-confirmed display | Indicator | — | The candidate sees when they last answered |
+
+### Flow
+
+1. The candidate opens availability and answers the configured questions.
+2. The answer is written on the shared schema and reconciled by
+   [engagement and availability](/docs/release-plan/part-2/engagement-and-availability).
+3. Confidence resets and ranking sees a fresh candidate.
+
+### Scenarios to test
+
+- An app answer and a WhatsApp answer produce the same record shape.
+- Answers on two channels within the window reconcile to one, without double-counting.
+- A confirmed answer resets confidence immediately.
+- Changing the question set changes what the app asks with no app release.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| CV parsing at width | [Phase 3 · Candidate app](/docs/release-plan/part-3/candidate-app) |
+| Payslips in the app | [Phase 3 · Candidate app](/docs/release-plan/part-3/candidate-app) |
+| The app-guided statutory onboarding flow | [Phase 2 · Associate onboarding](/docs/release-plan/part-2/associate-onboarding) |

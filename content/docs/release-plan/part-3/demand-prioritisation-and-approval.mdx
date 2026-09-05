@@ -1,0 +1,155 @@
+---
+title: "Demand prioritisation and approval"
+description: "Phase 3: priority scoring with the reasoning shown, suggested recruiter allocation with load balancing, and the approval step before a vacancy goes live."
+icon: ListTodo
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D14` — **the remainder (full)** |
+| **Engineering reference** | [Demand prioritisation and approval](/docs/engineering/build/modules#demand-prioritisation-and-approval) |
+| **Screens** | `/board` · `/requisitions/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+Earlier phases recorded which recruiter was put on which vacancy, as decided on the morning call.
+This feature makes the system do the deciding: score which vacancies matter most, suggest which
+recruiter should take each one, and add an approval step before a vacancy goes live. **The system
+suggests; a person still decides** — nothing here writes an allocation directly.
+
+It is in Phase 3 rather than next to the requisition because priority scoring and recruiter
+suggestion read performance data that [analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting)
+produces. Built earlier, it would be a suggestion engine reading data that does not exist.
+
+## Release in this phase
+
+1. Priority scoring and the priority board.
+2. Suggested recruiter allocation with load balancing.
+3. The requisition approval workflow.
+
+---
+
+## 1. Priority scoring and the priority board
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/board` · `/requisitions/:id`
+
+### Scenarios to cover
+
+Each open requisition is scored on urgency, value and age, **with the reasoning shown** — a number
+nobody can explain is a number nobody will use. A person can override a priority, with a reason.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Priority score | Derived | Yes | Per requisition, recomputed on a schedule |
+| 2 | Scoring inputs | Definition | Yes | Urgency, contract value, age, fill difficulty |
+| 3 | Reasoning | Per score | Yes | Which inputs contributed and how much |
+| 4 | Priority board | Screen | — | Ordered by score, with the reasoning visible |
+| 5 | Manual override | Action | Yes | With a mandatory reason, append-only |
+| 6 | Weighting configuration | Settings | Yes | Changeable without a deploy |
+
+### Flow
+
+1. Scoring runs on a schedule over open requisitions.
+2. The board orders by score and shows the reasoning per row.
+3. An override is appended with its reason; the computed score remains readable.
+
+### Scenarios to test
+
+- Every score can be explained from its inputs.
+- Changing a weight changes scores at the next run, not retrospectively on stored ones.
+- An override without a reason is refused, and never overwrites the computed score.
+- The board ordering matches the scores exactly.
+
+---
+
+## 2. Suggested recruiter allocation with load balancing
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/board` · `/requisitions/:id`
+
+### Scenarios to cover
+
+The system suggests which recruiter should take a vacancy, showing their **current load against the
+operating norm** — named recruiters carry 15–16 vacancies each — and a person accepts or ignores the
+suggestion. The accepted result is written through the append-only allocation record built earlier.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Recruiter capacity | Derived | Yes | Open requisitions per recruiter |
+| 2 | Operating norm | Setting | Yes | The target load per recruiter |
+| 3 | Suggestion | Derived | Yes | Recruiter, with the reasoning |
+| 4 | Performance input | Feature | Yes | From the reporting marts |
+| 5 | Accept suggestion | Action | Yes | Writes an allocation record |
+| 6 | Ignore | Behaviour | Yes | Recorded, so suggestion quality is measurable |
+
+### Flow
+
+1. Capacity and performance are read from the marts.
+2. A suggestion is produced with its reasoning and shown next to the requisition.
+3. A person accepts — which writes the allocation — or allocates someone else.
+
+### Scenarios to test
+
+- **No allocation is ever written without a person acting.**
+- Capacity counts match the board.
+- Accepting a suggestion produces the same allocation record shape as a manual allocation.
+- Ignored suggestions are recorded, so quality can be measured later.
+
+---
+
+## 3. The requisition approval workflow
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id` · `/board`
+
+### Scenarios to cover
+
+A new state between created and open: **`awaiting_approval`**. A requisition above a configured
+threshold waits for an approver before it goes live, and the approval or rejection is recorded.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | `awaiting_approval` state | State machine | Yes | Added to the existing lifecycle |
+| 2 | Approval rule | Configuration | Yes | Which requisitions require approval, by value or client |
+| 3 | Approver | Role and assignment | Yes | Cannot be the raiser |
+| 4 | Decision | Approve / reject with reason | Yes | Append-only |
+| 5 | Notification | Trigger | Yes | Approver notified; raiser notified of the outcome |
+| 6 | Aging behaviour | Rule | Yes | Time awaiting approval is measured separately |
+
+### Flow
+
+1. A requisition meeting the rule enters `awaiting_approval` instead of `open`.
+2. The approver is notified and decides.
+3. Approval opens the requisition; rejection returns it with a reason.
+
+### Scenarios to test
+
+- A requisition below the threshold opens directly, unchanged from earlier behaviour.
+- The raiser cannot approve their own requisition.
+- Time in approval is visible separately from time open.
+- Rejection returns the requisition with its reason and does not close it silently.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| The owner field and the morning-call allocation record | [Phase 2 · Requisitions and allocation](/docs/release-plan/part-2/requisitions-and-allocation) |
+| The requisition lifecycle and fulfilment board | [Phase 1 · Demand and requisitions](/docs/release-plan/part-1/demand-and-requisitions) |

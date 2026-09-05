@@ -1,0 +1,264 @@
+---
+title: "Notifications and alerts"
+description: "Phase 2: templates with provider approval state, trigger configuration, delivery status and retry, preferences and opt-out honoured at selection, the per-user log, and the reminder scheduling layer."
+icon: Bell
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D10` · `D29` — **both in full; they appear in no other part** |
+| **Engineering reference** | [Outbound messaging](/docs/engineering/build/platform-services#outbound-messaging) · [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| **Screens** | `/admin/templates` · `/messaging/delivery-log` · `/app/notifications` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+Phase 1 built the pipe: a queue, providers, retries and receipts. Phase 2 builds the layer on top —
+the part Apollo operates rather than engineering. Content becomes a template someone edits, sending
+becomes a trigger someone configures, and **a candidate's opt-out becomes something the platform
+honours at selection rather than at send**, which is the difference between not sending a message and
+paying for one that should never have been chosen.
+
+## Release in this phase
+
+1. Template management with provider approval state.
+2. Trigger configuration.
+3. Delivery status, retry and the delivery log.
+4. Contact preferences and opt-out.
+5. The per-user notification log.
+6. The reminder and nudge scheduling layer (`D29`).
+
+---
+
+## 1. Template management with provider approval state
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/templates`
+
+### Scenarios to cover
+
+Message content becomes editable configuration, per channel and purpose, with variables resolved
+from the candidate, requisition, placement or invoice record. A WhatsApp template also carries its
+**provider approval state — an unapproved template cannot be sent**, which is a rule the platform
+enforces rather than a convention someone remembers.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Template | Record | Yes | Name, channel, purpose, language, body |
+| 2 | Variables | Definition | Yes | Resolved from a named record type, validated at save |
+| 3 | Provider approval state | Field | Yes | Draft, submitted, approved, rejected |
+| 4 | Send guard | Behaviour | Yes | **An unapproved template cannot be sent** |
+| 5 | Versioning | Behaviour | Yes | An edit creates a version; sent messages keep theirs |
+| 6 | Preview | Action | — | Rendered against a sample record |
+
+### Flow
+
+1. An administrator writes a template and defines its variables.
+2. A WhatsApp template is submitted to the provider; its state tracks the outcome.
+3. A trigger referencing an unapproved template refuses to send and reports why.
+4. Editing produces a version; messages already sent still resolve their original.
+
+### Scenarios to test
+
+- A variable that does not exist on the record type is refused at save.
+- Sending on an unapproved WhatsApp template is blocked with a clear reason.
+- A rejected template shows the provider's reason.
+- An old message renders with the template version it was sent on.
+
+---
+
+## 2. Trigger configuration
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/templates`
+
+### Scenarios to cover
+
+A trigger binds an event to a message: which event, which template, which channel, which recipient,
+and what to fall back to when the first channel fails.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Trigger | Record | Yes | Event, audience, template, channel |
+| 2 | Recipient resolution | Rule | Yes | Candidate, client contact, or internal user |
+| 3 | Fallback order | Rule | Yes | Second channel when the first fails |
+| 4 | Enable / disable | Toggle | Yes | Without a deploy |
+| 5 | Audience scoping | Rule | Yes | Candidate, client and internal user are separate audiences |
+
+### Flow
+
+1. An administrator binds an event to a template, channel and audience.
+2. The event fires, the recipient resolves, the message queues on the Phase 1 sending path.
+3. A channel failure falls back per the configured order.
+
+### Scenarios to test
+
+- Disabling a trigger stops the message without stopping the event.
+- Recipient resolution never sends a client message to a candidate, and the test proves it.
+- Fallback fires only after the primary channel has genuinely failed.
+- A trigger with no approved template is flagged before it fires, not after.
+
+---
+
+## 3. Delivery status, retry and the delivery log
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/messaging/delivery-log`
+
+### Scenarios to cover
+
+Every message the platform sends, with what happened to it: queued, sent, delivered, read where the
+channel reports it, failed, suppressed — with cost attribution, and the contact history per
+candidate.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Delivery log | Screen | — | Shared list engine; filter by channel, status, period |
+| 2 | Status timeline | Per message | Yes | Every state with its timestamp |
+| 3 | Retry visibility | Per message | Yes | Attempts, reasons, final outcome |
+| 4 | Cost attribution | Field | Yes | Per message, per channel |
+| 5 | Per-candidate contact history | View | Yes | Everything sent to one person |
+| 6 | Suppression | Behaviour | Yes | Hard bounce or block stops further sends |
+
+### Flow
+
+1. Each message writes its states as they occur, including asynchronous receipts.
+2. The log is filterable and exportable; costs total per period and channel.
+3. A candidate's contact history is readable from their record.
+
+### Scenarios to test
+
+- A message's timeline reconciles with the provider's receipts.
+- Cost per channel totals correctly for a period.
+- A suppressed recipient receives nothing further and the reason is visible.
+- Export matches the on-screen filter.
+
+---
+
+## 4. Contact preferences and opt-out
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/notifications` · `/candidates/:id`
+
+### Scenarios to cover
+
+A candidate says what they are willing to receive and on which channel, and can opt out. **Opt-outs
+and send windows are honoured at selection, not at send** — the cadence engine does not pick someone
+it cannot contact, so the platform is not paying to discard messages.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Preferences | Per candidate | Yes | Channel and message-purpose level |
+| 2 | Opt-out | Action | Yes | From the app and from a message |
+| 3 | Statutory exception | Rule | Yes | Statutory messages distinguished from marketing-style contact |
+| 4 | Selection-time enforcement | Behaviour | Yes | **Applied when choosing recipients** |
+| 5 | Send-time enforcement | Behaviour | Yes | A second guard, in case selection is bypassed |
+
+### Flow
+
+1. The candidate sets preferences in the app or opts out from a message.
+2. Selection excludes opted-out candidates before a message is composed.
+3. The send path checks again as a backstop.
+
+### Scenarios to test
+
+- An opted-out candidate is not selected by the cadence engine at all.
+- A statutory message still reaches an opted-out candidate, per the configured rule.
+- Opting out from a message takes effect immediately.
+- Both guards are exercised by test — selection and send.
+
+---
+
+## 5. The per-user notification log
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/notifications` · `/candidates/:id`
+
+### Scenarios to cover
+
+A candidate, a client contact or an internal user can see what they were sent. A recruiter answering
+*"nobody told me"* opens the log rather than guessing.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | In-app log | Screen | Yes | For candidates |
+| 2 | Console view | Panel | Yes | On the candidate record and the client contact |
+| 3 | Message detail | View | Yes | Rendered content and delivery state |
+| 4 | Read state | Field | — | Where the channel supports it |
+
+### Flow
+
+1. Every message written to the delivery log is attributed to a recipient.
+2. The recipient's log renders their messages in order with state.
+
+### Scenarios to test
+
+- A candidate's log shows every message sent to them and none sent to anyone else.
+- Content renders as it was sent, not as the current template version would render.
+- The console view and the in-app view agree.
+
+---
+
+## 6. The reminder and nudge scheduling layer — `D29`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/cadence` · `/admin/jobs`
+
+### Scenarios to cover
+
+The scheduling layer the cadence engine executes through, and the layer every reminder in the
+platform uses: trial check-in reminders, timesheet approval reminders, offer expiry reminders. One
+scheduler, one set of send windows, one place a stuck reminder shows up.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Schedule definition | Configuration | Yes | What, to whom, when, how often |
+| 2 | Send windows | Configuration | Yes | Quiet hours honoured per audience |
+| 3 | Frequency caps | Configuration | Yes | Per candidate, per period |
+| 4 | Reminder series | Record | Yes | Stops when the thing it reminds about completes |
+| 5 | Execution | Job runtime | Yes | Idempotent, observable, dead-lettered on failure |
+
+### Flow
+
+1. A feature registers a reminder series against a subject.
+2. The scheduler fires within the send window, respecting frequency caps.
+3. Completion of the subject cancels the remaining series.
+
+### Scenarios to test
+
+- A reminder does not fire outside the send window.
+- Completing the subject stops further reminders immediately.
+- The frequency cap is honoured across features, not per feature.
+- A failed reminder dead-letters visibly and can be re-queued.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Payslip delivery over WhatsApp | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |
+| Dunning schedules and payment chasing | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |

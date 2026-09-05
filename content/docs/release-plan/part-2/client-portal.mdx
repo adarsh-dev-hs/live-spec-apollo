@@ -1,0 +1,260 @@
+---
+title: "Client portal"
+description: "Phase 2: client users with accounts, hard row scoping, raising and tracking requisitions, reviewing shortlists, approving timesheets and downloading invoices — logged in."
+icon: LayoutDashboard
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D12` — **in full; it appears in no other part** |
+| **Engineering reference** | [Client portal](/docs/engineering/build/modules#client-portal) · [Identity and access](/docs/engineering/build/platform-services#identity-and-access) |
+| **Screens** | `/portal` · `/portal/requisitions` · `/portal/requisitions/new` · `/portal/shortlists` · `/portal/timesheets` · `/portal/invoices` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+Until now clients have had one-off links and no password. This gives them accounts, so they can raise
+vacancies themselves, see how their vacancies are progressing, review shortlists, approve timesheets
+and download invoices. **This feature adds screens and a tenancy boundary, not new business logic** —
+everything it shows already exists. The one genuinely new thing is **hard row scoping**: a portal user
+reaches their own client and sites and nothing else, and a new endpoint fails closed.
+
+## Release in this phase
+
+1. Client user identity and the tenancy boundary.
+2. Raising a requisition from the portal.
+3. My requisitions.
+4. Shortlist review, logged in.
+5. Timesheet approval, logged in.
+6. Invoices, rate card and contract, read-only.
+
+---
+
+## 1. Client user identity and the tenancy boundary
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal`
+
+### Scenarios to cover
+
+A third identity realm, separate from Apollo staff and from candidates: client users, invited by
+Apollo or by their own client admin, each scoped to one client and a set of its sites. **Scoping is
+enforced in the query layer, not in the screen** — a new endpoint that forgets to scope returns
+nothing rather than everything.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Client user | Record | Yes | Name, email, client, sites, role |
+| 2 | Invitation | Flow | Yes | Invite, accept, set password |
+| 3 | Client admin role | Role | Yes | Can invite and deactivate users within their own client |
+| 4 | Sign-in and session | Flow | Yes | Separate realm from staff sign-in |
+| 5 | Scope predicate | Query guard | Yes | Applied before any filter, in the shared list helper |
+| 6 | Fail-closed default | Behaviour | Yes | An unscoped endpoint returns nothing |
+| 7 | Portal navigation | Component | Yes | Rendered from the client user's permissions |
+
+### Flow
+
+1. Apollo invites the first client admin; that admin invites their colleagues.
+2. Sign-in resolves a client-user principal carrying its client and sites.
+3. Every portal query passes the scope predicate first.
+
+### Scenarios to test
+
+- A client user cannot reach another client's requisition by identifier, in the UI or the API.
+- A user scoped to two sites sees exactly those two.
+- A new portal endpoint with no scope declaration returns nothing, proven by test.
+- A deactivated client user loses access immediately and their history remains.
+
+---
+
+## 2. Raising a requisition from the portal
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal/requisitions/new`
+
+### Scenarios to cover
+
+A client raises a vacancy themselves. It produces **the same requisition record as one arriving by
+email**, marked as sourced from the portal, and it goes through the same completeness scoring.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Requisition form | Screen | Yes | Client-appropriate subset of the console fields |
+| 2 | Site and department | Reference | Yes | Scoped to the user's sites |
+| 3 | Category and role | Reference | Yes | From reference data |
+| 4 | Submission | Action | Yes | Creates an inbound record on the portal channel |
+| 5 | Source marking | Field | Yes | Channel = portal, with the submitting user |
+| 6 | Confirmation | Screen | — | What happens next, and where to track it |
+
+### Flow
+
+1. The client user completes the form for one of their sites.
+2. Submission enters the intake pipeline as a portal-channel record.
+3. Completeness scoring runs; a complete requisition opens and appears on the Apollo board.
+
+### Scenarios to test
+
+- A portal-raised requisition is identical in shape to an email-raised one.
+- A site outside the user's scope cannot be selected or injected.
+- An incomplete submission is chased through the same mechanism as any channel.
+- The submitting user is recorded and visible to Apollo.
+
+---
+
+## 3. My requisitions
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal/requisitions`
+
+### Scenarios to cover
+
+The client sees their own vacancies with **client-appropriate status** — not Apollo's internal state
+machine — and how far each is towards being filled.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Requisition list | Screen | — | Scoped, filterable, exportable |
+| 2 | Client-facing status | Mapping | Yes | Internal states mapped to client language |
+| 3 | Fill progress | Derived | — | Positions filled against requested |
+| 4 | Requisition detail | Screen | — | What was asked for, and where it stands |
+| 5 | Withheld fields | Rule | Yes | Internal notes and owner are never shown |
+
+### Flow
+
+1. The list renders scoped requisitions with mapped statuses.
+2. Detail shows the requirement and progress, and nothing internal.
+
+### Scenarios to test
+
+- Internal states never leak into the client view.
+- Internal notes, owner and allocation are absent from every portal response.
+- Progress matches the Apollo-side count.
+
+---
+
+## 4. Shortlist review, logged in
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal/shortlists`
+
+### Scenarios to cover
+
+The logged-in version of the shortlist link: **the same decisions and the same taxonomy**, so an
+answer given in the portal and one given on a link are the same record with a different route in.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Shortlist list | Screen | — | Awaiting response, answered |
+| 2 | Candidate presentation | Rendering | Yes | The same configured visibility as the link page |
+| 3 | Response | Yes / No / With comments | Yes | The same schema as the link |
+| 4 | Attribution | Field | Yes | Which client user answered |
+| 5 | Link coexistence | Behaviour | Yes | An open link and the portal cannot both answer twice |
+
+### Flow
+
+1. A submitted shortlist appears in the portal for scoped users.
+2. A response writes back exactly as a link response would.
+3. Answering in one route closes the other.
+
+### Scenarios to test
+
+- Portal and link responses produce the same record shape.
+- Answering in the portal marks the outstanding link as answered.
+- Withheld candidate fields stay withheld in the portal.
+- The answering client user is attributed.
+
+---
+
+## 5. Timesheet approval, logged in
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal/timesheets`
+
+### Scenarios to cover
+
+The logged-in version of the timesheet approval link: **the same state machine and the same window
+rule**, including deemed approval on expiry.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Timesheet list | Screen | — | Awaiting approval, approved, queried |
+| 2 | Timesheet detail | Screen | — | Lines, hours, rates, total |
+| 3 | Approve / query | Actions | Yes | The same outcomes as the link |
+| 4 | Countdown | Display | Yes | The client sees their own deadline |
+| 5 | Deemed rule | Behaviour | Yes | Unchanged by the route |
+
+### Flow
+
+1. A timesheet sent for approval appears in the portal as well as on the link.
+2. Approval or query in either route produces the same state change.
+3. Expiry deems approval regardless of route.
+
+### Scenarios to test
+
+- Approving in the portal produces the same evidence as approving on the link.
+- The countdown shown matches the snapshotted window.
+- A query from the portal returns the timesheet to Apollo.
+- Expiry deems once, whichever routes were open.
+
+---
+
+## 6. Invoices, rate card and contract, read-only
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/portal/invoices`
+
+### Scenarios to cover
+
+The client downloads their own invoices and reads their rate card and contract. Read-only, scoped,
+and nothing about another client.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Invoice list | Screen | — | Their own, both types |
+| 2 | Invoice download | Action | — | Expiring link from the shared file store |
+| 3 | Rate card view | Screen | — | Current version, read-only |
+| 4 | Contract view | Screen | — | Current version and dates, read-only |
+
+### Flow
+
+1. Invoices raised for the client appear in the portal.
+2. Download issues an expiring link.
+3. Rate card and contract render read-only from the current version.
+
+### Scenarios to test
+
+- Only the signed-in client's invoices are listed or downloadable.
+- A download link expires and a stale link is refused.
+- Rate card and contract are read-only through the UI and the API.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Payment status, ageing and dunning visible to the client | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |
+| Client-facing analytics | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

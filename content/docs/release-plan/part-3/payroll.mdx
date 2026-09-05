@@ -1,0 +1,236 @@
+---
+title: "Payroll"
+description: "Phase 3: the pay run through a third-party engine, payroll settings and field mapping, PF and ESIC reports and challans, and payslips in the app and over WhatsApp."
+icon: Wallet
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D24` — **in full; it appears in no other part** |
+| **Engineering reference** | [Payroll](/docs/engineering/build/modules#payroll) |
+| **Screens** | `/workforce/payroll` · `/app/payslips` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+Paying the shift workers. This connects the platform to a **third-party payroll engine — the platform
+does not build a payroll calculator**. It assembles the inputs the engine needs, configures the pay
+cycle, takes the results back, produces the PF and ESIC reports and challans, and delivers payslips
+in the app and over WhatsApp. Until it exists payroll is done by hand, which puts a hard ceiling on
+how many shift workers Apollo can take on.
+
+<Callout type="warn" title="Live in Quarter 3, started in Quarter 1">
+Engine selection, contract and field mapping are **client dependencies**, and this feature sits
+behind associate onboarding, attendance and workforce operations. Starting the work in Quarter 3
+would put it behind three predecessors with no room left. The engine is chosen and the mapping agreed
+in Quarter 1; the build lands here.
+</Callout>
+
+## Release in this phase
+
+1. The engine integration boundary.
+2. Payroll settings and field mapping.
+3. The pay run.
+4. PF and ESIC reports and challans.
+5. Payslips in the app and over WhatsApp.
+
+---
+
+## 1. The engine integration boundary
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/payroll`
+
+### Scenarios to cover
+
+One boundary: assemble inputs, send, take back outputs, report exceptions. **No pay is calculated on
+this side of it** — if a number is wrong, the answer is a mapping fix or an engine fix, never a
+platform calculation.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Input assembly | Component | Yes | From timesheets, leave, advances, holds, associate profile |
+| 2 | Transfer | Integration | Yes | Per the engine's interface, with credentials in the secret store |
+| 3 | Output ingestion | Component | Yes | Results taken back and stored against the cycle |
+| 4 | Exception reporting | Screen | Yes | Per-associate failures, with the engine's reason |
+| 5 | Idempotency | Behaviour | Yes | A resent cycle does not double-pay |
+| 6 | Reconciliation | Report | Yes | Inputs sent against results received |
+
+### Flow
+
+1. Inputs are assembled for the cycle from the platform's own records.
+2. They are sent to the engine; results are ingested and stored.
+3. Exceptions are listed per associate for correction and resend.
+
+### Scenarios to test
+
+- No pay value is computed on the platform side, verified by review and by test.
+- A resend of the same cycle does not produce a second payment instruction.
+- An associate rejected by the engine is visible with the engine's reason.
+- Reconciliation shows every input accounted for by a result or an exception.
+
+---
+
+## 2. Payroll settings and field mapping
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/payroll` · `/admin/settings`
+
+### Scenarios to cover
+
+The cycle configuration and the mapping between platform fields and engine fields, held as
+configuration so a change to the engine's expectations is a settings change rather than a release.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Cycle frequency | Setting | Yes | Monthly or as agreed |
+| 2 | Cut-off dates | Setting | Yes | Input lock date per cycle |
+| 3 | Field mapping | Configuration | Yes | Platform field to engine field |
+| 4 | Deduction rates | Configuration | Yes | Where the engine expects them as inputs |
+| 5 | Validation | Behaviour | Yes | A mapping gap is caught before a run, not during |
+| 6 | Versioning | Behaviour | Yes | A mapping change does not alter closed cycles |
+
+### Flow
+
+1. Mapping and cycle settings are configured and validated.
+2. Opening a cycle validates the mapping before inputs are assembled.
+3. Changes version forward and leave closed cycles untouched.
+
+### Scenarios to test
+
+- An incomplete mapping blocks the run with a specific message.
+- A mapping change does not alter a closed cycle's stored inputs or outputs.
+- Cut-off dates are enforced: late inputs go to the next cycle.
+- Deduction rates are configuration, not code.
+
+---
+
+## 3. The pay run
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/payroll`
+
+### Scenarios to cover
+
+The operational sequence: **open a cycle, lock inputs, send, receive results, issue payslips, close**
+— with the state visible at every step and no way to skip one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Cycle | Record | Yes | Period, state, opened by, closed by |
+| 2 | State machine | States | Yes | Open → inputs locked → sent → results received → payslips issued → closed |
+| 3 | Input lock | Action | Yes | Snapshots inputs; later changes go to the next cycle |
+| 4 | Onboarding gate | Behaviour | Yes | **Incomplete paperwork blocks an associate from the run** |
+| 5 | Hold handling | Behaviour | Yes | Held associates are excluded with a reason |
+| 6 | Run summary | Screen | — | Counts, totals, exclusions and exceptions |
+| 7 | Closure | Action | Yes | Terminal; a closed cycle is immutable |
+
+### Flow
+
+1. A cycle is opened for the period and inputs are assembled.
+2. Locking snapshots the inputs; the onboarding gate and holds apply exclusions.
+3. The cycle is sent, results are received, payslips are issued and the cycle is closed.
+
+### Scenarios to test
+
+- A step cannot be skipped, and a closed cycle cannot be reopened or edited.
+- An associate with incomplete paperwork is excluded with a clear reason.
+- A held associate is excluded and appears on the summary.
+- Post-lock changes appear in the next cycle, not this one.
+- Totals on the summary reconcile with the engine's results.
+
+---
+
+## 4. PF and ESIC reports and challans
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/payroll`
+
+### Scenarios to cover
+
+The statutory outputs a period requires, produced from the engine's results and downloadable in the
+required formats. **Filing is not in scope** — reports and challans are produced; submitting them is
+Apollo's process.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | PF report | Output | Yes | For a period, in the required format |
+| 2 | ESIC report | Output | Yes | For a period, in the required format |
+| 3 | Challans | Output | Yes | As produced from the results |
+| 4 | Regeneration | Behaviour | Yes | Reproducible for a closed period |
+| 5 | Storage | Files | Yes | Retained through the shared file store |
+
+### Flow
+
+1. A closed cycle produces its statutory outputs.
+2. Outputs are stored and downloadable.
+3. Regeneration for a closed period reproduces the same file.
+
+### Scenarios to test
+
+- Reports reconcile with the cycle's results.
+- Regeneration for a closed period is reproducible.
+- Formats match the current statutory requirement, verified with Apollo.
+- **No filing action is attempted by the platform.**
+
+---
+
+## 5. Payslips in the app and over WhatsApp
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/payslips` · `/workforce/payroll`
+
+### Scenarios to cover
+
+Every paid associate receives their payslip, in the app and over WhatsApp, and only their own.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Payslip generation | Component | Yes | From the engine's results, one per associate per cycle |
+| 2 | Storage | Files | Yes | Shared file store, retention per policy |
+| 3 | In-app delivery | Behaviour | Yes | Listed at `/app/payslips` |
+| 4 | WhatsApp delivery | Trigger | Yes | Through the notification layer, on an approved template |
+| 5 | Access control | Behaviour | Yes | Own payslips only, enforced server-side |
+| 6 | Reissue | Action | Yes | Supersedes rather than duplicates |
+
+### Flow
+
+1. Closing a cycle generates and issues payslips.
+2. They appear in the app and are delivered over WhatsApp.
+3. A corrected payslip supersedes the earlier one.
+
+### Scenarios to test
+
+- One payslip per associate per cycle, and never another associate's.
+- WhatsApp delivery uses an approved template and records its delivery state.
+- A reissued payslip supersedes and both versions remain traceable.
+- Payslip content matches the engine's result for that associate.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not built at all | |
+|---|---|
+| A payroll calculator inside the platform | The engine calculates; the platform assembles and stores |
+| Statutory filing | Reports and challans are produced; filing is outside the scope |

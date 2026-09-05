@@ -1,12 +1,12 @@
 ---
 title: "Overview"
-description: "What is being delivered, in three parts over nine months, exactly as set out in the Statement of Work signed on 3 September 2026."
+description: "What is being delivered, in three parts over nine months, with each part specified separately as its own engineering spec."
 icon: ScrollText
 ---
 
 The Statement of Work signed on **3 September 2026** is the single source of truth for scope.
-This section reproduces it: the whole deliverable list, what falls in each of the three parts,
-and the assumptions and client dependencies the dates rest on.
+This section reproduces it and then specifies it: the whole deliverable list, what falls in each of
+the three parts, and — for each part — a **phase engineering spec** broken down feature by feature.
 
 **Where this section and the engineering documentation disagree, this section wins.**
 
@@ -29,29 +29,62 @@ every approach; Approach 3 fixes the sequence and the number of parts.
 
 ## 2. The three parts
 
-| Part | Due | Theme | What it proves |
+| Part | Due | Theme | Specified in |
 |---|---|---|---|
-| **[Part 1](/docs/release-plan/parts/part-1)** | End of Quarter 1 | Permanent placement, end to end, for one client | A vacancy arrives, a nurse is found, verified, ranked, offered, placed — and at day 90 the client confirms and an invoice is raised |
-| **[Part 2](/docs/release-plan/parts/part-2)** | End of Quarter 2 | All remaining capability opened | Contractual shift staffing bills from an approved timesheet; clients log in; demand arrives by email, WhatsApp and portal; the platform contacts candidates on its own schedule |
-| **[Part 3](/docs/release-plan/parts/part-3)** | End of Quarter 3 | Full depth | Payroll, analytics and MIS, workforce operations, collections, the legacy migration, and go-live |
+| **Part 1** | End of Quarter 1 | Permanent placement, end to end, for one client | [Phase 1 engineering spec](/docs/release-plan/part-1) — 13 feature pages |
+| **Part 2** | End of Quarter 2 | All remaining capability opened | [Phase 2 engineering spec](/docs/release-plan/part-2) — 15 feature pages |
+| **Part 3** | End of Quarter 3 | Full depth, migration and go-live | [Phase 3 engineering spec](/docs/release-plan/part-3) — 15 feature pages |
 
-## 3. How to read a part
+<Cards>
+  <Card title="Part 1 — Quarter 1" href="/docs/release-plan/part-1">
+    A vacancy arrives, a nurse is found, verified, ranked, offered and placed — and at day 90 the
+    client confirms and an invoice is raised. One client, one candidate category, one care setting.
+  </Card>
+  <Card title="Part 2 — Quarter 2" href="/docs/release-plan/part-2">
+    Contractual shift staffing bills from an approved timesheet; clients log in; demand arrives by
+    email, WhatsApp and portal; the platform contacts candidates on its own schedule.
+  </Card>
+  <Card title="Part 3 — Quarter 3" href="/docs/release-plan/part-3">
+    Payroll, analytics and MIS, the remaining intake channels, workforce operations, collections,
+    the CPAL migration, and go-live.
+  </Card>
+  <Card title="Scope register" href="/docs/release-plan/scope/deliverables">
+    All 51 deliverables with provenance and surface, the part-by-part matrix, and the assumptions
+    and client dependencies the dates rest on.
+  </Card>
+</Cards>
 
-Each part page carries three things:
+## 3. How each part is specified
 
-1. **What becomes available** — in the client's own language, as the SOW states it.
-2. **The deliverables that part draws on** — with `(partial)` where the deliverable is split
-   across more than one part.
-3. **What is deliberately absent** — the capability a reader might expect and will not find.
+Each part has **its own spec**, and each spec contains **only that part**. A part spec is one index
+page plus one page per feature, and every feature page is written to the same template:
 
-A deliverable marked `(partial)` is delivered across more than one part and appears in each part
-in which work on it falls. Twenty-one of the fifty-one are split this way; they are listed in the
-[deliverable matrix](/docs/release-plan/scope/matrix).
+| Section | What it carries |
+|---|---|
+| **Header block** | The phase, the deliverables the feature draws on in *this* phase, the module reference in the engineering documentation, the screens, and the ClickUp item |
+| **Purpose** | An introduction to the feature — **what it is for, not what is in scope** |
+| **Release in this phase** | A numbered list of the buildable items released in this phase, kept as singular as possible |
+| **One section per numbered item** | ClickUp item · Screens · Scenarios to cover · Elements · Flow · Scenarios to test |
+| **Not in this phase** | A pointer table only — the capability a reader will look for, and the part page that specifies it |
+
+**A numbered item is the unit of estimation, tracking and testing.** One item, one ClickUp card, one
+set of test scenarios.
+
+## 4. The rule that keeps the three specs separate
+
+A deliverable split across parts appears in more than one part spec — but **each part page describes
+only the slice released in that part**. The Part 1 page for a feature does not describe the Part 2
+work on it, and vice versa; where a reader would go looking, the page carries a pointer and nothing
+more.
+
+Twenty-five of the fifty-one deliverables are split this way. They are listed, with the slice each
+part takes, in the [deliverable matrix](/docs/release-plan/scope/matrix).
 
 **Building a deliverable to completion when its part only asked for a slice is the most expensive
-mistake available on this engagement.** Read the part before deciding how much of a module to build.
+mistake available on this engagement.** Read the part spec before deciding how much of a feature to
+build.
 
-## 4. The rule that decides what goes in Part 1
+## 5. The rule that decides what goes in Part 1
 
 Part 1 takes **one client, one candidate category, one line of business, one care setting** from
 sign-in to a raised invoice. Anything on that line is in. Anything that widens it — a second

@@ -1,0 +1,229 @@
+---
+title: "Workforce operations"
+description: "Phase 3: the maker-checker request engine, salary revisions individual and bulk, advances and holds, attendance upload paired against app check-ins, and geo-fence configuration."
+icon: Users
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D23` — **in full; it appears in no other part** |
+| **Engineering reference** | [Workforce operations](/docs/engineering/build/modules#workforce-operations) |
+| **Screens** | `/workforce/requests` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+The day-to-day changes that happen once people are working: salary revisions for one person or in
+bulk, salary advances, and putting a salary on hold or releasing it. Each needs two people — one to
+request and one to approve — **so nobody can change their own pay**. The request engine built here is
+reused by [timesheet extensions](/docs/release-plan/part-3/timesheet-extensions), which is why this
+feature is built first.
+
+## Release in this phase
+
+1. The maker-checker request engine.
+2. Salary revision, individual and bulk.
+3. Advances, holds and release.
+4. Attendance upload paired against app check-ins.
+5. Geo-fence configuration and enforcement.
+
+---
+
+## 1. The maker-checker request engine
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/requests`
+
+### Scenarios to cover
+
+One engine for every change that needs two people. Request types are **configuration**, thresholds
+vary by value, and **the raiser can never be the approver** — enforced by the engine, not by each
+caller.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Request type | Configuration | Yes | Name, payload schema, approval rule |
+| 2 | Request | Record | Yes | Type, payload, raiser, state, raised at |
+| 3 | Threshold by value | Configuration | Yes | Higher value, higher approver |
+| 4 | Raiser ≠ approver | Constraint | Yes | Enforced centrally |
+| 5 | Decision | Approve / reject with reason | Yes | Append-only |
+| 6 | Effect application | Behaviour | Yes | Approval applies the change in one transaction |
+| 7 | Request queue | Screen | — | Mine to raise, mine to approve, all, by state |
+
+### Flow
+
+1. A caller raises a typed request with its payload.
+2. Routing selects the approver from the type and the value threshold.
+3. Approval applies the change atomically; rejection records the reason and applies nothing.
+
+### Scenarios to test
+
+- A user cannot approve their own request through any route, including the API.
+- A rejected request applies no change at all.
+- Approval and effect commit together or not at all.
+- Adding a request type needs configuration, not a new approval implementation.
+
+---
+
+## 2. Salary revision, individual and bulk
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/requests`
+
+### Scenarios to cover
+
+One associate's pay changes, or a whole cohort's does. Both go through the request engine, and a bulk
+revision reports per-row outcomes rather than succeeding or failing as an opaque block.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Revision request | Request type | Yes | Associate, new value, effective date, reason |
+| 2 | Bulk revision | Request type | Yes | A set of associates in one request |
+| 3 | Per-row validation | Behaviour | Yes | Before approval, with a preview |
+| 4 | Effective dating | Behaviour | Yes | Applies from a date; never rewrites a closed period |
+| 5 | History | Append-only | Yes | Every revision with its approver |
+
+### Flow
+
+1. A revision is raised with an effective date and a reason.
+2. Bulk requests are validated per row and previewed before approval.
+3. Approval applies the new values from the effective date.
+
+### Scenarios to test
+
+- A revision effective next month does not change this month's closed pay.
+- A bulk request with one invalid row is reported before approval, not after.
+- Salary history shows every value with its approver and date.
+- A revision cannot be applied without approval.
+
+---
+
+## 3. Advances, holds and release
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/requests`
+
+### Scenarios to cover
+
+An advance with a **recovery plan**, and a hold that stops pay until it is released. Both are pay
+changes, so both go through the engine, and both are visible to payroll as inputs.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Advance request | Request type | Yes | Amount, reason, recovery schedule |
+| 2 | Recovery plan | Record | Yes | Instalments applied to future pay runs |
+| 3 | Hold | Request type | Yes | Reason, from date |
+| 4 | Release | Request type | Yes | Reason, from date |
+| 5 | Payroll visibility | Behaviour | Yes | Active advances and holds are pay-run inputs |
+| 6 | Outstanding balance | Derived | Yes | Advance recovered to date and remaining |
+
+### Flow
+
+1. An advance is approved with its recovery plan.
+2. Each pay run applies the scheduled recovery and reduces the balance.
+3. A hold stops the associate's pay until released; both are recorded.
+
+### Scenarios to test
+
+- Recovery reduces the balance exactly once per pay run.
+- A held associate is excluded from payment and the reason is visible on the run.
+- Releasing a hold restores payment from the release date, not retrospectively.
+- An advance cannot exceed the configured limit without the higher approval threshold.
+
+---
+
+## 4. Attendance upload paired against app check-ins
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/requests` · `/attendance`
+
+### Scenarios to cover
+
+Some sites produce their own attendance data. It is uploaded and **paired against the app check-ins
+already captured**, and mismatches are resolved by a person — the app remains the system of record
+for attendance.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Upload | Action | Yes | File per site and period, with a mapping |
+| 2 | Pairing | Mechanism | Yes | Uploaded row to app check-in, by associate and shift |
+| 3 | Mismatch queue | Screen | Yes | Unpaired rows and conflicting times |
+| 4 | Resolution | Action | Yes | Outcome plus a mandatory reason |
+| 5 | Precedence rule | Configuration | Yes | Which source wins, and when |
+| 6 | Audit | Records | Yes | Every resolution recorded |
+
+### Flow
+
+1. A file is uploaded and mapped for a site and period.
+2. Rows are paired to app check-ins; unpaired and conflicting rows queue.
+3. A person resolves each with a reason; the resolution feeds the timesheet.
+
+### Scenarios to test
+
+- A paired match with identical times needs no human action.
+- A conflict is resolved explicitly, never by a silent default.
+- An upload cannot create attendance for a shift that was never accepted.
+- Re-uploading the same file does not duplicate rows.
+
+---
+
+## 5. Geo-fence configuration and enforcement
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/settings` · `/attendance`
+
+### Scenarios to cover
+
+Geo-fence boundaries and modes managed as operations configuration, **for both a fixed site and a
+per-visit address**, with changes taking effect on the next check-in and never retrospectively.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Fence definition | Configuration | Yes | Boundary source, radius, mode |
+| 2 | Site fences | Records | Yes | Per client site |
+| 3 | Visit-address fences | Behaviour | Yes | Derived from the demand line |
+| 4 | Mode | Allow / Warn / Block | Yes | Per fence |
+| 5 | Change audit | Records | Yes | Who changed a fence and when |
+| 6 | Effect timing | Behaviour | Yes | Applies to future check-ins only |
+
+### Flow
+
+1. Fences are configured per site, or derived per visit address.
+2. The attendance receiver applies the fence at check-in.
+3. Changes are audited and apply from the next check-in.
+
+### Scenarios to test
+
+- Changing a radius does not re-evaluate past check-ins.
+- A home visit uses the line's address as its boundary.
+- Every fence change is audited with before and after values.
+- Switching to block prevents an out-of-fence check-in immediately.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it is specified |
+|---|---|
+| Applying the pay effects of these requests in a pay run | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |
+| Internal timesheet approval, which reuses this engine | [Phase 3 · Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions) |

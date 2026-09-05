@@ -1,0 +1,285 @@
+---
+title: "Engagement and availability"
+description: "Phase 2: six segments with their own cadences, availability confidence that decays, the re-contact engine, outbound voice with response capture, and one response schema across WhatsApp, app and voice."
+icon: PhoneCall
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `A3` · `A4` · `A5` in full · `A14` (partial) |
+| **Engineering reference** | [Engagement and availability](/docs/engineering/build/modules#engagement-and-availability) |
+| **Screens** | `/segments` · `/admin/cadence` · `/engagement/review` · `/engagement/calls` · `/engagement/runs` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+Apollo needs to know which professionals are actually available right now. This feature decides
+**who** to contact, **how often**, on **which channel** and with **which question set**, delivers
+through outbound messaging, captures the answer on one structured schema whichever channel it arrived
+on, writes it back to the candidate record, and **resets a freshness score that otherwise decays**.
+If nobody hears from a candidate, the score falls and ranking places them lower.
+
+<Callout type="warn" title="Build the four together">
+`A3`, `A4`, `A5` and `A14` form a closed loop and **none of the four is independently operable**.
+Build any three and none does anything useful. They are sequenced as one piece of work, not four.
+</Callout>
+
+## Release in this phase
+
+1. Segments and contact schedules.
+2. Availability decay (`A3`).
+3. The re-contact cadence engine (`A4`).
+4. Outbound voice with response capture (`A5`).
+5. Candidate response capture across channels (`A14`).
+6. The review queue and the call log.
+
+---
+
+## 1. Segments and contact schedules
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/segments` · `/admin/cadence`
+
+### Scenarios to cover
+
+**Six segments** — three candidate categories against two supply bases — each with its own cadence,
+channel, question set and staleness threshold. Segments are **shared with matching's talent
+segments** rather than defined twice.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Segment | Record | Yes | Definition by category, base and criteria |
+| 2 | Cadence rule | Configuration | Yes | Frequency, channel, question set, staleness threshold |
+| 3 | Send window | Configuration | Yes | Quiet hours per segment |
+| 4 | Frequency cap | Configuration | Yes | Per candidate, across all cadences |
+| 5 | Volume and cost preview | Screen | Yes | **Projected before a cadence can be enabled** |
+| 6 | Enable / disable | Toggle | Yes | Per segment |
+
+### Flow
+
+1. Segments are defined and bound to a cadence rule.
+2. Enabling a cadence first shows projected volume and cost for the period.
+3. The rule feeds selection in item 3.
+
+### Scenarios to test
+
+- A cadence cannot be enabled without the volume projection being shown.
+- Segments used by matching and by engagement are the same records.
+- Changing a segment definition changes both consumers.
+- Frequency caps apply across cadences, not within one.
+
+<Callout title="Cost note">
+Base B is contacted every 3–4 days across the whole base. This feature is the **largest driver of
+metered provider spend in the platform** — which is why the projection exists before a cadence can be
+switched on.
+</Callout>
+
+---
+
+## 2. Availability decay — `A3`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/candidates/:id` · `/segments`
+
+### Scenarios to cover
+
+An availability answer is only as good as its age. Confidence decays on a **configurable schedule per
+base** and resets on a confirmed response; ranking reads the confidence, so a candidate nobody has
+heard from falls behind one who answered yesterday.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Availability confidence | Column on the candidate | Yes | **Written by engagement**, read by matching |
+| 2 | Decay schedule | Configuration | Yes | Per base — six schedules across the segments |
+| 3 | Reset rule | Behaviour | Yes | A confirmed response resets to full |
+| 4 | Last-confirmed timestamp | Field | Yes | Displayed on the candidate record |
+| 5 | Decay job | Job | Yes | Runs on the job runtime, idempotent |
+
+### Flow
+
+1. A confirmed response sets confidence to full and stamps the time.
+2. The decay job lowers confidence per the schedule for the candidate's base.
+3. Matching reads confidence as a ranking feature and displays staleness.
+
+### Scenarios to test
+
+- Confidence decays on the configured schedule and no faster.
+- A response on any channel resets it once, not once per channel.
+- The decay job run twice in a day does not double-decay.
+- Ranking visibly reflects a decayed candidate.
+
+---
+
+## 3. The re-contact cadence engine — `A4`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/cadence` · `/engagement/runs`
+
+### Scenarios to cover
+
+Who to contact next, per segment, on confidence. **Base B runs every 3–4 days across the whole
+base.** Opt-outs and send windows are applied **at selection, not at send**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Selection query | Mechanism | Yes | By segment, confidence, last contact, caps |
+| 2 | Opt-out and window filter | Behaviour | Yes | **Applied at selection** |
+| 3 | Cadence run | Record | Yes | When, which segment, how many selected, sent, answered |
+| 4 | Channel choice | Rule | Yes | Per segment, with a fallback |
+| 5 | Run screen | Screen | — | `/engagement/runs`: history and outcomes |
+| 6 | Manual run | Action | — | Trigger a segment run outside the schedule |
+
+### Flow
+
+1. The scheduler starts a run for a segment.
+2. Selection applies confidence, caps, opt-outs and windows, producing the recipient set.
+3. Messages queue through outbound messaging with the segment's question set.
+4. The run records what was selected, sent and answered.
+
+### Scenarios to test
+
+- An opted-out candidate is never selected, so no message is queued and no cost is incurred.
+- A run outside the send window does not send.
+- Run totals reconcile with the delivery log.
+- A repeated run does not contact the same candidate twice inside the cap.
+
+---
+
+## 4. Outbound voice with response capture — `A5`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/engagement/calls`
+
+### Scenarios to cover
+
+Some of the base answers a call rather than a message. A voice campaign calls a segment inside a call
+window, asks the question set, and **extracts a structured answer from what was said** — on the same
+schema an app or WhatsApp answer produces.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Voice campaign | Record | Yes | Segment, question set, call window, retry policy |
+| 2 | Call record | Record | Yes | Candidate, attempt, outcome, duration, cost |
+| 3 | Transcript | Record | Yes | Stored with the call |
+| 4 | Response extraction schema | Schema | Yes | Structured answer from the transcript |
+| 5 | Confidence and fallback | Behaviour | Yes | Low confidence routes to the review queue |
+| 6 | Retry policy | Configuration | Yes | Attempts, spacing, give-up rule |
+| 7 | Call log | Screen | — | `/engagement/calls` |
+
+### Flow
+
+1. A campaign selects its recipients through the cadence engine.
+2. Calls are placed inside the call window with the configured retry policy.
+3. The transcript is captured and an answer extracted to the shared schema.
+4. Low-confidence extractions go to the review queue in item 6.
+
+### Scenarios to test
+
+- A call outside the window is not placed.
+- An unanswered call retries per policy and then gives up, recorded.
+- An extracted answer matches what a person reading the transcript would record.
+- A low-confidence extraction reaches the review queue rather than the candidate record.
+- Call cost is recorded per call.
+
+---
+
+## 5. Candidate response capture — `A14`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/engagement/review` · `/candidates/:id`
+
+### Scenarios to cover
+
+Answers arrive on WhatsApp, in the app and by voice. **All three produce one structured schema**,
+carrying the Quarter 1 screening questions where the segment asks them, and an answer arriving on two
+channels reconciles to one record rather than counting twice.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Candidate-response intent | Registration | Yes | Registered against the inbound pipeline |
+| 2 | Response schema | Schema | Yes | One shape across WhatsApp, app and voice |
+| 3 | Question set carriage | Behaviour | Yes | Including the Phase 1 screening questions |
+| 4 | Reconciliation | Behaviour | Yes | Two channels, one answer |
+| 5 | Write-back | Behaviour | Yes | To availability and to the candidate record |
+| 6 | Free-text handling | Behaviour | Yes | Below confidence → review queue |
+
+### Flow
+
+1. The intent is registered with the inbound pipeline built in
+   [demand intake](/docs/release-plan/part-2/demand-intake).
+2. An inbound message classified as a candidate response is dispatched here.
+3. The answer is parsed to the shared schema and reconciled.
+4. Write-back updates availability and resets confidence.
+
+### Scenarios to test
+
+- A WhatsApp answer and an app answer within the window produce one record.
+- Registering this intent required no change to the inbound pipeline.
+- An unparseable reply reaches the review queue with its raw text.
+- Write-back updates the candidate exactly once.
+
+---
+
+## 6. The review queue and the call log
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/engagement/review` · `/engagement/calls`
+
+### Scenarios to cover
+
+Everything the machine was not confident about lands in front of a person: free-text replies it could
+not classify, low-confidence voice extractions, and contradictory answers.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Review queue | Screen | — | Raw message beside the proposed structured answer |
+| 2 | Accept / correct / discard | Actions | Yes | Corrections retained for accuracy measurement |
+| 3 | Call log | Screen | — | Calls, outcomes, transcripts |
+| 4 | Ageing | Display | — | How long an item has waited |
+| 5 | Bulk handling | Action | — | For a systemic misclassification |
+
+### Flow
+
+1. Low-confidence items queue for review.
+2. A reviewer accepts, corrects or discards; the answer writes back on acceptance.
+3. Corrections are retained so classification accuracy is measurable.
+
+### Scenarios to test
+
+- An accepted review writes back exactly as a confident answer would.
+- A discarded item never reaches the candidate record.
+- Corrections are retained with the original.
+- The queue ages visibly and cannot hide an item with no owner.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Outcome signals from selection feeding ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |
+| Channel performance reporting | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |
+| Voice notes as a demand intake channel | [Phase 3 · Demand intake](/docs/release-plan/part-3/demand-intake) |

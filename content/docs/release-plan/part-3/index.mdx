@@ -1,0 +1,113 @@
+---
+title: "Phase 3 engineering spec"
+description: "Everything to be built for Phase 3 — payroll, analytics and MIS, the remaining intake channels, workforce operations, collections, the CPAL migration and go-live — and nothing else."
+icon: Target
+---
+
+This document is meant for the engineering team, with complete clarity on what needs to be built for
+**Phase 3**. Every page in this section is focused **only** on Phase 3, and no additional information
+is provided. What was built earlier is specified in the [Phase 1 spec](/docs/release-plan/part-1) and
+the [Phase 2 spec](/docs/release-plan/part-2), and is not repeated here.
+
+**Due: end of Quarter 3.** Full depth. Phases 1 and 2 made every thread work. Phase 3 takes each of
+them to its full width, moves Apollo's existing data onto the platform, and turns the platform into
+the **system of record**.
+
+## 1. What becomes available in Phase 3
+
+As the SOW states it.
+
+| Capability | What Phase 3 carries |
+|---|---|
+| **Payroll** | All live. **Work starts in Q1.** |
+| **Analytics and MIS** | Analytics and management information. |
+| **Multi-channel intake** | The remaining intake channels. |
+| **Workforce operations** | Workforce operations live. |
+| **Legacy migration** | CIEPAL. |
+| **Rate variance management** | Staffing. |
+
+<Callout type="warn" title="Payroll work starts in Quarter 1 even though payroll goes live in Quarter 3">
+It integrates a third-party engine whose selection, contract and field mapping are all client
+dependencies, and it sits behind associate onboarding, attendance and workforce operations. Starting
+it in Quarter 3 would put it behind three predecessors with no room left. The **build** is specified
+in [Payroll](/docs/release-plan/part-3/payroll); the **engine selection and mapping** begin in
+Quarter 1.
+</Callout>
+
+## 2. The features in this phase
+
+Fifteen feature pages, each describing **Phase 3 only**.
+
+| # | Feature | Delivers in Phase 3 | Items |
+|---|---|---|---|
+| 1 | [Demand intake](/docs/release-plan/part-3/demand-intake) | `A1` | 3 |
+| 2 | [Demand prioritisation and approval](/docs/release-plan/part-3/demand-prioritisation-and-approval) | `D14` full | 3 |
+| 3 | [Candidate record and credentials](/docs/release-plan/part-3/candidate-record-and-credentials) | `D4` `D16` | 3 |
+| 4 | [Candidate app](/docs/release-plan/part-3/candidate-app) | `D3` | 2 |
+| 5 | [Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) | `D5` `D18` `A8` | 2 |
+| 6 | [Selection and offers](/docs/release-plan/part-3/selection-and-offers) | `D20` | 1 |
+| 7 | [Placement and trial](/docs/release-plan/part-3/placement-and-trial) | `A6` | 2 |
+| 8 | [Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions) | `D22` full | 4 |
+| 9 | [Workforce operations](/docs/release-plan/part-3/workforce-operations) | `D23` | 5 |
+| 10 | [Payroll](/docs/release-plan/part-3/payroll) | `D24` | 5 |
+| 11 | [Associate onboarding](/docs/release-plan/part-3/associate-onboarding) | `D21` | 3 |
+| 12 | [Collections](/docs/release-plan/part-3/collections) | `D25` full | 5 |
+| 13 | [Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) | `D9` `D28` `A11` | 5 |
+| 14 | [Legacy migration](/docs/release-plan/part-3/legacy-migration) | `A10` | 6 |
+| 15 | [Documentation and go-live](/docs/release-plan/part-3/documentation-and-go-live) | `D11` `D30` | 3 |
+
+**Fifty-two numbered items in total.** Each item is one ClickUp card, one estimate and one set of
+test scenarios.
+
+## 3. Deliverables in Phase 3
+
+`D3` (partial) · `D4` (partial) · `D5` (partial) · `D9` · `D11` (partial) · `D13` (partial) ·
+`D14` (partial) · `D16` (partial) · `D18` (partial) · `D20` (partial) · `D21` (partial) ·
+`D22` (partial) · `D23` · `D24` · `D25` (partial) · `D28` · `D30` · `A1` (partial) · `A6` (partial) ·
+`A8` · `A10` · `A11` · `A14` (partial)
+
+**Twenty-three deliverable references.** `D9`, `D23`, `D24`, `D28`, `D30`, `A8`, `A10` and `A11` are
+delivered entirely here.
+
+## 4. Screens Phase 3 adds
+
+| Area | Screens |
+|---|---|
+| Reporting | `/reports/funnel` · `/reports/fill` · `/reports/trial-survival` · `/reports/stage-loss` · `/reports/performance` · `/reports/rate-variance` · `/reports/monthly-pack` |
+| Workforce and payroll | `/workforce/requests` · `/workforce/payroll` · `/app/payslips` |
+| Administration at width | `/admin/ranking-weights` · `/admin/registries` · `/admin/link-types` · `/admin/jobs` · `/admin/system` |
+
+## 5. The item with the least known about it
+
+`A10` moves Apollo's candidate data out of CPAL, after which the old tool is switched off. **Its
+effort basis awaits joint data profiling**, which has not happened: nobody has seen the volume, the
+completeness, the duplicate rate, or whether fields map cleanly.
+
+Profiling is the first piece of work on it and **it belongs early** — nothing else about `A10` can be
+sized until it has run, and its result affects the Phase 3 plan more than any other single input. It
+is item 1 of [legacy migration](/docs/release-plan/part-3/legacy-migration).
+
+## 6. Phase 3 is done when
+
+1. A requisition arrives on all five live channels plus verbal capture, and the six produce the same
+   record.
+2. Every report in `D9` and `D28` covers the whole period since the first requisition — not since
+   the reports were built.
+3. A pay run completes end to end through the third-party engine, with PF and ESIC reports produced
+   and payslips delivered in the app and over WhatsApp.
+4. A salary revision needs two people, and neither of them can be the same person.
+5. A payment is received, matched across invoices with part-payment and TDS handled, and ageing runs
+   off the contract payment terms rather than a flat rule.
+6. The migrated base reconciles against the source total, duplicates against app registrations are
+   resolved, and CPAL is switched off.
+7. Documentation, UAT and cutover are complete for everything released after the first go-live.
+
+## 7. Phase 3 dependencies that must be in place
+
+| Dependency | Gates |
+|---|---|
+| Third-party payroll engine — **selected in Quarter 1**, with field mapping agreed | [Payroll](/docs/release-plan/part-3/payroll) |
+| Electronic signature provider | [Selection and offers](/docs/release-plan/part-3/selection-and-offers) |
+| Legacy system access **and a named person who can answer questions on its data** | [Legacy migration](/docs/release-plan/part-3/legacy-migration) |
+| Client spreadsheet formats and HRMS/ATS access per client | [Demand intake](/docs/release-plan/part-3/demand-intake) |
+| Protected UAT time, booked in advance | [Documentation and go-live](/docs/release-plan/part-3/documentation-and-go-live) |

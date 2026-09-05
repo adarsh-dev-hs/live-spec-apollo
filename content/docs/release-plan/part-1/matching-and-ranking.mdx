@@ -1,0 +1,206 @@
+---
+title: "Matching and ranking"
+description: "Phase 1: advanced search over the internal database, one ranked set with rationale and unmet criteria, recruiter override, and shortlist assembly and submission."
+icon: Search
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D5` (partial) · `D18` (partial) |
+| **Engineering reference** | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| **Screens** | `/search` · `/requisitions/:id/ranking` · `/requisitions/:id/shortlist` · `/shortlists` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+Given a vacancy, produce a ranked list of candidates, best first, with a plain explanation of why
+each ranked where they did and which requirements they do not meet. A recruiter can also search by
+hand and move someone up or down, and **every override is recorded**. In Phase 1 the source is the
+internal database and the ranking runs on **one weight set** — one candidate category, one supply
+base.
+
+## Release in this phase
+
+1. Advanced search and saved searches.
+2. The ranked set with rationale and unmet criteria, on one weight set.
+3. Recruiter override, append-only.
+4. Shortlist assembly and submission.
+
+<Callout type="warn" title="Design dependency to settle before either module is built">
+The rejection taxonomy in [selection and offers](/docs/release-plan/part-1/selection-and-offers) and
+the features this engine reads are agreed in **one joint session before either is built**. Phase 1
+does not feed outcomes back into ranking — but if the model has no slot for outcome data, adding it
+in Phase 3 means rebuilding the engine.
+</Callout>
+
+---
+
+## 1. Advanced search and saved searches
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/search`
+
+### Scenarios to cover
+
+A recruiter searches the internal candidate database on skill, location, experience and status,
+narrows it, and saves the search to run again. This is the manual half of matching, and it is how a
+recruiter works a vacancy that ranking has not helped with.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Search criteria | Composable filters | — | Category, specialty, acuity, location, experience, qualification, verification status |
+| 2 | Result list | Shared list engine | — | Filter, sort, page, column choice, export |
+| 3 | Saved search | Record | — | Owned by its creator, shareable with their team |
+| 4 | Add to shortlist | Bulk action | — | Feeds item 4 |
+| 5 | Result count | Indicator | — | Before and after each criterion |
+
+### Flow
+
+1. The recruiter composes criteria; results update against the shared list engine.
+2. A search is saved and re-run later against current data.
+3. Selected candidates are added to a shortlist for a named requisition.
+
+### Scenarios to test
+
+- Criteria compose rather than replace one another.
+- A saved search re-run returns current data, not a stored result set.
+- Export matches the on-screen filter exactly.
+- The scope predicate applies before any search criterion.
+
+---
+
+## 2. The ranked set with rationale and unmet criteria
+
+**ClickUp item** — *link to be added* · **Delivers** `D18` (Phase 1 slice)
+
+**Screens** — `/requisitions/:id/ranking`
+
+### Scenarios to cover
+
+A recruiter opens a requisition and asks for a ranked set. Each entry carries a score, a **plain
+rationale**, and which requirements are met, partly met and unmet — produced as part of scoring, not
+reconstructed afterwards. Phase 1 runs one weight set: nurse, Base A.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Ranked set | Record | Yes | Requisition, requisition version, weight set version, generated at |
+| 2 | Rank entry | Record | Yes | Candidate, score, rank, rationale |
+| 3 | Criteria breakdown | Per entry | Yes | Met / partly met / unmet, per requirement |
+| 4 | Staleness | Per entry | Yes | How current the candidate's data is |
+| 5 | Weight set | Configuration | Yes | Versioned by effective date. **One set in Phase 1** |
+| 6 | Features read | Definition | Yes | Credentials, category attributes, experience, location, qualification |
+| 7 | Regenerate | Action | — | Produces a **new** ranked set, keeping the previous one |
+
+### Flow
+
+1. The recruiter requests a ranked set for the requisition's current version.
+2. The engine reads the features above and scores each eligible candidate.
+3. Rationale and criteria breakdown are produced **inside** scoring and stored with the entry.
+4. A revised requisition does not silently re-rank; the recruiter regenerates, and the earlier set
+   stays attached to the version it was produced against.
+
+### Scenarios to test
+
+- The same requisition version, weight set and candidate data produce the same ranking.
+- Every entry has a rationale and a criteria breakdown; none is blank.
+- An unmet mandatory requirement is shown as unmet rather than quietly lowering a score.
+- A regenerated set is a new set, and the old one is still readable with its version references.
+- A candidate with stale data is marked stale rather than excluded.
+
+---
+
+## 3. Recruiter override
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id/ranking`
+
+### Scenarios to cover
+
+A recruiter knows something the engine does not, and moves a candidate up or down. **Every override
+is recorded with a mandatory reason and is append-only** — it is evidence later, when someone asks
+why a shortlist looked the way it did.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Override action | Move up / down / exclude | — | On a rank entry |
+| 2 | Reason | Text or reference | Yes | Mandatory, from the configured list with free text |
+| 3 | Override record | Append-only | Yes | Actor, entry, from, to, reason, timestamp |
+| 4 | Display | Indicator | — | An overridden entry is visibly overridden, with its reason |
+
+### Flow
+
+1. The recruiter overrides a position and gives a reason.
+2. The override is appended; the engine's original position is retained.
+3. The shortlist that follows shows both the ranked order and the overrides applied to it.
+
+### Scenarios to test
+
+- An override without a reason is refused.
+- The engine's original position remains readable after an override.
+- An override cannot be edited or deleted, only superseded by another.
+- Overrides appear on the audit trail and as events.
+
+---
+
+## 4. Shortlist assembly and submission
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id/shortlist` · `/shortlists`
+
+### Scenarios to cover
+
+The recruiter assembles the candidates to put in front of the client, submits the shortlist, and
+**that submission issues the client link** — which in Phase 1 is the entire client interaction. The
+client answers yes, no or with comments, and the answer lands back on the shortlist.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Shortlist | Record | Yes | Requisition, requisition version, assembled by, submitted at |
+| 2 | Shortlist entry | Record | Yes | Candidate, rank, rationale carried through, recruiter note |
+| 3 | Candidate presentation | Configuration | Yes | What the client sees, and what is withheld |
+| 4 | Submit | Action | — | Issues the shortlist client link |
+| 5 | Client response | Per entry | — | Yes / no / with comments, written back |
+| 6 | Shortlist list | Screen | — | Across requisitions, with status and age |
+
+### Flow
+
+1. Entries are added from the ranked set or from search.
+2. Submitting assembles what the client sees and issues the link through
+   [client link surfaces](/docs/release-plan/part-1/client-link-surfaces).
+3. The client's answer per candidate is written back onto the shortlist entry.
+4. A yes moves the candidate on to interview scheduling in selection.
+
+### Scenarios to test
+
+- A shortlist cannot be submitted empty, or against a closed requisition.
+- Submission issues exactly one link, to the mapped client contacts.
+- A client answer writes back to the right entry, and a second submission of the same link is
+  ignored.
+- What the client sees excludes the fields configured as withheld.
+- Submission and response both appear on the audit trail and as events.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Ranking per category and per supply base, and shift-level ranking against a demand line | [Phase 2 · Matching and ranking](/docs/release-plan/part-2/matching-and-ranking) |
+| Talent segments shared with the engagement cadence model | [Phase 2 · Matching and ranking](/docs/release-plan/part-2/matching-and-ranking) |
+| Weight tuning per category and base, and outcome write-back into ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |

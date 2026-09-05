@@ -1,0 +1,24 @@
+{
+  "title": "Part 2 — Phase 2 spec",
+  "description": "All remaining capability opened. Every page here describes Phase 2 only.",
+  "icon": "Network",
+  "defaultOpen": false,
+  "pages": [
+    "index",
+    "demand-intake",
+    "requisitions-and-allocation",
+    "clients-and-contracts",
+    "candidate-record-and-credentials",
+    "candidate-app",
+    "notifications-and-alerts",
+    "engagement-and-availability",
+    "matching-and-ranking",
+    "selection-and-offers",
+    "client-link-surfaces",
+    "placement-and-trial",
+    "attendance-and-timesheets",
+    "billing-and-receivables",
+    "client-portal",
+    "associate-onboarding"
+  ]
+}

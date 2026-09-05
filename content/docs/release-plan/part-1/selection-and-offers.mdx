@@ -1,0 +1,237 @@
+---
+title: "Selection and offers"
+description: "Phase 1: interview slots proposed to two parties without a login, structured feedback, accept/hold/reject with a mandatory reason, and offer generation, issue, acceptance and contract mapping."
+icon: Handshake
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D6` (partial) · `D20` (partial) |
+| **Engineering reference** | [Selection and offers](/docs/engineering/build/modules#selection-and-offers) |
+| **Screens** | `/interviews` · `/offers` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+Interviews, the decision, and the offer — arranged between a candidate who has an app and a client
+who has **no login at all**. Feedback is structured, and the decision carries **a mandatory reason
+from a configured taxonomy**, because that taxonomy is what later feeds ranking. If accepted, the
+offer is generated from a template, delivered, tracked to expiry, accepted, and **mapped to the
+contract version whose terms billing will read at day 90**. Without this feature the permanent chain
+stops after selection: no offer, no joining, no trial, no retention link, no invoice.
+
+## Release in this phase
+
+1. Interview slot proposal and confirmation.
+2. Structured interview feedback.
+3. Accept, hold or reject with a mandatory reason.
+4. Offer generation from a template, issue and tracking.
+5. Offer acceptance and offer-to-contract mapping.
+
+---
+
+## 1. Interview slot proposal and confirmation
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/interviews`
+
+### Scenarios to cover
+
+A recruiter proposes slots to a candidate and to the client. The candidate answers in the app; the
+client answers on the channel they already use. The interview list shows **what is awaiting
+feedback**, so a pipeline does not stall silently while everyone assumes someone else is chasing.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Interview | Record | Yes | Requisition, candidate, client, mode, location |
+| 2 | Proposed slots | Repeating block | Yes | Date and time options |
+| 3 | Candidate response | Action | — | Accept a slot or decline, in the app |
+| 4 | Client confirmation | Action | — | Recorded by the recruiter in Phase 1 |
+| 5 | Confirmed slot | Derived | — | Written when both sides agree |
+| 6 | Interview list | Screen | — | Awaiting response, confirmed, held, awaiting feedback |
+| 7 | Cancellation | Action | — | With a reason |
+
+### Flow
+
+1. The recruiter creates the interview and proposes slots.
+2. The candidate accepts or declines in the app; the recruiter records the client's confirmation.
+3. A confirmed interview moves to *awaiting feedback* after its slot passes.
+4. A cancellation records a reason and returns the candidate to the shortlist.
+
+### Scenarios to test
+
+- An interview cannot be confirmed without a slot both sides accepted.
+- Declining every slot returns the interview to the recruiter with the candidate still shortlisted.
+- An interview past its slot with no feedback appears in *awaiting feedback* rather than disappearing.
+- Cancellation without a reason is refused.
+
+---
+
+## 2. Structured interview feedback
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/interviews`
+
+### Scenarios to cover
+
+Feedback is captured in a structure that can be read by a machine later, not only as free text — it
+is what the outcome write-back in Phase 3 will consume, and the shape has to exist from the start.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Feedback record | Record | Yes | Interview, author, submitted at |
+| 2 | Criterion ratings | Structured | Yes | Per the configured criteria for the category |
+| 3 | Overall recommendation | Single select | Yes | |
+| 4 | Comments | Text | No | |
+| 5 | Attachments | Files | No | Through the shared file store |
+
+### Flow
+
+1. The recruiter or interviewer records feedback against the configured criteria.
+2. Feedback attaches to the interview and is visible on the candidate and the requisition.
+3. The decision in item 3 reads it.
+
+### Scenarios to test
+
+- Feedback cannot be submitted without the mandatory ratings.
+- Criteria change with the candidate category, from reference data.
+- Feedback is immutable after submission except by a superseding entry.
+
+---
+
+## 3. Accept, hold or reject with a mandatory reason
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/interviews`
+
+### Scenarios to cover
+
+The decision, with a full audit trail and **a mandatory structured reason on a rejection**, taken
+from a configured taxonomy. The taxonomy is agreed jointly with matching before either is built.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Decision | Accept / Hold / Reject | Yes | |
+| 2 | Rejection reason | Reference | Yes on reject | From the configured taxonomy |
+| 3 | Hold reason and review date | Fields | Yes on hold | |
+| 4 | Decision record | Append-only | Yes | Actor, decision, reason, timestamp |
+| 5 | Downstream effect | Behaviour | — | Accept opens the offer path; reject returns the position |
+
+### Flow
+
+1. The decision is recorded against the interview and the application.
+2. A rejection records its structured reason; a hold records a review date.
+3. An acceptance makes the offer path available for that candidate and requisition.
+4. Every decision writes an audit entry and an event.
+
+### Scenarios to test
+
+- A rejection without a taxonomy reason is refused; free text alone is not enough.
+- A decision cannot be edited — a change is a new, superseding decision.
+- An acceptance is the only route to an offer.
+- The reason taxonomy is reference data and changes without a deploy.
+
+---
+
+## 4. Offer generation, issue and tracking
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/offers`
+
+### Scenarios to cover
+
+The offer is generated from a template, previewed, issued to the candidate, and tracked to
+acceptance, decline or expiry — with reminders on the way.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Offer | Record | Yes | Candidate, requisition, client, salary, joining date |
+| 2 | Template | Configuration | Yes | **One template in Phase 1** |
+| 3 | Variables | Resolution | Yes | From candidate, requisition, client and contract |
+| 4 | Preview | Screen | Yes | What the candidate will receive, before issue |
+| 5 | Issue | Action | Yes | Delivered through the sending path and visible in the app |
+| 6 | Expiry | Date rule | Yes | With reminders before it |
+| 7 | Status | Derived | Yes | Draft, issued, accepted, declined, expired |
+| 8 | Decline reason | Reference | Yes on decline | |
+| 9 | Offer versions | Records | — | A revised offer is a new version |
+
+### Flow
+
+1. An accepted decision opens offer creation; variables resolve from the records.
+2. The recruiter previews and issues; the candidate receives it in the app and on their channel.
+3. Reminders fire before expiry; expiry closes the offer with a status.
+4. A revision issues a new version rather than editing the issued one.
+
+### Scenarios to test
+
+- An offer cannot be issued without a decision of accept.
+- Preview and issued document are identical.
+- Expiry fires exactly once and moves the status.
+- A decline records a reason and returns the position to the requisition.
+- A revised offer supersedes the previous version, which stays readable.
+
+---
+
+## 5. Offer acceptance and offer-to-contract mapping
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/offers`
+
+### Scenarios to cover
+
+Acceptance is what starts everything after it, and the offer is mapped to the **contract version**
+whose terms — the placement fee in particular — billing will read at day 90. Getting this mapping
+wrong is not visible for ninety days, which is why it is recorded at acceptance rather than derived
+at invoicing.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Acceptance | Action | Yes | In the app, or recorded by the recruiter |
+| 2 | Accepted at | Timestamp | Yes | |
+| 3 | Contract version mapping | Reference | Yes | Resolved through *terms in force* at acceptance |
+| 4 | Placement fee captured | Value | Yes | Snapshotted with its source version id |
+| 5 | Handover to placement | Event | Yes | Opens joining confirmation |
+
+### Flow
+
+1. The candidate accepts; acceptance is recorded with its timestamp.
+2. Terms in force resolve the contract version, and the offer records the version id and the fee.
+3. The acceptance event opens joining confirmation in
+   [placement and trial](/docs/release-plan/part-1/placement-and-trial).
+
+### Scenarios to test
+
+- Acceptance with no contract version in force is refused with the reason, and no placement opens.
+- The recorded fee and version id still resolve a year later.
+- Acceptance produces exactly one placement handover event, even if retried.
+- An expired offer cannot be accepted.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Offer templates by state, role and skill; reschedule and cancellation handling at width | [Phase 2 · Selection and offers](/docs/release-plan/part-2/selection-and-offers) |
+| Digital signature on the offer | [Phase 3 · Selection and offers](/docs/release-plan/part-3/selection-and-offers) |
+| Selection outcomes feeding back into ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |

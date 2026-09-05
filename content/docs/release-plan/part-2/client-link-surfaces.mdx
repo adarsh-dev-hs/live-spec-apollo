@@ -1,0 +1,117 @@
+---
+title: "Client link surfaces"
+description: "Phase 2: the two remaining link types — day 30 and day 60 trial check-in, and timesheet approval with its deemed-approval rule."
+icon: Link2
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `A13` (partial) — **the remaining two link types** |
+| **Engineering reference** | [Client link surfaces](/docs/engineering/build/platform-services#client-link-surfaces) |
+| **Screens** | `/links` · `/admin/link-types` · the public pages at `/l` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+The mechanism exists from Phase 1; Phase 2 configures the two link types that were not needed until
+now. One of them — timesheet approval — carries a **deemed rule** like the day-90 link does, and it
+is the only other place in the platform where a client not answering has a financial consequence.
+
+## Release in this phase
+
+1. The day 30 and day 60 trial check-in link types.
+2. The timesheet approval link type with deemed approval.
+
+---
+
+## 1. Day 30 and day 60 trial check-in links
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/l` · `/links` · `/admin/link-types`
+
+### Scenarios to cover
+
+At day 30 and day 60 the client is asked how the placement is going. These capture signal — they are
+not billing triggers, and **must not be configurable to become one**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Link type configuration | Record | Yes | Day 30 and day 60, with their question sets |
+| 2 | Question set | Reference data | Yes | Per candidate category and care setting |
+| 3 | Response capture | Schema | Yes | Written back to the trial event |
+| 4 | Billing-trigger flag | Constraint | Yes | **Cannot be set on these types** |
+| 5 | Reminders | Configuration | Yes | Through the Phase 2 reminder layer |
+| 6 | Expiry | Behaviour | Yes | Expires without a deemed outcome |
+
+### Flow
+
+1. The trial schedule fires the day-30 and day-60 events.
+2. A link is issued to the mapped recipients and answered on the public page.
+3. Responses write back to the trial event and are visible on the placement.
+4. No answer expires the link with no financial consequence.
+
+### Scenarios to test
+
+- Neither type can be configured as a billing trigger, enforced by constraint and by test.
+- Responses write back to the correct trial event.
+- The question set follows the candidate category and care setting.
+- Expiry records the non-response without deeming anything.
+
+---
+
+## 2. The timesheet approval link with deemed approval
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/l` · `/timesheets/:id` · `/links`
+
+### Scenarios to cover
+
+A compiled timesheet is sent to the client on a link. They approve it, or query it, or do nothing —
+and doing nothing for the configured window means **deemed approved**, after which a shift invoice
+can be raised. The countdown is visible internally, and the reminders warn of the deemed outcome.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Link type configuration | Record | Yes | Timesheet approval, with its deemed rule |
+| 2 | Timesheet rendering | Public page | Yes | Lines, hours, rates, total |
+| 3 | Response | Approve / query with comments | Yes | A query returns it to Apollo |
+| 4 | Window snapshot | Field | Yes | The deemed-approval window in force at send |
+| 5 | Reminders | Configuration | Yes | Each warning of deemed approval on expiry |
+| 6 | Deemed handling | Behaviour | Yes | Expiry produces `deemed_approved` |
+| 7 | Countdown | Display | Yes | Visible on the timesheet internally |
+
+### Flow
+
+1. Attendance and timesheets sends a timesheet for approval; the link is issued and the window
+   snapshotted.
+2. The client approves, or queries with comments, or lets the window run out.
+3. Approval or expiry moves the timesheet state; a query returns it for correction.
+4. The billing path reads the **approved or deemed-approved** state, never raw attendance.
+
+### Scenarios to test
+
+- The countdown uses the snapshotted window, not the current setting.
+- A query returns the timesheet to Apollo and stops the countdown.
+- Expiry produces `deemed_approved` exactly once and records that the window expired.
+- A late approval after expiry is recorded but does not change the deemed state.
+- Reminders carry the deemed-approval warning.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| A logged-in equivalent of these approvals | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) — items 4 and 5 |
+| Credit and debit notes reaching the client | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |

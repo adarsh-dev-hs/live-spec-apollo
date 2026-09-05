@@ -1,0 +1,259 @@
+---
+title: "Clients and contracts"
+description: "Phase 1: one client with its sites, contacts and link recipients, its rate card, its contract and versions, and the two lookups billing reads at the day-90 trigger."
+icon: Building2
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D1` (partial) · `D13` (partial) |
+| **Engineering reference** | [Clients, contracts and rate cards](/docs/engineering/build/modules#clients-contracts-and-rate-cards) |
+| **Screens** | `/clients` · `/clients/:id` · `/contracts` · `/contracts/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+The client side of the business: the hospital, its sites and departments, the people at it who
+receive things, the rates agreed with it, and the signed contract. It looks like reference data and
+is not. The contract terms are read **at the moment billing decides to raise an invoice**, with no
+fallback — which is why a contract is recorded before a placement is made, not after someone notices
+an invoice will not run.
+
+## Release in this phase
+
+1. Client record with sites, departments and contacts.
+2. Rate card with baseline rate and placement fee, versioned by effective date.
+3. Contract record and versioning.
+4. Waiting periods, per client with a platform default.
+5. The two lookup services billing depends on: rate resolution and contract terms in force.
+
+<Callout title="Phase 1 populates one client">
+The feature is built for many and populated with one. Nothing here is hardcoded to a single client;
+the Phase 1 acceptance runs against one because the chain it proves only needs one.
+</Callout>
+
+---
+
+## 1. Client record with sites, departments and contacts
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients` · `/clients/:id`
+
+### Scenarios to cover
+
+An operations user records the client: its legal identity for invoicing, the service lines it buys,
+its care setting, the sites and departments a vacancy can be raised against, and the contacts —
+including **which contact receives which type of tokenised link**, because in Phase 1 that is the
+entire client relationship.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Legal name | Text | Yes | As it appears on an invoice |
+| 2 | Tax details | Text | Yes | GSTIN and PAN |
+| 3 | Billing address | Address | Yes | Read by invoicing |
+| 4 | Service lines | Multi select | Yes | Phase 1 populates **permanent** |
+| 5 | Care setting | Single select | Yes | From reference data. Phase 1 populates **hospital** |
+| 6 | Locations (sites) | Repeating block | Yes | Name, address, care setting |
+| 7 | Departments | Repeating block, per site | No | |
+| 8 | Client contacts | Repeating block | Yes | Name, role, email, mobile |
+| 9 | Link recipient mapping | Per contact | Yes | Which link types this contact receives |
+| 10 | Status | Active / Inactive | Yes | |
+
+### Flow
+
+1. A user creates the client with its legal and tax identity and its service lines.
+2. Sites are added, each with its own address and care setting; departments hang under a site.
+3. Contacts are added and each is marked for the link types they receive — in Phase 1, shortlist
+   response and day-90 retention.
+4. The client becomes selectable on the requisition form and on the contract.
+5. Every change is audited; deactivating a client does not touch its history.
+
+### Scenarios to test
+
+- A client cannot be saved without the fields invoicing later reads.
+- A site with no department can still carry a requisition.
+- A contact with no link-type mapping never receives a link, and the link feature says so rather
+  than failing silently.
+- A deactivated client disappears from the requisition picker and its existing records still render.
+- Create and edit appear on the audit trail with before and after values.
+
+---
+
+## 2. Rate card with baseline rate and placement fee
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id`
+
+### Scenarios to cover
+
+Rates agreed with the client by role, skill and location, **versioned by effective date**, each line
+carrying a baseline rate and the placement fee percentage the permanent invoice is calculated from.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Rate card | Header | Yes | Client, currency, status |
+| 2 | Version | Record | Yes | Effective from, effective to, who approved |
+| 3 | Line: role | Reference | Yes | |
+| 4 | Line: skill / specialty | Reference | No | |
+| 5 | Line: location | Reference | Yes | Client site or a location group |
+| 6 | Line: baseline rate | Money | Yes | The standard rate, stored as decimal with a currency |
+| 7 | Line: placement fee % | Percentage | Yes | Read by the permanent invoice |
+| 8 | Effective-date resolution | Behaviour | Yes | One version applies at any given date |
+
+### Flow
+
+1. A user creates a rate card version with an effective-from date and adds its lines.
+2. Publishing a new version closes the previous one at the day before; **versions never overlap**.
+3. Rate resolution (item 5) reads the version in force at the date it is asked about.
+4. Editing a published version is refused — a correction is a new version.
+
+### Scenarios to test
+
+- Two versions cannot be in force on the same date.
+- A rate lookup for a past date returns the version that was in force then, not the current one.
+- A line without a placement fee percentage cannot be saved.
+- Money is stored and returned as a decimal with a currency, never a float.
+- A published version cannot be edited in place.
+
+---
+
+## 3. Contract record and versioning
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/contracts` · `/contracts/:id`
+
+### Scenarios to cover
+
+The signed contract as a record: its versions, its dates, its renewal alert, its history, and the
+document itself attached. **Contracts are recorded, not drafted** — there is no template engine and
+no e-signature here; the signed PDF is attached and signing happens outside the platform.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Client | Reference | Yes | |
+| 2 | Contract reference | Text | Yes | Apollo's own reference |
+| 3 | Version | Record | Yes | Effective from, effective to, status |
+| 4 | Signed document | File | Yes | Through the shared file store |
+| 5 | Commercial terms | Fields | Yes | Placement fee basis, payment terms in days |
+| 6 | Renewal alert | Date rule | Yes | Alert n days before the end date |
+| 7 | History | Read-only list | — | Every version with who recorded it and when |
+| 8 | Status | Draft / Active / Expired | Yes | |
+
+### Flow
+
+1. A user records the contract and attaches the signed document.
+2. A new version is created with its own effective dates; the previous version closes.
+3. The renewal alert raises a job on the runtime ahead of the end date.
+4. **Terms in force** (item 5) reads the version covering the date it is asked about.
+
+### Scenarios to test
+
+- A contract version with no signed document cannot be made active.
+- Version dates cannot overlap for one client.
+- A renewal alert fires at the configured lead time, once.
+- The history shows every version with its author and timestamp, and none can be edited.
+
+---
+
+## 4. Waiting periods
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id` · `/admin/settings`
+
+### Scenarios to cover
+
+The waiting periods the Phase 1 triggers read. Each is configurable **per client with a platform
+default fallback**, so a trigger never stalls on an unconfigured client.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Retention confirmation window | Days | Yes | The day-90 link auto-accept window — SOW example: 7 days |
+| 2 | Follow-up window | Days | Yes | Reserved by the platform default in Phase 1 |
+| 3 | Per-client override | Number | No | Overrides the platform default for this client |
+| 4 | Platform default | Number | Yes | Held in `/admin/settings` |
+| 5 | Resolution order | Behaviour | Yes | Client override first, platform default second |
+
+### Flow
+
+1. A default is set once in settings.
+2. A client may carry an override; the resolver returns the override when present and the default
+   otherwise.
+3. The value in force when a trigger is created is the value that trigger uses — a later change does
+   not retrospectively move an open window.
+
+### Scenarios to test
+
+- A client with no override resolves to the platform default.
+- Changing the default does not shift a window already running.
+- A zero or negative window is refused at entry.
+- The resolved value is visible on the record that used it, not only in settings.
+
+---
+
+## 5. Rate resolution and contract-terms-in-force lookups
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none — consumed by matching, selection and billing
+
+### Scenarios to cover
+
+Two services other features call rather than reimplement: *what rate applies to this role, skill and
+location on this date*, and *what contract terms are in force for this client on this date*. Billing
+calls the second at the day-90 trigger, and **there is no fallback** — no terms in force means the
+invoice does not run at all. That is the designed behaviour, not a defect to work around.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Rate resolution input | Client, role, skill, location, date | Yes | |
+| 2 | Rate resolution output | Baseline rate, placement fee %, rate card version id | Yes | The version id is recorded by the caller |
+| 3 | Terms-in-force input | Client, date | Yes | |
+| 4 | Terms-in-force output | Contract version id, fee basis, payment terms | Yes | |
+| 5 | Not-found behaviour | Explicit result | Yes | A typed *no terms in force*, never a default or a zero |
+
+### Flow
+
+1. A caller asks for the rate or the terms at a date.
+2. The service returns the version in force with its identifier, which the caller records on its own
+   record so the answer is reconstructable later.
+3. Where nothing is in force, the service says so explicitly, and the caller stops.
+
+### Scenarios to test
+
+- A lookup at a past date returns the version in force then.
+- A lookup with nothing in force returns the typed not-found result and no invoice is produced.
+- The version id returned is stored on the invoice and the placement, and still resolves a year on.
+- The same input at the same date always produces the same output.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Sender identities — the email addresses and WhatsApp numbers each inbound message resolves against | [Phase 2 · Clients and contracts](/docs/release-plan/part-2/clients-and-contracts) |
+| Shift rate cards | [Phase 2 · Clients and contracts](/docs/release-plan/part-2/clients-and-contracts) |
+| The deemed-approval window the timesheet path reads | [Phase 2 · Clients and contracts](/docs/release-plan/part-2/clients-and-contracts) |
+| Client login and self-service | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) |
+
+**Not built at all, in any part:** drafting contracts from a template, credit limits and credit
+control, and electronic signature of the client contract.

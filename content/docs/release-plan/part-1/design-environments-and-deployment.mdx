@@ -1,0 +1,247 @@
+---
+title: "Design, environments and deployment"
+description: "Phase 1: the design system, the console shell, four environments on Apollo's own AWS Mumbai account, data protection, and the Phase 1 documentation and go-live."
+icon: Server
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `F12` · `F10` · `F13` in full · `D11` (partial — the Phase 1 slice) |
+| **Engineering reference** | [Design system](/docs/engineering/build/platform-services#design-system) · [Console shell](/docs/engineering/build/platform-services#console-shell) · [Environments and observability](/docs/engineering/build/platform-services#environments-and-observability) · [Data protection](/docs/engineering/build/platform-services#data-protection) · [Infrastructure](/docs/engineering/reference/infrastructure) |
+| **Screens** | `/showcase` · the frame every console screen renders inside |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+There are five surfaces in this platform — the Ops console, the candidate app, WhatsApp templates,
+voice scripts and client link pages. Designed separately, the work is done five times and looks like
+it. There are four environments, and code has to move between them onto **Apollo's own AWS account
+in Mumbai**. And from the moment a candidate signs up, the platform holds personal and health-related
+data under Indian data protection law — which is Phase 1, not Phase 3 when someone remembers
+compliance.
+
+## Release in this phase
+
+1. Design system and component library.
+2. Console shell.
+3. Environments, pipeline and monitoring.
+4. Data protection: consent, residency, retention.
+5. Deployment to Apollo's AWS Mumbai account, and the Phase 1 technical documentation.
+
+---
+
+## 1. Design system and component library
+
+**ClickUp item** — *link to be added* · **Delivers** `F12`
+
+**Screens** — `/showcase`
+
+### Scenarios to cover
+
+One visual language, consumed by both the web console and the native app from the same tokens, plus
+the content patterns for the two non-visual surfaces. It must be **complete before screen design is
+finalised**, not developed alongside it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Design tokens | Package | Yes | Colour, type, spacing, radius, elevation — consumed by web and native |
+| 2 | Web component library | Package | Yes | Every control the console screens use |
+| 3 | Native component library | Package | Yes | Same tokens, native primitives |
+| 4 | Standard screen states | Components | Yes | Empty, loading, error, no-permission, partial failure |
+| 5 | Form patterns | Components | Yes | Inline validation, field-level and form-level errors |
+| 6 | Accessibility baseline | Standard and tests | Yes | Contrast, focus order, labels, keyboard paths |
+| 7 | Content patterns | Guidance | Yes | WhatsApp template tone and voice-script structure |
+| 8 | Component showcase | Screen | — | `/showcase`, the rendered catalogue |
+
+### Flow
+
+1. Tokens are defined once and published to both the web and native libraries.
+2. Each component is built with its five standard states before it is used in a screen.
+3. Screen design is finalised against the library rather than ahead of it.
+4. The accessibility tests run in the pipeline; a component that fails them does not ship.
+
+### Scenarios to test
+
+- A token change propagates to both console and app without a per-surface edit.
+- Every component renders its empty, loading, error, no-permission and partial-failure state.
+- Keyboard-only navigation completes a form on the console.
+- Contrast and focus-order checks pass in the pipeline, and a regression fails the build.
+
+---
+
+## 2. Console shell
+
+**ClickUp item** — *link to be added* · **Delivers** part of `D11`
+
+**Screens** — the frame around every console screen
+
+### Scenarios to cover
+
+The page frame every Ops screen sits inside: navigation, header, global search entry point, user
+menu, and the application of role-based access to every route. Around thirty screens across the
+Phase 1 features render inside it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Application frame | Component | Yes | Header, left navigation, content region |
+| 2 | Navigation | Component | Yes | Rendered from the signed-in user's **permissions**, never hardcoded |
+| 3 | Route guard | Mechanism | Yes | Route-level permission enforcement, failing closed |
+| 4 | No-permission page | Screen state | Yes | For a direct URL to a screen the user may not reach |
+| 5 | Global search entry | Component | Yes | The entry point; results come from the feature that owns them |
+| 6 | Session expiry handling | Mechanism | Yes | Preserves unsaved form state across a re-authentication |
+| 7 | Filter-state preservation | Mechanism | Yes | Filters survive a module switch and a return |
+
+### Flow
+
+1. A request resolves the principal once and the shell renders navigation from their permissions.
+2. Any route is checked by the guard before its screen renders.
+3. A direct URL without permission renders the no-permission page.
+4. A session expiring mid-form returns the user to sign-in and restores what they had typed.
+
+### Scenarios to test
+
+- Two users with different roles see different navigation on the same build.
+- A direct URL to a forbidden screen renders the no-permission page.
+- A form half-filled survives a session expiry and re-authentication.
+- Leaving a filtered list for another module and returning restores the filters.
+
+---
+
+## 3. Environments, pipeline and monitoring
+
+**ClickUp item** — *link to be added* · **Delivers** `F10`
+
+**Screens** — none
+
+### Scenarios to cover
+
+Four environments, a way to move a release between them, and enough monitoring to know something has
+broken before a user says so.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Environments | Infrastructure as code | Yes | `dev`, `qa`, `uat`, `prod` — one stack each |
+| 2 | Container images | Build artefacts | Yes | API, worker, edge handlers |
+| 3 | Pipeline | CI/CD | Yes | Verify on pull request, build on merge, promote with approvals |
+| 4 | Rollback | Capability | Yes | Back to the prior release, rehearsed |
+| 5 | Monitoring and alerting | Config | Yes | With on-call routing |
+| 6 | Backups and PITR | Config | Yes | Point-in-time recovery configured |
+| 7 | Restore rehearsal | Evidence | Yes | **Rehearsed and evidenced before go-live** |
+| 8 | Non-production data | Process | Yes | Production data anonymised for the three lower environments |
+
+### Flow
+
+1. Each environment is stood up from the same infrastructure code with its own parameters.
+2. A pull request runs verification; a merge builds images; promotion to `uat` and `prod` requires
+   approval.
+3. Monitoring and alerts route to on-call, with dashboards covering the API, workers and queues.
+4. A restore is rehearsed against a real backup and the evidence is kept.
+
+### Scenarios to test
+
+- An environment can be rebuilt from code alone.
+- A failing verification blocks the merge.
+- A promotion to `prod` cannot happen without the approval step.
+- A rollback returns the prior release and the application still starts.
+- A restore rehearsal completes within the agreed objective, with evidence recorded.
+- No production personal data reaches a lower environment un-anonymised.
+
+---
+
+## 4. Data protection: consent, residency, retention
+
+**ClickUp item** — *link to be added* · **Delivers** `F13`
+
+**Screens** — the consent step inside `/app/signup`; the settings entries in `/admin/settings`
+
+### Scenarios to cover
+
+Handling personal and health-related data about candidates in a way that meets Indian data protection
+law. First needed the moment candidate personal data is captured — which is candidate sign-up in
+Phase 1.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Consent capture | Record | Yes | Versioned notice, timestamp, retrievable evidence |
+| 2 | Verification consent | Separate record | Yes | **Checked before any adapter call is dispatched** |
+| 3 | Consent withdrawal | Action | Yes | Honoured forward; statutory messages distinguished from contractual |
+| 4 | Residency enforcement | Config and tests | Yes | Mumbai only, including backups |
+| 5 | Retention policy | Per data type | Yes | With the sweep that applies it |
+| 6 | Erasure request | Workflow | Yes | Intake, action, evidence |
+| 7 | Redaction rules | Standard | Yes | Obeyed by every log line and event payload |
+
+### Flow
+
+1. A candidate consents at sign-up against a versioned notice; the evidence is retrievable later.
+2. A verification check reads the separate verification consent **before** any adapter call is
+   dispatched, and refuses to dispatch without it.
+3. A withdrawal stops future processing that depends on it, without rewriting history.
+4. The retention sweep applies the per-type policy on the job runtime.
+5. Logs and event payloads are redacted at write, per the shared rules.
+
+### Scenarios to test
+
+- No verification check dispatches without a recorded verification consent.
+- Consent evidence for a candidate is retrievable with the notice version they agreed to.
+- A withdrawal stops the affected processing and leaves statutory messages unaffected.
+- A residency test fails the build if any store or backup is configured outside Mumbai.
+- The retention sweep removes exactly what its policy names and nothing else.
+- An erasure request produces evidence of what was erased and what was retained, with the reason.
+
+---
+
+## 5. Deployment to Apollo's AWS Mumbai account and Phase 1 documentation
+
+**ClickUp item** — *link to be added* · **Delivers** `D11` (Phase 1 slice)
+
+**Screens** — none
+
+### Scenarios to cover
+
+The Phase 1 build runs in **Apollo's own AWS account in Mumbai**, and the technical documentation
+covers what Phase 1 ships — no more.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Apollo AWS account access | Client dependency | Yes | With the agreed security tooling |
+| 2 | Production stack | Deployment | Yes | Deployed into that account, not a Hiresense account |
+| 3 | Technical documentation | Deliverable | Yes | Architecture, data model, APIs, runbooks **for Phase 1 scope** |
+| 4 | Runbooks | Deliverable | Yes | Deploy, rollback, restore, on-call |
+| 5 | Phase 1 go-live | Event | Yes | With the restore rehearsal from item 3 evidenced |
+
+### Flow
+
+1. Apollo provides account access and security tooling; the stack is deployed there.
+2. Documentation is written against what Phase 1 actually ships and reviewed with Apollo.
+3. Go-live proceeds once the restore rehearsal is evidenced and the runbooks are handed over.
+
+### Scenarios to test
+
+- The production stack runs in Apollo's account, in Mumbai, and nothing runs elsewhere.
+- The runbooks are executed by someone who did not write them, successfully.
+- The documentation matches the Phase 1 scope: no feature documented that does not exist, and no
+  Phase 1 feature undocumented.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Documentation, UAT and cutover for everything released after the first go-live | [Phase 3 · Documentation and go-live](/docs/release-plan/part-3/documentation-and-go-live) |
+| The client-portal tenancy boundary and portal data scoping | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) |

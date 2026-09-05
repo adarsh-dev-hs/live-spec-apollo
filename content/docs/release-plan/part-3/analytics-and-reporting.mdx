@@ -1,0 +1,224 @@
+---
+title: "Analytics and reporting"
+description: "Phase 3: the mart layer, funnel and fill reporting, stage-level loss and performance, the monthly MIS pack, and rate variance against baseline."
+icon: ChartColumn
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D9` · `D28` · `A11` — **all three in full; they appear in no other part** |
+| **Engineering reference** | [Analytics and reporting](/docs/engineering/build/modules#analytics-and-reporting) |
+| **Screens** | `/reports/funnel` · `/reports/fill` · `/reports/trial-survival` · `/reports/stage-loss` · `/reports/performance` · `/reports/rate-variance` · `/reports/monthly-pack` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+How many vacancies get filled, how fast, where candidates drop out, how each recruiter and each intake
+channel performs, how many placements survive to day 90, and how the rate agreed compares to the
+standard rate. **Everything here reads marts built from the event spine, never operational tables** —
+and every report depends on events having been written when the work happened, which is why the event
+spine shipped in Phase 1 with nothing yet reading it.
+
+## Release in this phase
+
+1. The mart layer.
+2. Funnel, fill rate, time-to-fill and trial survival (`D9`).
+3. Stage-level loss, channel and recruiter performance (`D28`).
+4. The monthly MIS pack.
+5. Rate variance against baseline (`A11`).
+
+---
+
+## 1. The mart layer
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/jobs`
+
+### Scenarios to cover
+
+The reporting substrate: marts derived from the append-only event log, rebuildable by replay, and
+covering **the whole period since the first requisition** — not since the reports were built.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Mart definitions | Schemas | Yes | One per reporting subject area |
+| 2 | Derivation jobs | Jobs | Yes | From the event log, idempotent |
+| 3 | Replay | Capability | Yes | Rebuild a mart from the log without touching operational tables |
+| 4 | Freshness indicator | Field | Yes | Shown on every report |
+| 5 | Isolation | Rule | Yes | **No report reads an operational table** |
+| 6 | Backfill | Job | Yes | Covers the whole history from Phase 1 onward |
+
+### Flow
+
+1. Marts are defined and derived from the event log.
+2. A backfill run covers the entire history since the first event.
+3. Reports read marts only, with freshness shown.
+
+### Scenarios to test
+
+- A rebuild from the log reproduces the mart exactly.
+- Every report names its freshness.
+- No report query touches an operational table, verified by test.
+- The backfill covers the earliest events, from Phase 1.
+
+---
+
+## 2. Funnel, fill rate, time-to-fill and trial survival — `D9`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/reports/funnel` · `/reports/fill` · `/reports/trial-survival`
+
+### Scenarios to cover
+
+The four core measures: where candidates move and drop between stages, what share of vacancies get
+filled, how long that takes — **shown as a distribution rather than only an average** — and how many
+placements survive the full day 0–90 curve.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Funnel | Report | Yes | Stage counts and conversion between them |
+| 2 | Fill rate | Report | Yes | By client, site, category, period |
+| 3 | Time-to-fill | Report | Yes | Distribution — median and spread, not only a mean |
+| 4 | Trial survival | Report | Yes | The full day 0–90 curve |
+| 5 | Filters | Shared | Yes | Client, category, care setting, period, owner |
+| 6 | Export | Action | — | Per report |
+
+### Flow
+
+1. Reports read their marts and render with filters.
+2. Every figure can be traced to the events behind it.
+
+### Scenarios to test
+
+- Funnel stage counts reconcile with the operational records for the same period.
+- Time-to-fill excludes held days, consistently with the aging rule.
+- Trial survival matches the placement outcomes.
+- A period before a report existed still returns data.
+
+---
+
+## 3. Stage-level loss, channel and recruiter performance — `D28`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/reports/stage-loss` · `/reports/performance`
+
+### Scenarios to cover
+
+Where the pipeline loses people, **by client and by recruiter**, and how each intake channel and each
+recruiter performs. Stage-level loss by recruiter depends on the owner field captured from Phase 2 —
+periods before it exists show as unattributed rather than as zero.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Stage loss | Report | Yes | By client and by recruiter |
+| 2 | Channel performance | Report | Yes | Volume, completeness, conversion by intake channel |
+| 3 | Recruiter performance | Report | Yes | Load, fill rate, time-to-fill |
+| 4 | Attribution rule | Definition | Yes | Owner at the time of the event, not current owner |
+| 5 | Unattributed handling | Behaviour | Yes | Shown explicitly, never as zero |
+
+### Flow
+
+1. Marts join events to the owner in force at the time.
+2. Reports render by client, recruiter and channel.
+
+### Scenarios to test
+
+- Attribution uses the owner at the time, not the current one.
+- Periods with no owner data show as unattributed.
+- Channel performance reconciles with the intake records.
+- Recruiter load matches the allocation records.
+
+---
+
+## 4. The monthly MIS pack
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/reports/monthly-pack`
+
+### Scenarios to cover
+
+One pack, generated on a schedule, containing the agreed management measures for a month, in a form
+that can be circulated.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Pack definition | Configuration | Yes | Which measures, in which order |
+| 2 | Schedule | Job | Yes | Monthly, on the agreed day |
+| 3 | Generated document | File | Yes | Stored through the shared file store |
+| 4 | Distribution | Trigger | Yes | To the configured recipients |
+| 5 | Regeneration | Behaviour | Yes | Reproducible for a closed month |
+
+### Flow
+
+1. The pack is generated on schedule from the marts.
+2. It is stored and distributed to the configured recipients.
+3. Regeneration for a closed month reproduces the same figures.
+
+### Scenarios to test
+
+- The pack generates on schedule without manual intervention.
+- Figures in the pack match the on-screen reports for the same period.
+- Regeneration for a closed month is reproducible.
+- A failed generation is visible and re-runnable, not silently skipped.
+
+---
+
+## 5. Rate variance against baseline — `A11`
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/reports/rate-variance`
+
+### Scenarios to cover
+
+The rate actually agreed against the baseline rate on the rate card, **by client, role, specialty and
+acuity** — which is how Apollo sees where margin is being given away.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Baseline capture | Data | Yes | From the rate card lines, versioned |
+| 2 | Agreed rate capture | Data | Yes | From requisitions, placements and timesheets |
+| 3 | Variance measure | Derived | Yes | Absolute and percentage |
+| 4 | Dimensions | Filters | Yes | Client, role, specialty, acuity, period |
+| 5 | Drill-through | Behaviour | — | To the records behind a variance figure |
+
+### Flow
+
+1. Marts pair each agreed rate with the baseline in force at the time.
+2. Variance is computed and rendered across the dimensions.
+3. A figure drills through to the records behind it.
+
+### Scenarios to test
+
+- Variance uses the baseline in force at the agreement date.
+- Figures reconcile with the underlying invoices and timesheets.
+- Drill-through reaches the exact records that produced a figure.
+- A missing baseline is shown as missing, never as zero variance.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | |
+|---|---|
+| Client-facing analytics in the portal | Not in scope in any part |
+| AI technical screening | **Not in scope** — see [Scope and deliverables](/docs/release-plan/scope/deliverables) |

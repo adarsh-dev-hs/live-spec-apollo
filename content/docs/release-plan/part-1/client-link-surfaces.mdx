@@ -1,0 +1,242 @@
+---
+title: "Client link surfaces"
+description: "Phase 1: the tokenised link mechanism, link recipients, the shortlist response link, the day-90 retention link with deemed handling, and the link log finance uses."
+icon: Link2
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `A13` (partial) — the mechanism and **two of the four link types** |
+| **Engineering reference** | [Client link surfaces](/docs/engineering/build/platform-services#client-link-surfaces) |
+| **Screens** | `/links` · the public pages at `/l` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+**This is the entire client relationship in Phase 1.** There is no client login until Phase 2, so
+every interaction a hospital has with the platform is a tokenised link, sent over a channel they
+already use, opened without a password or an account. Two of the four link types are released here,
+and one of them — day 90 — is a **billing trigger**: the record it produces is what allows an invoice
+to be raised and what has to answer a billing query a year later.
+
+## Release in this phase
+
+1. The link mechanism: token, issue, send, open, answer, expire, reissue.
+2. Link recipients — who at the client receives which type.
+3. The shortlist response link.
+4. The day-90 retention link, with reminders and deemed handling.
+5. The link log finance uses to justify an invoice.
+
+---
+
+## 1. The link mechanism
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/links` · `/l`
+
+### Scenarios to cover
+
+One mechanism carries every link type as configuration. A token is unguessable and expires, an
+answer can be submitted once, a link can be reissued when a client says they never got it, and a
+recipient who opens an expired link is told what to do rather than shown an error.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Link record | Record | Yes | Type, subject entity, recipient, issued at, expires at, state |
+| 2 | Token | Secret | Yes | Unguessable, single-subject, expiring |
+| 3 | Link type | Configuration | Yes | Behaviour, page, answer schema, deemed rule |
+| 4 | States | Enum | Yes | Issued, sent, opened, answered, expired, reissued |
+| 5 | Public page | Screen | Yes | Rendered at `/l`, no account, no password |
+| 6 | Duplicate-submission protection | Behaviour | Yes | A second submission of one link is ignored |
+| 7 | Reissue | Action | Yes | New token, old token dead, both recorded |
+| 8 | Answer routing | Mechanism | Yes | To the consumer registered for that type |
+
+### Flow
+
+1. A consumer asks for a link of a type, naming the subject entity and the recipient.
+2. The token is issued and sent through the sending path; the state moves to sent.
+3. Opening records the open; answering records the answer and routes it to the consumer.
+4. Expiry moves the state and applies the type's deemed rule where it has one.
+5. A reissue kills the old token and issues a new one, both recorded.
+
+### Scenarios to test
+
+- A token cannot be guessed from another token, and cannot be reused for another subject.
+- A second submission on one token is ignored and recorded as ignored.
+- An expired link renders an explanatory page, not an error.
+- A reissued link invalidates its predecessor immediately.
+- Opening and answering are both recorded with time and source.
+
+---
+
+## 2. Link recipients
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id` · `/links`
+
+### Scenarios to cover
+
+Who at the client receives which type of link. A shortlist goes to the person who reviews
+candidates; a day-90 confirmation goes to whoever is accountable for the placement. Getting this
+wrong means a billing trigger sitting unanswered in the wrong inbox.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Recipient mapping | Per client contact | Yes | Which link types this contact receives |
+| 2 | Channel per recipient | Reference | Yes | Email or WhatsApp, from their contact record |
+| 3 | Multiple recipients | Behaviour | Yes | A type may go to more than one contact |
+| 4 | No-recipient handling | Behaviour | Yes | Issuing with no mapped recipient fails loudly |
+
+### Flow
+
+1. Recipients are mapped on the client record.
+2. Issuing a link resolves recipients for its type and sends to each.
+3. Where no recipient is mapped, issuing fails with a clear message rather than sending nowhere.
+
+### Scenarios to test
+
+- A type with two recipients produces two sends and one answerable link per recipient.
+- A client with no mapped recipient for a type cannot have that link issued silently.
+- Changing a contact's channel changes where the next link goes, not where past ones went.
+
+---
+
+## 3. The shortlist response link
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/l` · `/shortlists`
+
+### Scenarios to cover
+
+The client opens a link with no account, sees the shortlisted candidates as configured, and answers
+per candidate: **yes, no, or with comments**. They can also verify the details of the requirement
+while they are there. The answer lands back on the shortlist entry.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Candidate cards | Rendering | Yes | Only the fields configured as visible to a client |
+| 2 | Response per candidate | Yes / No / With comments | Yes | One answer per candidate |
+| 3 | Comment | Text | Yes when *with comments* | |
+| 4 | Requirement verification | Confirm or comment | — | The client checks the requirement is right |
+| 5 | Submit | Action | Yes | One submission per link |
+| 6 | Confirmation state | Page | — | What happens next, in the client's language |
+
+### Flow
+
+1. Submitting a shortlist issues the link and sends it to the mapped recipients.
+2. The client opens the public page and answers per candidate.
+3. Submission writes each answer back to its shortlist entry and notifies the requisition owner.
+4. A *yes* makes the candidate available for interview scheduling.
+
+### Scenarios to test
+
+- The page shows no field configured as withheld, and no other client's data.
+- *With comments* without a comment is refused.
+- Answers write back to the correct entries in one transaction.
+- A second submission is ignored and the client is told the response is already recorded.
+- The requisition owner is notified once.
+
+---
+
+## 4. The day-90 retention link
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/l` · `/trial` · `/links`
+
+### Scenarios to cover
+
+At day 90 the client is asked **whether the person is still there**. That answer is what lets Apollo
+invoice. If the client does not answer within the configured waiting period, the window expires and
+the outcome is **deemed** — and the reminders sent before that carry an explicit warning that
+non-response will be treated as acceptance.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Retention question | Rendering | Yes | Still in post: yes / no / with comments |
+| 2 | Waiting period | Resolved value | Yes | Per client, with the platform default — SOW example: 7 days |
+| 3 | Reminder schedule | Configuration | Yes | **Each reminder warns of auto-accept on expiry** |
+| 4 | Deemed handling | Behaviour | Yes | Expiry produces the deemed outcome |
+| 5 | Countdown | Display | Yes | Visible internally on the placement and the link |
+| 6 | Outcome record | Reference | Yes | Handed to placement to write the retention record |
+| 7 | Billing-trigger flag | Configuration | Yes | **Only this link type may carry it** |
+
+### Flow
+
+1. Placement asks for a day-90 link at the right point in the trial schedule.
+2. The link is sent; reminders fire on schedule, each carrying the auto-accept warning.
+3. A client answer records the outcome and who gave it.
+4. No answer by expiry records the deemed outcome and says explicitly that the window expired.
+5. Either outcome is handed to placement, which writes the immutable retention record.
+
+### Scenarios to test
+
+- The countdown and expiry use the client's resolved waiting period, not a flat rule.
+- Every reminder carries the auto-accept warning.
+- An answer arriving after expiry does not overwrite the deemed outcome; it is recorded separately.
+- The outcome record distinguishes *client acknowledged* from *window expired*.
+- No other link type can be configured as a billing trigger.
+
+---
+
+## 5. The link log
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/links`
+
+### Scenarios to cover
+
+Finance has to justify an invoice: who was sent what, when they opened it, what they answered, and
+what happened if they did not. The link log is that evidence, and it is read alongside billing
+evidence.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Log list | Screen | — | Type, subject, recipient, states with timestamps |
+| 2 | Send record | Per send | Yes | Channel, provider outcome |
+| 3 | Open record | Per open | Yes | Time and source |
+| 4 | Answer record | Per answer | Yes | The submitted payload |
+| 5 | Expiry record | Per expiry | Yes | Including the deemed outcome |
+| 6 | Filters and export | Shared list engine | — | By client, type, state and period |
+
+### Flow
+
+1. Every state change on a link writes to the log.
+2. Finance opens the log from the invoice's billing evidence and sees the whole life of the link.
+3. Export produces the same rows for a period.
+
+### Scenarios to test
+
+- Every state transition appears, with nothing editable.
+- The log entry for an invoice-triggering link reaches from issue to outcome without a gap.
+- Export matches the filter.
+- A link for one client is never visible in another client's filtered view.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| The day 30 and day 60 trial check-in link types | [Phase 2 · Client link surfaces](/docs/release-plan/part-2/client-link-surfaces) |
+| The timesheet approval link type and its deemed-approval rule | [Phase 2 · Client link surfaces](/docs/release-plan/part-2/client-link-surfaces) |
+| A logged-in client experience of any kind | [Phase 2 · Client portal](/docs/release-plan/part-2/client-portal) |

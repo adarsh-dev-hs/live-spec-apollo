@@ -1,0 +1,192 @@
+---
+title: "Timesheet extensions"
+description: "Phase 3: leave, overtime rules, internal approval routing, and the full timesheet calculation that feeds both the client invoice and the payroll input."
+icon: Timer
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D22` — **the remainder (full)** |
+| **Engineering reference** | [Timesheet extensions](/docs/engineering/build/modules#timesheet-extensions) |
+| **Screens** | `/timesheets` · `/timesheets/:id` · `/workforce/requests` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+The three things the thin-slice timesheet deliberately left out, plus the calculation that puts them
+together. The same timesheet then feeds **both the client invoice and the payroll input, with no
+second calculation** — which is the whole reason these are built here rather than approximated inside
+payroll later.
+
+<Callout type="warn" title="Sequencing">
+Internal approval routing **reuses the maker-checker engine** built in
+[workforce operations](/docs/release-plan/part-3/workforce-operations). Build workforce operations
+first; built the other way round, the engine gets built twice.
+</Callout>
+
+## Release in this phase
+
+1. Leave types and leave records.
+2. Overtime rules.
+3. Internal timesheet approval routing.
+4. The full timesheet calculation.
+
+---
+
+## 1. Leave types and leave records
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets/:id` · `/workforce/requests`
+
+### Scenarios to cover
+
+Time not worked is categorised rather than simply absent: paid and unpaid leave types as reference
+data, records against an associate and a period, and a visible effect on both the invoice and the pay
+input.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Leave type | Reference data | Yes | Paid or unpaid, with its rules |
+| 2 | Leave record | Record | Yes | Associate, type, dates, approval state |
+| 3 | Interaction with attendance | Rule | Yes | Leave explains an absence rather than leaving a no-show |
+| 4 | Billing effect | Rule | Yes | Whether the client is billed, per type |
+| 5 | Pay effect | Rule | Yes | Whether the associate is paid, per type |
+
+### Flow
+
+1. Leave types are configured with their billing and pay rules.
+2. A leave record is raised and approved for a period.
+3. Compilation reads leave alongside attendance and applies both rules.
+
+### Scenarios to test
+
+- A no-show covered by approved leave is reclassified, not double-counted.
+- An unpaid type reduces the pay input without changing the invoice, per its rule.
+- Overlapping leave records for one associate are refused.
+- Changing a type's rules does not retrospectively change closed periods.
+
+---
+
+## 2. Overtime rules
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets/:id` · `/admin/settings`
+
+### Scenarios to cover
+
+Overtime is not one rule. It **varies by client and by state**, and the rule in force at the shift
+date is the rule that applies.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Overtime rule | Configuration | Yes | Threshold, multiplier, basis — daily or weekly |
+| 2 | Scope | Fields | Yes | By client and by state |
+| 3 | Effective dating | Behaviour | Yes | Versions never overlap |
+| 4 | Calculation output | Fields | Yes | Ordinary hours and overtime hours, separately |
+| 5 | Rate application | Behaviour | Yes | Overtime priced against the contract's overtime rate |
+
+### Flow
+
+1. Rules are configured per client and state, effective-dated.
+2. Compilation resolves the rule at the shift date.
+3. Hours split into ordinary and overtime, each priced accordingly.
+
+### Scenarios to test
+
+- A shift crossing a rule change uses the rule in force on its date.
+- Daily and weekly thresholds are both honoured where configured.
+- Overtime hours appear separately on the timesheet and the invoice.
+- Missing an overtime rate blocks pricing rather than pricing at ordinary.
+
+---
+
+## 3. Internal timesheet approval routing
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets/:id` · `/workforce/requests`
+
+### Scenarios to cover
+
+Before a timesheet goes to the client it is approved internally, routed by value, client or site,
+**reusing the maker-checker engine** rather than implementing a second approval mechanism.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Routing rule | Configuration | Yes | By value, client, site |
+| 2 | Approval request | Record | Yes | Raised through the shared engine |
+| 3 | Raiser ≠ approver | Constraint | Yes | Enforced by the engine |
+| 4 | Internal state | State machine | Yes | Added before `sent_for_approval` |
+| 5 | Rejection | Action | Yes | Returns the timesheet for correction, with a reason |
+
+### Flow
+
+1. A compiled timesheet raises an internal approval request per the routing rule.
+2. An approver other than the raiser approves or rejects.
+3. Approval permits sending to the client; rejection returns it for correction.
+
+### Scenarios to test
+
+- A timesheet cannot reach the client before internal approval where the rule requires it.
+- The raiser cannot approve their own timesheet.
+- The engine used is the workforce-operations engine, not a second implementation.
+- Rejection records a reason and returns the timesheet without losing its lines.
+
+---
+
+## 4. The full timesheet calculation
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets/:id`
+
+### Scenarios to cover
+
+Leave and overtime applied **on top of** the attendance data already captured, producing one
+calculation that both the client invoice and the payroll input read.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Calculation | Component | Yes | Attendance + leave + overtime |
+| 2 | Billing output | Values | Yes | What the client is invoiced |
+| 3 | Pay output | Values | Yes | What payroll receives as input |
+| 4 | Divergence | Behaviour | Yes | Billed and paid may differ; both come from **one** calculation |
+| 5 | Recalculation | Behaviour | Yes | On correction, with the previous version retained |
+
+### Flow
+
+1. Compilation applies leave and overtime to the attendance base.
+2. Billing and pay outputs are produced from the same calculation.
+3. A correction recalculates and supersedes, retaining the previous version.
+
+### Scenarios to test
+
+- Billing and pay outputs derive from one calculation, proven by test rather than by convention.
+- A correction recalculates both outputs consistently.
+- A closed period cannot be recalculated silently.
+- Totals reconcile line by line against attendance, leave and overtime.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Attendance capture, geo-fencing, exceptions, compilation, client approval | [Phase 2 · Attendance and timesheets](/docs/release-plan/part-2/attendance-and-timesheets) |
+| The maker-checker engine itself | [Phase 3 · Workforce operations](/docs/release-plan/part-3/workforce-operations) |
+| Consuming the pay output | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |

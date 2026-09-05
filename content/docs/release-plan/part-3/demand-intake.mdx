@@ -1,0 +1,155 @@
+---
+title: "Demand intake"
+description: "Phase 3: the remaining channels — per-client spreadsheet formats, client HRMS and ATS feeds, and WhatsApp voice notes transcribed to the requisition schema."
+icon: Inbox
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `A1` (partial) — **the remaining three channels** · `A14` (partial) |
+| **Engineering reference** | [Demand intake](/docs/engineering/build/modules#demand-intake) · [Inbound pipeline](/docs/engineering/build/platform-services#inbound-pipeline) |
+| **Screens** | `/inbound` · `/inbound/manual-entry` · `/duplicates` · `/admin/channels` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+The three ways clients send vacancies that a parser cannot simply read: a spreadsheet in the client's
+own layout, a feed from the client's own HR system, and a voice note. Each lands on the pipeline built
+earlier and normalises to the same requisition schema — the work here is the mapping, the connector
+and the transcription, not a new intake stack.
+
+## Release in this phase
+
+1. Per-client spreadsheet intake with configurable column mapping.
+2. Client HRMS and ATS feeds.
+3. WhatsApp voice notes, transcribed.
+
+---
+
+## 1. Per-client spreadsheet intake
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/channels` · `/inbound`
+
+### Scenarios to cover
+
+Every client has their own spreadsheet. The mapping from their columns to the requisition schema is
+**configuration, changeable without a deployment**, because a client changing a column heading must
+not be an engineering ticket.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Spreadsheet channel | Channel config | Yes | Per client, with the arrival route |
+| 2 | Column mapping | Configuration | Yes | Source column to requisition field, per client |
+| 3 | Header detection | Behaviour | Yes | Tolerates leading blank rows and merged headers |
+| 4 | Row-to-requisition rule | Configuration | Yes | One row per vacancy, or a quantity column |
+| 5 | Validation report | Output | Yes | Per-row accepted or rejected with a reason |
+| 6 | Partial acceptance | Behaviour | Yes | Valid rows proceed; invalid rows are reported |
+| 7 | Mapping preview | Screen | Yes | Test a mapping against a sample file before enabling |
+
+### Flow
+
+1. A mapping is configured for the client and previewed against a sample file.
+2. A spreadsheet arrives on its configured route and becomes an inbound record with its file retained.
+3. Rows are mapped, validated and turned into requisitions; invalid rows are reported back.
+4. Completeness scoring and the chase loop run per requisition as on any channel.
+
+### Scenarios to test
+
+- Changing a column heading is fixed by editing the mapping, with no deploy.
+- A file with fifty rows where three are invalid creates forty-seven requisitions and reports three.
+- The original file is retained and reachable from every requisition it produced.
+- A duplicate upload of the same file does not create duplicate requisitions.
+
+---
+
+## 2. Client HRMS and ATS feeds
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/channels` · `/inbound`
+
+### Scenarios to cover
+
+A client's own HR system pushes or exposes vacancies. The tenant is resolved to a client through the
+sender identity list, the payload maps to the requisition schema, and an update to a vacancy in the
+source updates the requisition rather than creating a second one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Feed channel | Channel config | Yes | Per client: endpoint or inbound webhook, credentials |
+| 2 | Tenant resolution | Mechanism | Yes | System tenant as a sender identity |
+| 3 | Payload mapping | Configuration | Yes | Source fields to the requisition schema |
+| 4 | External reference | Field | Yes | The source system's vacancy id, held on the requisition |
+| 5 | Update semantics | Behaviour | Yes | A changed source vacancy revises, not duplicates |
+| 6 | Backfill and replay | Capability | Yes | Re-run a period without duplicating |
+
+### Flow
+
+1. The feed is configured and its tenant registered as a sender identity.
+2. Records arrive, resolve to the client, and map to requisitions carrying the external reference.
+3. A later change to the same external reference creates a **new requisition version**.
+
+### Scenarios to test
+
+- The same external reference never produces two requisitions.
+- A source change produces a version, and the earlier version stays readable.
+- A feed outage followed by a backfill produces no duplicates.
+- An unmatched tenant lands in the unmatched queue.
+
+---
+
+## 3. WhatsApp voice notes, transcribed
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/inbound/manual-entry`
+
+### Scenarios to cover
+
+A client sends a voice note describing a vacancy. It is stored, transcribed, parsed to the
+requisition schema, and — because a transcript is never certain — **reviewed before the requisition
+opens**, with the audio available beside the draft.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Voice note capture | Receiver | Yes | Audio stored through the shared file store |
+| 2 | Transcription | Integration | Yes | Language handling per the agreed set |
+| 3 | Transcript record | Store | Yes | Retained with the inbound record |
+| 4 | Parse to schema | Component | Yes | The same requisition mapping as text |
+| 5 | Mandatory review | Behaviour | Yes | Audio and transcript beside the draft requisition |
+| 6 | Confidence handling | Behaviour | Yes | Low confidence routes to manual entry |
+
+### Flow
+
+1. A voice note arrives on the WhatsApp channel and is stored.
+2. Transcription runs and the transcript is parsed.
+3. A person reviews the draft with the audio available, corrects and opens the requisition.
+
+### Scenarios to test
+
+- The audio is retained and playable from the requisition's evidence.
+- A voice-note requisition cannot open without review.
+- A failed transcription routes to manual entry with the audio, not to a dead end.
+- A candidate response arriving as a voice note routes to its own intent, not to demand.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Email, WhatsApp text and portal intake | [Phase 2 · Demand intake](/docs/release-plan/part-2/demand-intake) |
+| Console entry and verbal capture | [Phase 1 · Demand and requisitions](/docs/release-plan/part-1/demand-and-requisitions) |

@@ -1,0 +1,337 @@
+---
+title: "Demand intake"
+description: "Phase 2: vacancies arriving by email, WhatsApp and the client portal — received, resolved to a client, parsed into the requisition schema, scored for completeness, chased on the channel they came in on, and queued for a person where the machine could not finish."
+icon: Inbox
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `A1` (partial) — **three of the six channels** |
+| **Engineering reference** | [Demand intake](/docs/engineering/build/modules#demand-intake) · [Inbound pipeline](/docs/engineering/build/platform-services#inbound-pipeline) |
+| **Screens** | `/inbound` · `/inbound/unmatched` · `/inbound/manual-entry` · `/duplicates` · `/admin/channels` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 7 below.
+
+Clients tell Apollo about vacancies in whatever way suits them — an email, a WhatsApp message, or a
+form on their own portal. This feature turns all of them into **one standard requisition payload**,
+scores it against what *complete* means for that candidate category, chases the client **on the
+channel they used** for anything missing, and gives a person a queue for everything the machine could
+not do. Until now every requisition was keyed in by a recruiter; from here the recruiter's job on
+most vacancies is to check what arrived rather than to type it.
+
+## Release in this phase
+
+1. The shared inbound pipeline: receive, record, deduplicate, resolve sender, classify, dispatch.
+2. Email intake.
+3. WhatsApp intake.
+4. Portal intake as a registered channel.
+5. Parser dispatch and field extraction to the requisition schema.
+6. Completeness scoring and the chase loop.
+7. The four operational queues.
+
+<Callout type="warn" title="The pipeline must accept a second consumer from the start">
+`A1` owns this stack and `A14` — candidate response capture in
+[engagement and availability](/docs/release-plan/part-2/engagement-and-availability) — consumes it
+with a different intent schema. **Build the intent-registration contract in item 1, not as a
+retrofit** once demand parsing works.
+</Callout>
+
+---
+
+## 1. The shared inbound pipeline
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound`
+
+### Scenarios to cover
+
+Everything that arrives from outside lands here first: it is written down exactly as it was sent, a
+redelivery does not become a second record, the sender is resolved to exactly one client, the message
+is classified, and it is handed to whoever registered for that kind of message — retrying, and
+**never discarding anything on the way**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Inbound record | Store | Yes | One per message or file, with the **raw payload retained forever** |
+| 2 | Channel receiver | Component | Yes | One per channel, writing the same record shape |
+| 3 | Deduplication | Behaviour | Yes | A provider redelivery updates, never duplicates |
+| 4 | Sender identity resolution | Mechanism | Yes | Against the client sender list — **exactly one client, or the unmatched queue** |
+| 5 | Intent classification | Mechanism | Yes | With a shared confidence threshold and a fallback |
+| 6 | Intent registration contract | API | Yes | Lets a second consumer attach without modifying the stack |
+| 7 | Reclassification | Action | Yes | Between intent sets, **without re-ingestion** |
+| 8 | Queue, retry, dead letter | Job runtime | Yes | Observable end to end |
+
+### Flow
+
+1. A receiver accepts a message and writes the inbound record with its raw payload.
+2. Deduplication checks the provider's message identifier.
+3. Sender resolution matches against sender identities; no match goes to the unmatched queue.
+4. Classification assigns an intent; below the confidence threshold it goes to the fallback.
+5. Dispatch hands the record to the consumer registered for that intent.
+6. Failures retry and then dead-letter, visible on `/admin/jobs`.
+
+### Scenarios to test
+
+- The raw payload is retained and readable for every record, including failures.
+- A redelivered provider message produces one record, not two.
+- A sender matching two clients is refused as ambiguous rather than assigned to one.
+- A second intent consumer registers without a change to the pipeline.
+- Reclassifying a record does not re-ingest it or lose its history.
+- Nothing is discarded: every record ends in a terminal state that a person can see.
+
+---
+
+## 2. Email intake
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/admin/channels`
+
+### Scenarios to cover
+
+Requisitions arrive as email into a monitored mailbox. The sender address resolves to a client, the
+body and attachments are parsed, and a requisition is produced. A mail from an address nobody has
+registered goes to the unmatched queue with a person told about it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Mailbox configuration | Channel config | Yes | Address, credentials, polling or push |
+| 2 | Message capture | Receiver | Yes | Headers, body, attachments, all retained |
+| 3 | Attachment handling | Behaviour | Yes | Stored through the shared file store |
+| 4 | Thread handling | Behaviour | Yes | A reply attaches to the same follow-up thread |
+| 5 | Sender resolution | Shared mechanism | Yes | From the address, against sender identities |
+| 6 | Auto-reply suppression | Behaviour | Yes | Out-of-office and bounce messages do not create demand |
+
+### Flow
+
+1. Mail arrives in the monitored mailbox and is captured with its attachments.
+2. The sender address resolves to a client; unmatched goes to the unmatched queue.
+3. The classifier decides it is demand, and the parser in item 5 runs.
+4. A reply to a chase message is threaded to the follow-up it answers.
+
+### Scenarios to test
+
+- A mail with attachments produces one record with every attachment stored.
+- An out-of-office reply does not create a requisition.
+- A reply threads to its follow-up rather than creating a new demand.
+- An unknown sender lands in unmatched and a person is notified.
+- Duplicate delivery of the same message produces one record.
+
+---
+
+## 3. WhatsApp intake
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/admin/channels`
+
+### Scenarios to cover
+
+A client contact sends a WhatsApp message about a vacancy. The number resolves to a client, the
+message is parsed, and a requisition is produced. **The same WhatsApp registration and template set
+serves demand follow-up and candidate messaging** — one registration, not two.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | WhatsApp channel configuration | Channel config | Yes | Number, webhook, credentials |
+| 2 | Inbound webhook receiver | Component | Yes | Signature-verified |
+| 3 | Text message handling | Behaviour | Yes | Free text to the parser |
+| 4 | Media handling | Behaviour | Yes | Images and documents stored; **voice notes are not handled in Phase 2** |
+| 5 | Number resolution | Shared mechanism | Yes | Against sender identities |
+| 6 | Conversation window rules | Behaviour | Yes | Template versus session message, respected on reply |
+
+### Flow
+
+1. The webhook receives a message and verifies its signature.
+2. The number resolves to a client; unmatched goes to the unmatched queue.
+3. Text is classified and parsed; media is stored and linked to the record.
+4. A chase reply is sent inside the conversation window, or as an approved template outside it.
+
+### Scenarios to test
+
+- An unsigned or replayed webhook call is rejected.
+- A message from a registered client number produces a demand record.
+- A message from an unknown number lands in unmatched.
+- A chase message outside the session window uses an approved template and is delivered.
+- A voice note is recorded as received and routed to manual entry, not silently dropped.
+
+---
+
+## 4. Portal intake as a registered channel
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/channels` · the portal form in [client portal](/docs/release-plan/part-2/client-portal)
+
+### Scenarios to cover
+
+The client portal becomes an intake channel like any other. A vacancy raised in the portal produces
+**the same requisition record as one arriving by email**, marked as sourced from the portal — no
+second code path, no second schema.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Portal channel | Channel config | Yes | Enabled per client |
+| 2 | Structured submission | Payload | Yes | Already field-complete; no parsing needed |
+| 3 | Source marking | Field | Yes | Channel = portal, with the submitting user |
+| 4 | Completeness scoring | Shared | Yes | Runs the same as any channel |
+
+### Flow
+
+1. A portal submission arrives as an inbound record with a structured payload.
+2. Sender resolution is trivial — the signed-in user's client.
+3. Completeness scoring runs; a complete submission opens directly.
+
+### Scenarios to test
+
+- A portal requisition and an email requisition for the same vacancy differ only in source channel
+  and raw payload.
+- Disabling the portal channel for a client removes the option from their portal.
+- The submitting client user is recorded on the requisition.
+
+---
+
+## 5. Parser dispatch and field extraction
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/inbound/manual-entry`
+
+### Scenarios to cover
+
+A record classified as demand is handed to the parser for its channel, which extracts fields into
+**the requisition schema** — the same schema the console form writes. What could not be extracted is
+left blank rather than guessed, and the extraction is kept beside the raw payload so a disputed
+requirement traces back to what the client actually sent.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Parser per channel | Component | Yes | Dispatched by channel and intent |
+| 2 | Parse result | Record | Yes | Extracted fields, per-field confidence, unparsed remainder |
+| 3 | Requisition schema mapping | Mapping | Yes | Client, site, category, role, positions, experience, dates |
+| 4 | Evidence link | Reference | Yes | Parse result to inbound record to raw payload |
+| 5 | Review before open | Behaviour | Yes | A parsed requisition is reviewable before it goes live |
+| 6 | Manual entry | Screen | Yes | A person keys in what the parser could not |
+
+### Flow
+
+1. The parser runs and produces a parse result with confidences.
+2. Mapped fields create a draft requisition carrying its source evidence.
+3. Complete drafts are scored in item 6; incomplete ones are chased or queued.
+4. Manual entry lets a person complete a record from the raw payload beside the form.
+
+### Scenarios to test
+
+- A parsed requisition carries a resolvable link back to the raw payload.
+- A field the parser could not read is blank, never invented.
+- Manual entry shows the raw payload beside the form.
+- The requisition produced is indistinguishable in shape from a console-created one.
+
+---
+
+## 6. Completeness scoring and the chase loop
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/admin/channels`
+
+### Scenarios to cover
+
+*Complete* means different things for different candidate categories. The required-field set per
+category defines it; a requisition below it is chased **on the channel it arrived on**, with a
+configured message, a window, and an escalation target when the window passes.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Required-field set | Configuration | Yes | Per candidate category |
+| 2 | Completeness score | Derived | Yes | Against that set |
+| 3 | Follow-up configuration | Configuration | Yes | Message per channel, window, escalation target |
+| 4 | Follow-up thread | Record | Yes | What was asked, when, and what came back |
+| 5 | Reply matching | Behaviour | Yes | An inbound reply attaches to its thread and re-scores |
+| 6 | Escalation | Action | Yes | To the configured internal owner on window expiry |
+| 7 | State | Enum | Yes | `incomplete` → `awaiting_client` → `complete` |
+
+### Flow
+
+1. A parsed requisition is scored against its category's required-field set.
+2. Complete → the requisition opens. Incomplete → a chase is sent on the arrival channel.
+3. A reply attaches to the thread, re-parses and re-scores.
+4. No reply inside the window escalates to the configured owner.
+
+### Scenarios to test
+
+- Changing the required-field set changes what is chased, without a deploy.
+- A chase goes out on the channel the demand arrived on, not a default one.
+- A reply re-scores the requisition and closes the thread when it completes it.
+- Window expiry escalates once, to the configured target.
+- A requisition never opens while it is below its required set.
+
+---
+
+## 7. The four operational queues
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/inbound` · `/inbound/unmatched` · `/inbound/manual-entry` · `/duplicates`
+
+### Scenarios to cover
+
+Everything the machine could not finish has a person's queue: what arrived, what could not be
+matched to a client, what needs keying in, and what looks like the same vacancy twice.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Inbound list | Screen | — | Everything received, with channel, client, intent, state |
+| 2 | Unmatched senders | Screen | — | Resolve to a client, or add a sender identity from here |
+| 3 | Manual entry | Screen | — | Raw payload beside the requisition form |
+| 4 | Suspected duplicates | Screen | — | Same client, site, role and window |
+| 5 | Duplicate resolution | Actions | — | Merge into the existing requisition, or keep both with a reason |
+| 6 | Channel configuration | Screen | — | `/admin/channels`: enable, credentials, follow-up settings |
+
+### Flow
+
+1. Records land in the inbound list with their state.
+2. An unmatched sender is resolved by a person, who can register the sender identity there and then;
+   later messages from it resolve automatically.
+3. Manual entry completes what could not be parsed.
+4. A suspected duplicate is merged or kept, with the decision recorded.
+
+### Scenarios to test
+
+- Resolving an unmatched sender registers the identity and re-processes the record.
+- A duplicate merged into an existing requisition keeps both source payloads attached.
+- Keeping both requires a reason and records it.
+- Every queue is filterable and exportable through the shared list engine.
+- No record can sit in a queue with no owner and no state.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Per-client spreadsheet column mapping | [Phase 3 · Demand intake](/docs/release-plan/part-3/demand-intake) |
+| Client HRMS and ATS feeds | [Phase 3 · Demand intake](/docs/release-plan/part-3/demand-intake) |
+| WhatsApp voice notes transcribed to the requisition schema | [Phase 3 · Demand intake](/docs/release-plan/part-3/demand-intake) |
+| Channel and recruiter performance reporting | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

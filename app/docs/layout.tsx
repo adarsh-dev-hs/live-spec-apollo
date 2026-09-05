@@ -11,6 +11,12 @@ import { TabBar } from '@/components/tab-bar';
  * render with the same styling as page-tree items — four top-level destinations
  * reading as siblings of "Overview" and "Context". The banner sits above the tree
  * in its own bordered block, which is what the tabs actually are.
+ *
+ * The banner carries an explicit `key`. fumadocs renders it as one entry of a
+ * children array — in the sidebar and again in the mobile drawer — and an element
+ * created as a prop value is never key-validated where it is written, so React
+ * reports a missing key against this line. The key is the fix; nothing else here
+ * needs it.
  */
 export default function Layout({ children }: LayoutProps<'/docs'>) {
   return (
@@ -19,7 +25,7 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       {...baseOptions()}
       links={[]}
       tabs={false}
-      sidebar={{ banner: <TabBar orientation="vertical" /> }}
+      sidebar={{ banner: <TabBar key="section-tabs" orientation="vertical" /> }}
     >
       {children}
     </DocsLayout>

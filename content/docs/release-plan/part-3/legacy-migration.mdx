@@ -1,0 +1,268 @@
+---
+title: "Legacy migration"
+description: "Phase 3: profiling CPAL, the migration pipeline, delta runs, duplicate resolution against app registrations, the operational screens, and the reconciliation that permits cutover."
+icon: Database
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `A10` — **in full; it appears in no other part** |
+| **Engineering reference** | [Legacy migration](/docs/engineering/build/modules#legacy-migration) |
+| **Screens** | `/admin/system` · `/duplicates` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 6 below.
+
+Move Apollo's existing candidate data out of CPAL and the current tooling into the platform, after
+which **the platform becomes the system of record and the old tool is switched off**.
+
+<Callout type="warn" title="The item with the least known about it">
+Nobody has seen the data: how many records, how complete, how many duplicates, whether fields map
+cleanly. **Its effort basis awaits joint data profiling.** Profiling is item 1 and belongs *much
+earlier than the rest of this feature* — nothing else here can be sized until it has run, and its
+result affects the Phase 3 plan more than any other single input. It needs legacy system access and
+**a named person who can answer questions about the data** — both client dependencies.
+</Callout>
+
+## Release in this phase
+
+1. Data profiling.
+2. The migration pipeline.
+3. Delta runs.
+4. Duplicate resolution.
+5. The operational screens.
+6. Reconciliation and cutover.
+
+---
+
+## 1. Data profiling
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none
+
+### Scenarios to cover
+
+Before anything is moved: how much data there is, how complete it is, how many duplicates it holds,
+and whether its fields map to the platform's schema at all. The output is a **written assessment**
+that sizes the rest of this feature.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Volume analysis | Output | Yes | Records by type and by age |
+| 2 | Completeness analysis | Output | Yes | Field fill rates against what the platform requires |
+| 3 | Duplicate estimate | Output | Yes | Within CPAL, and against the app-registered base |
+| 4 | Mapping feasibility | Output | Yes | Field by field, with the gaps named |
+| 5 | Effort basis | Output | Yes | The estimate the rest of this feature is planned from |
+| 6 | Access and data owner | Client dependency | Yes | Legacy access and a named person who can answer questions |
+
+### Flow
+
+1. Access is obtained and an extract is profiled in a controlled environment.
+2. The four analyses are produced and reviewed jointly with Apollo.
+3. The effort basis is agreed before the pipeline is built.
+
+### Scenarios to test
+
+- The profile covers the entire source, not a sample presented as the whole.
+- Every platform-mandatory field is assessed for source coverage.
+- Unmappable fields are named explicitly, with a decision recorded for each.
+- The profiling extract is handled under the same data-protection rules as production.
+
+---
+
+## 2. The migration pipeline
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/system`
+
+### Scenarios to cover
+
+Extract, map, load — **resumable and re-runnable without creating duplicates**. A migration that
+cannot be re-run is a migration that gets one attempt.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Extract | Component | Yes | From CPAL and the current tooling |
+| 2 | Mapping | Configuration | Yes | Source field to platform field, per entity |
+| 3 | Load | Component | Yes | Through the owning module's service, not raw inserts |
+| 4 | Batch | Record | Yes | Id, scope, counts, state |
+| 5 | Checkpointing | Behaviour | Yes | Resumable from the last checkpoint |
+| 6 | Idempotency | Behaviour | Yes | A re-run updates rather than duplicates |
+| 7 | Exception records | Store | Yes | Rows that failed, with the reason |
+
+### Flow
+
+1. A batch extracts a scope of source records.
+2. Records are mapped and loaded through the owning services, so every invariant holds.
+3. Failures are recorded per row; the batch is resumable.
+
+### Scenarios to test
+
+- A re-run of a completed batch changes nothing.
+- An interrupted batch resumes from its checkpoint.
+- A record that violates a platform rule fails visibly rather than being written around it.
+- Loading goes through module services — no direct writes into another module's tables.
+
+---
+
+## 3. Delta runs
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/system`
+
+### Scenarios to cover
+
+CPAL keeps being used between the main load and cutover. Delta runs pick up what changed, so cutover
+does not lose a fortnight of work.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Change detection | Mechanism | Yes | By source timestamp or change log |
+| 2 | Delta batch | Record | Yes | Window, counts, state |
+| 3 | Conflict rule | Configuration | Yes | Source change against a platform change since load |
+| 4 | Final delta | Run | Yes | Immediately before cutover |
+
+### Flow
+
+1. Delta runs execute on a schedule after the main load.
+2. Conflicts are surfaced and resolved per the rule.
+3. A final delta runs immediately before cutover.
+
+### Scenarios to test
+
+- A record changed in the source after load is updated, not duplicated.
+- A record changed on both sides is surfaced, never silently overwritten.
+- The final delta window leaves no gap before cutover.
+
+---
+
+## 4. Duplicate resolution
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/duplicates` · `/candidates`
+
+### Scenarios to cover
+
+Duplicates within the migrated base, **and between the migrated base and candidates who registered in
+the app**. This uses the platform's single merge implementation rather than a migration-only one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Detection over migrated records | Job | Yes | Same rules as the platform's detection |
+| 2 | Cross-base detection | Job | Yes | Migrated records against app registrations |
+| 3 | Merge | Action | Yes | **The platform's merge**, not a migration variant |
+| 4 | Survivor rule | Configuration | Yes | Which source wins by default, overridable per merge |
+| 5 | Bulk review | Screen | — | Working the queue at migration volume |
+| 6 | Audit | Records | Yes | Every merge recorded with its source |
+
+### Flow
+
+1. Detection runs over the migrated base and across it and the app base.
+2. Reviewers work the queue, merging with a survivor and a reason.
+3. Every merge re-points references exactly as a normal merge does.
+
+### Scenarios to test
+
+- A migrated record and an app registration for one person merge to one candidate.
+- The merge path is the platform's, verified by test rather than assumed.
+- Merges at volume do not leave dangling references.
+- Every merge is attributable to a reviewer and a reason.
+
+---
+
+## 5. The operational screens
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/system`
+
+### Scenarios to cover
+
+Migration is run by people who need to see what happened: batch status, failed records, correction and
+rejection.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Batch list | Screen | — | State, counts, timings |
+| 2 | Failed records | Screen | — | With the reason and the source payload |
+| 3 | Correct and retry | Action | — | Fix a mapping or a value and re-run that record |
+| 4 | Reject | Action | — | With a reason; excluded from reconciliation with an explanation |
+| 5 | Progress | Indicator | — | Loaded against expected |
+
+### Flow
+
+1. Operators watch batches and work the failed-record queue.
+2. A correction re-runs a single record; a rejection records why it will never load.
+3. Progress is visible against the expected total from profiling.
+
+### Scenarios to test
+
+- Every failed record shows its reason and its source payload.
+- A corrected record loads without re-running the whole batch.
+- A rejected record is excluded from reconciliation **with its reason**, not silently.
+- Counts on screen reconcile with the batch records.
+
+---
+
+## 6. Reconciliation and cutover
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/system`
+
+### Scenarios to cover
+
+Reconciliation **against the source total** is what permits cutover. After cutover the platform is the
+system of record and CPAL is switched off.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Reconciliation report | Output | Yes | Source total against loaded, merged and rejected |
+| 2 | Acceptance threshold | Agreement | Yes | What must reconcile before cutover |
+| 3 | Cutover plan | Document | Yes | Sequence, owners, timings, rollback position |
+| 4 | Final delta | Run | Yes | Immediately before switchover |
+| 5 | Read-only source | Step | Yes | CPAL made read-only, then switched off |
+| 6 | Post-cutover verification | Checklist | Yes | Spot checks against known records |
+
+### Flow
+
+1. Reconciliation is produced and reviewed with Apollo.
+2. The final delta runs and the source is made read-only.
+3. Cutover completes; verification checks run; CPAL is switched off.
+
+### Scenarios to test
+
+- Source total equals loaded plus merged plus rejected, exactly, with every rejection explained.
+- The cutover plan has been rehearsed, not only written.
+- After cutover, a known set of records is verifiable in the platform.
+- No write path to CPAL remains open after switchover.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it is specified |
+|---|---|
+| The merge implementation itself | [Phase 3 · Candidate record and credentials](/docs/release-plan/part-3/candidate-record-and-credentials) — item 2 |
+| Go-live for the rest of the release | [Phase 3 · Documentation and go-live](/docs/release-plan/part-3/documentation-and-go-live) |

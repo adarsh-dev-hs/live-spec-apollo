@@ -1,0 +1,150 @@
+---
+title: "Matching and ranking"
+description: "Phase 2: weight sets per candidate category and supply base, shift-level ranking against a demand line, and talent segments shared with the engagement cadence model."
+icon: Search
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D5` (partial) · `D18` (partial) |
+| **Engineering reference** | [Matching and ranking](/docs/engineering/build/modules#matching-and-ranking) |
+| **Screens** | `/search` · `/segments` · `/requisitions/:id/ranking` · `/admin/ranking-weights` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+Phase 1 ranked one category on one weight set. Phase 2 opens ranking to everything the business now
+carries: three candidate categories against two supply bases — **at least six weight sets** — and a
+second thing to rank against entirely, the shift demand line, where a candidate is matched to a
+single date and time band rather than to a job.
+
+## Release in this phase
+
+1. Weight sets per category and supply base.
+2. Shift-level ranking against a demand line.
+3. Talent segments shared with the engagement cadence model.
+
+---
+
+## 1. Weight sets per category and supply base
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/ranking-weights` · `/requisitions/:id/ranking`
+
+### Scenarios to cover
+
+What matters in a nurse for a permanent post is not what matters in a locum doctor for a night
+shift. Weights are configured per category and per base, versioned by effective date, and the ranked
+set records which set produced it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Weight set | Record | Yes | Category, supply base, version, effective from |
+| 2 | Feature weights | Configuration | Yes | Per ranking feature, including availability confidence |
+| 3 | Set selection | Behaviour | Yes | By the requisition's category and the target base |
+| 4 | Version reference | Field | Yes | Recorded on every ranked set |
+| 5 | Comparison | Screen | — | Two sets side by side before publishing a change |
+
+### Flow
+
+1. An administrator configures a set for a category and base and publishes a version.
+2. Ranking selects the set from the requisition's category and the base being ranked.
+3. The ranked set records the weight set version that produced it.
+
+### Scenarios to test
+
+- Six sets exist and each is selected for the right category and base pair.
+- Publishing a new version does not retrospectively change an existing ranked set.
+- A missing set for a pair fails visibly rather than falling back to another category's weights.
+- Availability confidence is a weighted feature, and its effect is visible in the rationale.
+
+---
+
+## 2. Shift-level ranking against a demand line
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id/ranking`
+
+### Scenarios to cover
+
+Ranking a candidate for a shift is a different question: are they credentialed for the role, are they
+in range of the site or visit address, are they free on that date and time band, and how recently did
+they confirm availability.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Ranked set per demand line | Record | Yes | Not per requisition |
+| 2 | Clash exclusion | Behaviour | Yes | Candidates already accepted elsewhere in that band |
+| 3 | Distance feature | Feature | Yes | To the site or the visit address |
+| 4 | Availability feature | Feature | Yes | Confidence and last-confirmed |
+| 5 | Rationale | Per entry | Yes | Produced inside scoring, as in Phase 1 |
+| 6 | Feed to the app | Behaviour | Yes | Ranking informs what shift discovery surfaces |
+
+### Flow
+
+1. A demand line requests a ranked set.
+2. Ineligible and clashing candidates are excluded before scoring.
+3. Scoring runs on the Base B weight set for the category.
+4. The result informs both the recruiter's view and app shift discovery.
+
+### Scenarios to test
+
+- A candidate with a clashing acceptance does not appear.
+- A candidate whose credential lapses before the shift date does not appear.
+- Distance is measured to the visit address for home care lines.
+- The same line ranked twice with unchanged data returns the same order.
+
+---
+
+## 3. Talent segments shared with engagement
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/segments` · `/search`
+
+### Scenarios to cover
+
+A segment used to decide who to contact and a segment used to find candidates are **the same
+definition**. Two definitions would drift within a month, and the platform would be contacting one
+population and ranking another.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Segment definition | Shared record | Yes | Owned once, read by matching and engagement |
+| 2 | Saved search to segment | Action | — | Promote a saved search into a segment |
+| 3 | Segment membership | Derived | Yes | Evaluated live, not stored as a list |
+| 4 | Usage indicator | Display | — | Which cadences and searches use a segment |
+
+### Flow
+
+1. A segment is defined once, from criteria.
+2. Engagement binds a cadence to it; matching searches within it.
+3. Changing the definition changes both consumers at once.
+
+### Scenarios to test
+
+- Editing a segment changes both the cadence population and the search result.
+- A segment in use by a cadence cannot be deleted silently.
+- Membership evaluates live against current candidate data.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Weight tuning informed by outcome data | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |
+| Selection outcomes and rejection reasons feeding subsequent ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |

@@ -1,0 +1,22 @@
+{
+  "title": "Part 1 — Phase 1 spec",
+  "description": "Permanent placement live end to end for one client. Every page here describes Phase 1 only.",
+  "icon": "Rocket",
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "access-and-administration",
+    "shared-platform-services",
+    "design-environments-and-deployment",
+    "clients-and-contracts",
+    "demand-and-requisitions",
+    "candidate-record-and-credentials",
+    "market-adapter-layer",
+    "candidate-app",
+    "matching-and-ranking",
+    "selection-and-offers",
+    "client-link-surfaces",
+    "placement-and-trial",
+    "billing-and-receivables"
+  ]
+}

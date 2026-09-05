@@ -1,0 +1,202 @@
+---
+title: "Billing and receivables"
+description: "Phase 1: the permanent placement invoice raised from the day-90 retention record, the evidence behind it, the receivable it opens, and duplicate prevention."
+icon: Receipt
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D8` (partial) · `A7` (partial — the invoicing half) |
+| **Engineering reference** | [Billing and receivables](/docs/engineering/build/modules#billing-and-receivables) |
+| **Screens** | `/invoices` · `/invoices/:id` · `/billing/evidence` · `/receivables` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+The money out. A **permanent placement** invoices once the client confirms at day 90 that the person
+is still there — **not at placement**. Phase 1 builds that one path and the evidence behind it: who
+confirmed, when, against which contract terms, and whether the client acknowledged or the window
+expired. The chain here ends at *invoice raised, receivable open*.
+
+## Release in this phase
+
+1. Permanent invoice generation from the day-90 retention record.
+2. The billing evidence view.
+3. The receivable, with ageing displayed.
+4. Duplicate prevention.
+
+<Callout type="warn" title="No fallback, by design">
+No contract terms in force at the trigger moment means permanent billing **does not run at all**.
+That is not a defect to work around; it is the designed behaviour, and it is why contracts are
+recorded before the first placement —
+[Phase 1 · Clients and contracts](/docs/release-plan/part-1/clients-and-contracts).
+</Callout>
+
+---
+
+## 1. Permanent invoice generation from the day-90 record
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices` · `/invoices/:id`
+
+### Scenarios to cover
+
+The billing trigger arrives from placement carrying an immutable retention record. Billing resolves
+the terms recorded on it, calculates the placement fee, and raises the invoice against the client —
+at the terms in force **at the trigger moment**, not at today's terms.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Invoice | Record | Yes | Client, type (permanent), currency, dates, status |
+| 2 | Invoice line | Record | Yes | Placement, candidate, role, fee basis, amount |
+| 3 | Fee calculation | Derived | Yes | From the placement fee percentage snapshotted on the retention record |
+| 4 | Contract version reference | Reference | Yes | Recorded on the invoice, not resolved at render time |
+| 5 | Evidence reference | Reference | Yes | The retention record and the link that produced it |
+| 6 | Invoice number | Sequence | Yes | Gapless per the agreed numbering rule |
+| 7 | Invoice document | File | Yes | Generated and stored in the shared file store |
+| 8 | Status | Enum | Yes | Draft, raised, sent, cancelled |
+| 9 | Invoice list | Screen | — | Shared list engine, with export |
+
+### Flow
+
+1. The billing trigger arrives with the retention record reference.
+2. Billing reads the snapshotted terms and computes the fee; money is decimal with a currency.
+3. The invoice is created with its line, its evidence reference and its contract version id.
+4. The invoice document is generated and stored; the invoice moves to raised.
+5. A receivable is opened in item 3, and the invoice event is recorded.
+
+### Scenarios to test
+
+- The fee matches the snapshotted percentage, not the current rate card.
+- An invoice always carries a resolvable evidence reference.
+- A trigger with no terms produces no invoice and a visible exception for finance.
+- Invoice numbering has no gaps and no duplicates under concurrent triggers.
+- Cancelling an invoice records who cancelled it and why, and leaves the record readable.
+
+---
+
+## 2. The billing evidence view
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/billing/evidence`
+
+### Scenarios to cover
+
+A client queries a charge months later. The evidence view answers it without anyone opening a
+database: **who confirmed, when, against which contract terms, and whether the client acknowledged or
+the window expired** — each item linked to the record that proves it.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Evidence panel | Screen | — | One per invoice, reachable from the invoice |
+| 2 | Confirmation detail | Read-only | Yes | Responder, timestamp, or the expiry that deemed it |
+| 3 | Terms applied | Read-only | Yes | Contract version, fee basis, percentage |
+| 4 | Link history | Read-only | Yes | From the link log: issued, sent, opened, answered or expired |
+| 5 | Placement detail | Read-only | Yes | Candidate, site, role, joining date, day-90 date |
+| 6 | Export | Action | — | The evidence pack for one invoice |
+
+### Flow
+
+1. Finance opens an invoice and follows through to its evidence.
+2. Every element resolves from immutable records, not from current operational data.
+3. An export produces a pack that can be sent to the client.
+
+### Scenarios to test
+
+- Every invoice raised in Phase 1 has complete evidence; none is partial.
+- The evidence renders identically a year later, after rate cards and contracts have changed.
+- A deemed outcome is labelled as deemed, never as an acknowledgement.
+- The export contains everything on screen and nothing about another invoice.
+
+---
+
+## 3. The receivable, with ageing displayed
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/receivables`
+
+### Scenarios to cover
+
+A raised invoice opens a receivable, and the receivable ages against the payment terms recorded on
+the contract version. Phase 1 **displays** ageing; it does not chase, reconcile or record payments.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Receivable | Record | Yes | Invoice, client, amount, due date, status |
+| 2 | Due date | Derived | Yes | From the contract payment terms, not a flat rule |
+| 3 | Ageing bands | Display | Yes | Current, and the agreed overdue bands |
+| 4 | Receivable list | Screen | — | Shared list engine, with export |
+| 5 | Status | Enum | Yes | Open, cancelled |
+
+### Flow
+
+1. Raising an invoice opens a receivable with a due date from the contract terms.
+2. The list shows outstanding amounts by client and by age.
+3. Cancelling an invoice cancels its receivable.
+
+### Scenarios to test
+
+- The due date follows the contract payment terms for that client.
+- Ageing bands are computed against the due date, in `Asia/Kolkata` business dates.
+- The receivable total reconciles with the raised invoices.
+- Cancelling an invoice removes its amount from the outstanding total, with the record retained.
+
+---
+
+## 4. Duplicate prevention
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/invoices`
+
+### Scenarios to cover
+
+One retention record produces **one** invoice, whatever happens to the trigger: a retry, a redelivered
+event, a second click, or an operator re-queueing a dead-lettered job.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Trigger idempotency key | Field | Yes | Derived from the retention record |
+| 2 | Uniqueness constraint | Database | Yes | One invoice per trigger, enforced by the database |
+| 3 | Repeat handling | Behaviour | Yes | A repeat returns the existing invoice, and records the attempt |
+| 4 | Exception queue | Screen state | — | Triggers that could not invoice, with the reason |
+
+### Flow
+
+1. Every trigger carries an idempotency key.
+2. Invoice creation is guarded by a uniqueness constraint on that key.
+3. A repeat is a no-op that returns the existing invoice and records the attempt.
+4. A trigger that cannot invoice — no terms in force — lands in the exception queue with its reason.
+
+### Scenarios to test
+
+- The same trigger delivered five times produces one invoice.
+- Concurrent delivery of the same trigger produces one invoice, proven under load.
+- A dead-lettered job re-queued after a successful invoice does not produce a second.
+- An exception carries a reason a finance user can act on.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| The shift invoice, raised from an approved or deemed-approved timesheet | [Phase 2 · Billing and receivables](/docs/release-plan/part-2/billing-and-receivables) |
+| Payments, reconciliation, TDS, ageing chases, dunning, credit and debit notes | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |
+| Rate variance reporting | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

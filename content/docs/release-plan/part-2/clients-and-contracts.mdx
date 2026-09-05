@@ -1,0 +1,154 @@
+---
+title: "Clients and contracts"
+description: "Phase 2: sender identities that resolve an inbound message to exactly one client, shift rate cards, and the deemed-approval window the timesheet path reads."
+icon: Building2
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D1` (partial) · `D13` (partial) |
+| **Engineering reference** | [Clients, contracts and rate cards](/docs/engineering/build/modules#clients-contracts-and-rate-cards) |
+| **Screens** | `/clients` · `/clients/:id` · `/contracts` · `/contracts/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+Three additions to the client record, each one a precondition for something else in Phase 2. Intake
+cannot resolve a message without sender identities. Shift billing cannot price a timesheet without
+shift rates. And the timesheet approval link cannot expire into a deemed approval without a window to
+expire against.
+
+## Release in this phase
+
+1. Sender identities.
+2. Shift rate cards.
+3. The deemed-approval window.
+
+---
+
+## 1. Sender identities
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id`
+
+### Scenarios to cover
+
+Every email address, WhatsApp number and client system tenant Apollo might receive a message from,
+**each mapped to exactly one client**. This is the list the inbound pipeline checks every incoming
+message against; an address on two clients is an ambiguity that must be impossible, not resolved by
+a guess.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Sender identity | Record | Yes | Type, value, client, status |
+| 2 | Type | Enum | Yes | Email address, WhatsApp number, system tenant |
+| 3 | Uniqueness | Constraint | Yes | **One identity resolves to exactly one client** |
+| 4 | Contact association | Reference | No | Which client contact it belongs to |
+| 5 | Registration from unmatched | Action | Yes | Added from the unmatched queue and re-processed |
+| 6 | Status | Active / Inactive | Yes | Deactivating stops resolution without losing history |
+
+### Flow
+
+1. Identities are recorded on the client, or added from the unmatched queue when a message arrives
+   from an unknown sender.
+2. Inbound resolution matches an incoming message against active identities.
+3. A duplicate value on a second client is refused at entry.
+
+### Scenarios to test
+
+- The same address cannot be registered against two clients.
+- Registering an identity from the unmatched queue re-processes the waiting record.
+- Deactivating an identity sends later messages from it to unmatched.
+- Resolution is case-insensitive and normalises phone number formats.
+
+---
+
+## 2. Shift rate cards
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id`
+
+### Scenarios to cover
+
+Contractual work is priced per shift, not per placement. The rate card gains shift lines — by role,
+skill, location and time band — versioned by effective date like every other rate, and read when a
+timesheet is priced.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Shift rate line | Record | Yes | Role, skill, location, time band, unit |
+| 2 | Unit | Enum | Yes | Per hour or per shift |
+| 3 | Rate | Money | Yes | Decimal with a currency |
+| 4 | Baseline rate | Money | Yes | The standard, for later variance reporting |
+| 5 | Version | Record | Yes | Effective from and to; versions never overlap |
+| 6 | Resolution | Service | Yes | Extends the Phase 1 rate resolution to shift lines |
+
+### Flow
+
+1. A shift rate version is created with its lines and effective dates.
+2. Timesheet pricing calls rate resolution with the shift's role, location, date and time band.
+3. The resolved version id is recorded on the timesheet line.
+
+### Scenarios to test
+
+- A timesheet priced at a past date uses the version in force then.
+- A shift with no matching rate line fails visibly rather than pricing at zero.
+- Night or weekend bands resolve to their own lines where configured.
+- The version id recorded on the line still resolves after a later version is published.
+
+---
+
+## 3. The deemed-approval window
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/clients/:id` · `/contracts/:id` · `/admin/settings`
+
+### Scenarios to cover
+
+When a timesheet is sent for approval, the client has a window to answer. If they do not, it is
+**deemed approved** and invoicing proceeds. The window is per client with a platform default, exactly
+like the Phase 1 retention window, and the value in force when a timesheet is sent is the value that
+timesheet uses.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Deemed-approval window | Days | Yes | Per client, with a platform default |
+| 2 | Contract version binding | Reference | Yes | Recorded on the contract version |
+| 3 | Resolution order | Behaviour | Yes | Client override first, platform default second |
+| 4 | Snapshot at send | Behaviour | Yes | A later change does not move an open window |
+
+### Flow
+
+1. The window is configured on the client or inherited from the default.
+2. Sending a timesheet for approval snapshots the window onto that timesheet.
+3. The link countdown and the deemed rule both read the snapshot.
+
+### Scenarios to test
+
+- A client with no override resolves to the platform default.
+- Changing the window does not move a timesheet already out for approval.
+- A zero or negative window is refused.
+- The window used is visible on the timesheet, not only in settings.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Rate agreed against baseline, reported by client, role, specialty and acuity | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |
+| Payment terms driving ageing, dunning and reconciliation | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |

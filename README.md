@@ -13,7 +13,7 @@ npm run dev     # http://localhost:3000
 |---|---|---|
 | **Original Plan** | `/original-plan` | The client's original delivery plan, framed verbatim from `public/requirement-doc.html` — its own tabs, filters and styling intact |
 | **Live POC App** | external | The running POC (`live_app_apollo`). Every screen reference in the docs links straight into it |
-| **Release Plan** | `/docs/release-plan` | The Statement of Work signed **3 September 2026**, reproduced: 51 deliverables, three parts, assumptions and client dependencies. **The authority on scope.** |
+| **Release Plan** | `/docs/release-plan` | The Statement of Work signed **3 September 2026**, reproduced and then specified: 51 deliverables, and one **phase engineering spec per part** — a feature page each, to a fixed template. **The authority on scope.** |
 | **Engineering Documentation** | `/docs/engineering` | How the platform is built: architecture, platform services, the twenty modules with scope and purpose, data model, APIs, infrastructure, security, integrations, delivery |
 
 The tabs are declared once in `lib/layout.shared.tsx` and rendered by both the home layout and the
@@ -33,8 +33,12 @@ content/docs/
 
   release-plan/                root: true  →  the Release Plan tab
     index.mdx                  Overview
-    parts/                     group: "The three parts"
-      part-1.mdx  part-2.mdx  part-3.mdx
+    part-1/                    group: "Part 1 — Phase 1 spec"
+      index.mdx                Phase 1 engineering spec, and 13 feature pages
+    part-2/                    group: "Part 2 — Phase 2 spec"
+      index.mdx                Phase 2 engineering spec, and 15 feature pages
+    part-3/                    group: "Part 3 — Phase 3 spec"
+      index.mdx                Phase 3 engineering spec, and 15 feature pages
     scope/                     group: "Scope"
       deliverables.mdx  matrix.mdx  assumptions.mdx
 
@@ -77,6 +81,25 @@ top-level destinations end up reading as siblings of "Overview" and "Context".
 `Apollo_SOW_Final_03_09_2026_Engineering.pdf` (one directory up) is the signed document. The
 `release-plan/` pages reproduce it — deliverable register, part contents, assumptions, dependencies.
 **Where the engineering documentation and the release plan disagree, the release plan wins.**
+
+### How a phase spec page is written
+
+Every feature page under `part-1/`, `part-2/` and `part-3/` follows one template, and **each page
+carries only the slice released in its own part**:
+
+```
+Header block   Phase · deliverables in this phase · engineering reference · screens · ClickUp epic
+Purpose        introduction to the feature — explicitly NOT the scope
+Release in     a numbered list of the buildable items in this phase, kept as singular as possible
+this phase
+1..n           one section per item: ClickUp item · Screens · Scenarios to cover ·
+                 Elements (table) · Flow (numbered) · Scenarios to test
+Not in this    pointer table only — the capability a reader will look for, and the part page
+phase            that specifies it. No detail from another part appears anywhere on the page.
+```
+
+A numbered item is the unit of estimation, tracking and testing: one item, one ClickUp card, one set
+of test scenarios. The `*link to be added*` placeholders are where the PM pastes ClickUp links.
 
 ## Scripts
 

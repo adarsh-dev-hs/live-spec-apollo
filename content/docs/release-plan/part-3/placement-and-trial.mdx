@@ -1,0 +1,115 @@
+---
+title: "Placement and trial"
+description: "Phase 3: the trial dashboard at width across categories and care settings, and escalation on negative responses."
+icon: CalendarCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `A6` (partial) |
+| **Engineering reference** | [Placement and trial](/docs/engineering/build/modules#placement-and-trial) |
+| **Screens** | `/trial` · `/placements` · `/placements/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+Earlier phases made the trial work and made it visible. Phase 3 makes it **operable at volume**: one
+dashboard across every category and care setting, and a negative answer that reaches a person by
+itself rather than waiting to be noticed. A placement lost at day 40 is a permanent invoice that never
+happens.
+
+## Release in this phase
+
+1. The trial dashboard at width.
+2. Escalation on negative responses.
+
+---
+
+## 1. The trial dashboard at width
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/trial`
+
+### Scenarios to cover
+
+Every live trial across the three candidate categories and both care settings, in one view: which
+check-ins are done, due and missed, which answers were negative, and which placements are approaching
+their day-90 trigger.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Trial view | Screen | — | All live placements, filterable by category, care setting, client, owner |
+| 2 | Check-in status matrix | Component | — | Day 0 / 7 / 30 / 60 / 90 per placement |
+| 3 | Negative-answer indicator | Derived | Yes | Visible without opening the placement |
+| 4 | Day-90 approach | Derived | Yes | Placements nearing the trigger, for finance |
+| 5 | Missed check-ins | Derived | Yes | Aged, and assignable |
+| 6 | Export | Action | — | Through the shared list engine |
+
+### Flow
+
+1. The dashboard reads every live placement and its trial events.
+2. Status is shown per event, with negatives and misses surfaced.
+3. Filters let one owner work their own trials.
+
+### Scenarios to test
+
+- Totals reconcile with the placement records, per category and care setting.
+- A missed check-in appears as missed and is assignable to a person.
+- Placements approaching day 90 are visible in advance to finance.
+- Export matches the on-screen filter.
+
+---
+
+## 2. Escalation on negative responses
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/trial` · `/placements/:id`
+
+### Scenarios to cover
+
+A negative answer — not being paid on time, no preceptor, a problem at the site — **raises an
+escalation to a named owner automatically**, with a response window, rather than waiting to be read
+on a dashboard.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Escalation rule | Configuration | Yes | Which answers escalate, to whom, in what window |
+| 2 | Escalation record | Record | Yes | Trial response, owner, raised at, state |
+| 3 | Notification | Trigger | Yes | Through the notification layer |
+| 4 | Resolution | Action | Yes | Outcome and a mandatory note |
+| 5 | Second-level escalation | Rule | Yes | On window expiry, to the configured next owner |
+| 6 | Reporting hook | Event | Yes | Escalations are events, so they reach the marts |
+
+### Flow
+
+1. A negative answer matches an escalation rule and raises an escalation.
+2. The owner is notified and works it to a resolution.
+3. An unresolved escalation escalates again at window expiry.
+
+### Scenarios to test
+
+- Every configured negative answer raises exactly one escalation.
+- An unresolved escalation escalates once at expiry, not repeatedly.
+- Resolution requires an outcome note.
+- Escalations appear in the reporting marts alongside trial survival.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Joining, drop-out, the check-in schedule and the immutable day-90 record | [Phase 1 · Placement and trial](/docs/release-plan/part-1/placement-and-trial) |
+| Privileging and per-category, per-care-setting question sets | [Phase 2 · Placement and trial](/docs/release-plan/part-2/placement-and-trial) |
+| Trial survival reporting | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

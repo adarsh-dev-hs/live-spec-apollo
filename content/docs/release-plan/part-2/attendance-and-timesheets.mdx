@@ -1,0 +1,314 @@
+---
+title: "Attendance and timesheets"
+description: "Phase 2: shift attendance from app check-ins with geo-fencing, exception resolution, audited manual correction, timesheet compilation and pricing, client approval, and the export the manual payroll process runs on."
+icon: Clock
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D22` — **the thin slice only** |
+| **Engineering reference** | [Attendance and timesheets](/docs/engineering/build/modules#attendance-and-timesheets) |
+| **Screens** | `/attendance` · `/timesheets` · `/timesheets/:id` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 7 below.
+
+The contractual invoice chain. Shift attendance arrives from app check-ins — **there is no other
+route** — exceptions are resolved by a person, and the period is compiled into a timesheet priced
+against the contract version in force. The client approves it through a tokenised link, or it is
+deemed approved when the window expires, and billing invoices against the **approved timesheet**
+rather than raw attendance.
+
+## Release in this phase
+
+1. Shift attendance from app check-ins.
+2. Geo-fencing set to allow, warn or block.
+3. Exception resolution, including bulk resolution.
+4. Manual time correction, audited.
+5. Timesheet compilation and pricing.
+6. Send for approval, tracking and deemed approval.
+7. The approved-timesheet export for the manual payroll process.
+
+<Callout type="warn" title="Thin means thin">
+**No leave categorisation, no overtime treatment, no internal approval routing.** Those are `D22`
+full — [Phase 3 · Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions).
+</Callout>
+
+---
+
+## 1. Shift attendance from app check-ins
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/attendance`
+
+### Scenarios to cover
+
+Every shift produces an attendance record: expected, checked in, checked out, or no-show, with the
+location stamp the app captured. The receiver also accepts check-ins that were made offline and
+synced later, at their **original** time.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Attendance record | Record | Yes | Demand line, candidate, expected times, actual times |
+| 2 | State | Enum | Yes | Expected, checked in, checked out, no-show, exception |
+| 3 | Location stamp | Fields | Yes | Coordinates, accuracy, captured-at |
+| 4 | Offline sync receiver | Endpoint | Yes | Idempotent; preserves original timestamps |
+| 5 | No-show detection | Job | Yes | After a configured grace period |
+| 6 | Attendance list | Screen | — | By date, site, client, candidate, state |
+
+### Flow
+
+1. Accepted shifts create expected attendance records.
+2. Check-in and check-out update the record with times and location.
+3. A shift with no check-in past the grace period becomes a no-show.
+4. Offline check-ins sync idempotently at their original times.
+
+### Scenarios to test
+
+- One accepted shift produces exactly one attendance record.
+- A synced offline check-in carries its original time, not the sync time.
+- A no-show is raised once, at the configured grace period.
+- Attendance for a cancelled shift is closed, not left expected forever.
+
+---
+
+## 2. Geo-fencing: allow, warn or block
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/attendance` · `/admin/settings`
+
+### Scenarios to cover
+
+A check-in outside the boundary is **allowed, warned or blocked** according to configuration. The
+boundary is **the site for facility work and the visit address for home visits** — the same rule, two
+sources.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Boundary source | Rule | Yes | Site address, or the demand line's visit address |
+| 2 | Radius | Configuration | Yes | Per site or per care setting |
+| 3 | Mode | Allow / Warn / Block | Yes | Configurable |
+| 4 | Warn outcome | Behaviour | Yes | Accepted, flagged as an exception |
+| 5 | Block outcome | Behaviour | Yes | Refused, with an explanation and a recorded attempt |
+| 6 | Accuracy handling | Behaviour | Yes | Poor GPS accuracy is treated as an exception, not a breach |
+
+### Flow
+
+1. The app sends the check-in with coordinates and accuracy.
+2. The receiver resolves the boundary and applies the mode.
+3. Warn accepts and flags; block refuses and records the attempt.
+
+### Scenarios to test
+
+- A home visit check-in is measured against the visit address, not the client's head office.
+- Warn mode accepts and raises an exception; block mode refuses and records.
+- A low-accuracy reading does not produce a false breach.
+- A blocked attempt is visible to a recruiter, so the shift is not silently lost.
+
+---
+
+## 3. Exception resolution
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/attendance`
+
+### Scenarios to cover
+
+Missing check-outs, no-shows, out-of-fence check-ins and device failures all become exceptions, and
+**a timesheet cannot be compiled until they are resolved**. A systemic cause — a site whose network
+was down all Tuesday — is resolvable in bulk.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Exception | Record | Yes | Attendance record, type, raised at, state |
+| 2 | Type | Enum | Yes | Missing check-out, no-show, out of fence, accuracy, device |
+| 3 | Resolution | Action | Yes | Outcome plus a mandatory reason |
+| 4 | Bulk resolution | Action | Yes | For a systemic cause, with one reason applied to many |
+| 5 | Compilation gate | Behaviour | Yes | Unresolved exceptions block compilation |
+
+### Flow
+
+1. Exceptions are raised automatically as attendance is received.
+2. A person resolves each with an outcome and a reason.
+3. Bulk resolution applies one reason across a selected set, reporting per-row outcomes.
+4. Compilation runs only when the period has no unresolved exceptions.
+
+### Scenarios to test
+
+- Compilation is refused while an exception is open, and names it.
+- Bulk resolution reports per-row outcomes and does not silently skip failures.
+- Every resolution carries a reason and appears on the audit trail.
+- A resolved exception cannot be silently reopened without a new record.
+
+---
+
+## 4. Manual time correction
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/attendance`
+
+### Scenarios to cover
+
+Sometimes the times have to be corrected by hand. Because **a time correction changes an invoice**,
+every correction carries a mandatory reason and is fully audited, with the original retained.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Correction | Action | — | On check-in or check-out time |
+| 2 | Reason | Text or reference | Yes | Mandatory |
+| 3 | Original retention | Behaviour | Yes | The captured value is never overwritten |
+| 4 | Permission | Guard | Yes | Restricted to a role that carries it |
+| 5 | Downstream effect | Behaviour | Yes | Recompiles an uncompiled timesheet; a compiled one is reissued |
+
+### Flow
+
+1. An authorised user corrects a time with a reason.
+2. The original and the correction are both retained.
+3. An affected timesheet not yet approved recompiles; an approved one follows the reissue path.
+
+### Scenarios to test
+
+- A correction without a reason is refused.
+- The original captured time is still readable after correction.
+- An unauthorised user cannot correct times through the UI or the API.
+- Correcting a time after approval reissues rather than silently changing the invoice basis.
+
+---
+
+## 5. Timesheet compilation and pricing
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets` · `/timesheets/:id`
+
+### Scenarios to cover
+
+A period's resolved attendance is compiled into a timesheet and **priced against the contract version
+in force**, with the version recorded on each line so the price can be justified later.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Timesheet | Record | Yes | Client, site, period, state, total |
+| 2 | Timesheet line | Record | Yes | Candidate, shift, hours, rate, amount, rate version id |
+| 3 | Period definition | Configuration | Yes | Weekly or monthly, per client |
+| 4 | Pricing | Behaviour | Yes | Rate resolution at the shift date, not at compile date |
+| 5 | State | Enum | Yes | `building` → `built` → `sent_for_approval` → `approved` / `deemed_approved` |
+| 6 | Reissue | Action | Yes | After a correction, superseding the previous version |
+
+### Flow
+
+1. Compilation gathers resolved attendance for the period.
+2. Each line is priced by rate resolution at the shift's own date and band.
+3. The timesheet totals and moves to `built`.
+4. A correction after approval reissues a superseding timesheet.
+
+### Scenarios to test
+
+- A shift priced across a rate-version boundary uses the version in force on the shift date.
+- A shift with no matching rate line blocks compilation with a clear message.
+- Totals reconcile line by line, in decimal, with a currency.
+- Reissue supersedes and leaves the previous timesheet readable.
+
+---
+
+## 6. Send for approval, tracking and deemed approval
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets/:id` · `/links`
+
+### Scenarios to cover
+
+The timesheet is sent to the client on the approval link, tracked with a **visible deemed-approval
+countdown**, and either approved, queried, or deemed approved when the window expires.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Send for approval | Action | Yes | Issues the timesheet approval link |
+| 2 | Window snapshot | Field | Yes | From the client's deemed-approval window |
+| 3 | Countdown | Display | Yes | Visible internally on the timesheet |
+| 4 | Client response | Inbound | Yes | Approve, or query with comments |
+| 5 | Query handling | Behaviour | Yes | Returns the timesheet for correction, stops the clock |
+| 6 | Deemed approval | Job | Yes | On expiry, recorded as deemed |
+| 7 | Approval evidence | Reference | Yes | The link, the responder and the time, or the expiry |
+
+### Flow
+
+1. Sending issues the link through
+   [client link surfaces](/docs/release-plan/part-2/client-link-surfaces) and snapshots the window.
+2. Approval sets `approved` with the responder recorded.
+3. A query sets the timesheet back for correction and stops the countdown.
+4. Expiry sets `deemed_approved`, recorded as an expiry rather than an acknowledgement.
+
+### Scenarios to test
+
+- A queried timesheet stops its countdown and is not later deemed approved.
+- Expiry deems exactly once, even if the job runs twice.
+- The evidence distinguishes approval from expiry.
+- A timesheet cannot be sent twice concurrently on two live links.
+
+---
+
+## 7. The approved-timesheet export
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/timesheets`
+
+### Scenarios to cover
+
+Payroll is done by hand until Phase 3. This export is what the manual process runs on: approved and
+deemed-approved timesheets for a period, in the agreed format, from one place.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Export | Action | Yes | For a period and a client or all clients |
+| 2 | Content | Definition | Yes | Candidate, shift, hours, site, rate, approval state |
+| 3 | State filter | Behaviour | Yes | **Approved and deemed approved only** |
+| 4 | Re-export | Behaviour | Yes | Reproducible for the same period |
+
+### Flow
+
+1. A finance or operations user exports for a period.
+2. The export contains only approved and deemed-approved timesheets.
+3. Re-running the export for the same period reproduces the same rows.
+
+### Scenarios to test
+
+- An unapproved timesheet never appears in the export.
+- Re-export for a closed period is byte-for-byte reproducible.
+- A reissued timesheet appears once, in its current version.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Leave categorisation and overtime treatment | [Phase 3 · Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions) |
+| Internal timesheet approval routing | [Phase 3 · Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions) |
+| Attendance uploaded from outside and paired against app check-ins | [Phase 3 · Workforce operations](/docs/release-plan/part-3/workforce-operations) |
+| Timesheets feeding a payroll engine | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |

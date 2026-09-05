@@ -1,0 +1,162 @@
+---
+title: "Requisitions and allocation"
+description: "Phase 2: shift templates, the shift demand lines they generate, and the recruiter allocation made on the daily morning call — recorded, not decided."
+icon: ClipboardList
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D2` (partial) · `D14` (**thin slice**) |
+| **Engineering reference** | [Requisitions and allocation](/docs/engineering/build/modules#requisitions-and-allocation) |
+| **Screens** | `/requisitions` · `/requisitions/:id` · `/board` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+The contractual line of business does not ask for a person, it asks for **a shift** — a date, a time
+band, a site or a visit address, and a role. That is a different demand shape from a permanent
+vacancy and it is what everything downstream in Phase 2 ranks, accepts, checks into and bills
+against. The second thing here is smaller and often misread: the morning call already decides which
+recruiter takes which vacancy. **This feature writes that decision down. It does not make it.**
+
+## Release in this phase
+
+1. Shift templates.
+2. Shift demand lines.
+3. Owner and allocation capture — the `D14` thin slice.
+
+---
+
+## 1. Shift templates
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id`
+
+### Scenarios to cover
+
+A client needs the same pattern of shifts week after week. A template describes the pattern once —
+role, time band, quantity, recurrence — and generates the demand lines from it, rather than someone
+keying in forty rows.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Template | Record | Yes | Client, site, role, candidate category |
+| 2 | Time band | Fields | Yes | Start time, end time, break rule |
+| 3 | Quantity per occurrence | Number | Yes | How many people per shift |
+| 4 | Recurrence | Rule | Yes | Days of week, date range |
+| 5 | Care setting | Reference | Yes | Hospital, or home healthcare |
+| 6 | Generation horizon | Setting | Yes | How far ahead lines are generated |
+| 7 | Regeneration | Action | Yes | Re-generates unfilled future lines only |
+
+### Flow
+
+1. A user creates the template against a contractual requisition.
+2. Generation produces one demand line per shift occurrence within the horizon.
+3. Editing the template regenerates future unfilled lines and leaves accepted ones alone.
+4. A rolling job extends generation as the horizon moves.
+
+### Scenarios to test
+
+- A template generates exactly the expected number of lines for its recurrence and range.
+- Editing a template does not disturb an accepted or worked shift.
+- The horizon job extends lines without duplicating existing ones.
+- A home healthcare template requires a visit address on each generated line.
+
+---
+
+## 2. Shift demand lines
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id` · `/board`
+
+### Scenarios to cover
+
+The demand line is the atom of the contractual chain: one shift, one date, one time band, one
+quantity — ranked against, accepted against, checked into, and priced on a timesheet. Where the
+workplace changes between shifts, **the visit address lives on the line**, not on the requisition.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Demand line | Record | Yes | Requisition, date, start, end, quantity, role |
+| 2 | Site or visit address | Reference or address | Yes | Site for facility work; **visit address for home care** |
+| 3 | Fill state | Derived | Yes | Open, partly accepted, filled, cancelled |
+| 4 | Acceptance link | Reference | — | The candidate acceptances against this line |
+| 5 | Cancellation | Action | Yes | With a reason; notifies accepted candidates |
+| 6 | Board rendering | Component | — | Shift demand visible alongside permanent demand |
+
+### Flow
+
+1. Lines are generated from a template or added individually.
+2. Matching ranks candidates against a line; the app offers it to them.
+3. Acceptances fill the line's quantity; the line closes when full.
+4. Cancelling a line notifies anyone who accepted it and records the reason.
+
+### Scenarios to test
+
+- A line cannot be over-accepted beyond its quantity, under concurrency.
+- A home care line without a visit address cannot be published.
+- Cancelling a line notifies every accepted candidate exactly once.
+- The board shows shift demand and permanent demand without conflating them.
+
+---
+
+## 3. Owner and allocation capture — `D14` thin
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id` · `/board`
+
+### Scenarios to cover
+
+On the daily morning call, vacancies are handed to recruiters. This item records who was put on what
+and when, **append-only**, so the allocation is answerable later and so Phase 3's reporting has the
+owner field it needs.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Requisition owner | Reference | Yes | Already present from Phase 1; carried here |
+| 2 | Allocation record | Append-only | Yes | Recruiter, allocated by, allocated at, note |
+| 3 | Multiple recruiters | Behaviour | Yes | More than one recruiter may be allocated |
+| 4 | Allocation view | Screen section | — | Current and historical allocations |
+| 5 | Board filter | Filter | — | By allocated recruiter |
+
+### Flow
+
+1. After the morning call, a user records the allocations on the requisitions discussed.
+2. Each allocation appends; nothing is overwritten.
+3. The board can be filtered by recruiter, which is how the call is run the next day.
+
+### Scenarios to test
+
+- An allocation never overwrites its predecessor.
+- Two recruiters can be allocated to one requisition and both are visible.
+- Allocation history is readable in order with actors and times.
+- Every allocation appears as an event, for Phase 3 reporting to read later.
+
+<Callout type="warn" title="Thin means thin">
+**No prioritisation engine, no suggested recruiter, no approval workflow.** Those are `D14` full —
+[Phase 3 · Demand prioritisation and approval](/docs/release-plan/part-3/demand-prioritisation-and-approval).
+Building them here spends Phase 2's schedule on Phase 3's capability.
+</Callout>
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Priority scoring, suggested recruiter with load balancing, requisition approval | [Phase 3 · Demand prioritisation and approval](/docs/release-plan/part-3/demand-prioritisation-and-approval) |
+| Stage-level conversion loss by recruiter | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |

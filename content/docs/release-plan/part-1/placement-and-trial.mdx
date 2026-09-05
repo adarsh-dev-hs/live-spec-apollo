@@ -1,0 +1,252 @@
+---
+title: "Placement and trial"
+description: "Phase 1: joining confirmation, drop-out capture, the day 0/7/30/60/90 check-in schedule for nurses in hospitals, and the immutable day-90 retention record."
+icon: CalendarCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D7` (partial) · `A6` (partial) |
+| **Engineering reference** | [Placement and trial](/docs/engineering/build/modules#placement-and-trial) |
+| **Screens** | `/placements` · `/placements/:id` · `/trial` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+Once someone accepts an offer, this feature tracks them joining and then checks in on them at **day
+0, 7, 30, 60 and 90**. The candidate is asked whether they are being paid on time, whether they have
+a preceptor and whether their accommodation is sorted. At day 90 the client is asked whether the
+person is still there — and **that answer is what lets Apollo invoice**. The record it produces is
+the most consequential object in the platform: it must still make sense to someone querying a charge
+a year later, so it is immutable, it snapshots the terms in force, and it records whether the client
+acknowledged or the window simply expired.
+
+## Release in this phase
+
+1. Joining confirmation and opening the placement.
+2. Drop-out capture, returning the position to the requisition.
+3. The trial check-in schedule for the nurse category in the hospital care setting.
+4. Candidate check-in answers and the trial dashboard.
+5. The immutable day-90 retention record.
+
+---
+
+## 1. Joining confirmation and opening the placement
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/placements` · `/placements/:id`
+
+### Scenarios to cover
+
+An accepted offer produces a placement when the candidate actually joins. Joining is confirmed with
+a date, the placement opens, and **the 90-day clock starts from that date** — not from acceptance and
+not from the offer.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Placement | Record | Yes | Candidate, requisition, client, site, offer, contract version |
+| 2 | Joining date | Date | Yes | The clock start |
+| 3 | Confirmation | Action | Yes | With who confirmed and when |
+| 4 | Expected vs actual joining | Fields | Yes | The gap is visible, not silently overwritten |
+| 5 | Placement status | Enum | Yes | Offered, joined, in trial, trial survived, trial ended |
+| 6 | Placement list | Screen | — | With trial stage and billing-trigger visibility for finance |
+
+### Flow
+
+1. Offer acceptance hands over to placement, which awaits joining confirmation.
+2. Confirming joining sets the date, opens the placement and schedules the trial events in item 3.
+3. The requisition's filled count increases, moving it to partially filled or filled.
+4. Finance can see, from the placement list, which placements are approaching a billing trigger.
+
+### Scenarios to test
+
+- The 90-day schedule is computed from the actual joining date.
+- Confirming joining twice does not create two placements or two schedules.
+- The requisition count updates on confirmation and reverses on a drop-out.
+- The contract version recorded on the offer is carried onto the placement.
+
+---
+
+## 2. Drop-out capture
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/placements/:id`
+
+### Scenarios to cover
+
+Someone accepts and does not join, or joins and leaves inside the trial. The reason is recorded, the
+placement ends, the trial schedule stops, and **the position returns to the requisition** so the
+vacancy is worked again rather than quietly lost.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Drop-out | Action | — | Available before and during the trial |
+| 2 | Reason | Reference | Yes | From the configured drop-out reason list |
+| 3 | Effective date | Date | Yes | |
+| 4 | Position return | Behaviour | Yes | The requisition reopens the position |
+| 5 | Schedule cancellation | Behaviour | Yes | Remaining trial events and links are cancelled |
+
+### Flow
+
+1. A drop-out is recorded with a reason and a date.
+2. The placement moves to trial ended; remaining check-ins and any pending links are cancelled.
+3. The requisition returns to fulfilment with the position open again.
+4. **No retention record is written and no invoice is raised.**
+
+### Scenarios to test
+
+- A drop-out without a reason is refused.
+- Pending day-30, 60 and 90 activity is cancelled and no link is later sent.
+- The requisition reopens the position and the board reflects it.
+- A dropped-out placement can never produce a retention record.
+
+---
+
+## 3. The trial check-in schedule — nurse, hospital
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/trial` · `/admin/settings`
+
+### Scenarios to cover
+
+Check-ins are scheduled at **day 0, 7, 30, 60 and 90** from the joining date. Which events exist and
+which questions each asks is **configuration per candidate category and per care setting** — Phase 1
+configures the nurse category in the hospital care setting, and the configurability is what makes
+Phase 2's other combinations a settings change rather than a build.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Check-in event definition | Configuration | Yes | Day offset, audience, question set |
+| 2 | Question set | Reference data | Yes | Attendance, salary timeliness, preceptor, accommodation |
+| 3 | Category and care-setting binding | Configuration | Yes | Phase 1: nurse · hospital |
+| 4 | Schedule | Generated records | Yes | Five trial events per placement |
+| 5 | Scheduler | Job | Yes | Runs on the job runtime |
+| 6 | Rescheduling | Behaviour | Yes | A changed joining date moves unfired events only |
+
+### Flow
+
+1. Joining confirmation generates the five trial events from the configured definition.
+2. The scheduler fires each at its day offset and dispatches the question set to its audience.
+3. Day 90's client audience is served by the retention link in
+   [client link surfaces](/docs/release-plan/part-1/client-link-surfaces).
+4. Changing the joining date moves events that have not fired.
+
+### Scenarios to test
+
+- Five events are generated per placement, at the right offsets from the joining date.
+- An event fires once, even if the scheduler runs twice.
+- Adding a question to the set changes what is asked without a deploy.
+- Moving the joining date moves unfired events and leaves fired ones untouched.
+
+---
+
+## 4. Candidate check-in answers and the trial dashboard
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/trial` · `/placements/:id`
+
+### Scenarios to cover
+
+The candidate is asked the configured questions and their answers are recorded against the trial
+event. The trial dashboard shows **which check-ins are done, due or missed** across live placements,
+so the trial is worked rather than watched.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Question rendering | App and message | Yes | The same set, whichever surface asks |
+| 2 | Trial response | Record | Yes | Event, respondent, answers, received at |
+| 3 | Negative answer flag | Derived | Yes | A negative answer is visible on the dashboard |
+| 4 | Trial dashboard | Screen | — | Done, due, missed, by placement |
+| 5 | Missed check-in | Derived | Yes | Not answered by the next event |
+| 6 | Internal follow-up | Manual action | — | A recruiter records what they did |
+
+### Flow
+
+1. A fired event asks the candidate its questions through the sending path and the app.
+2. Answers are recorded structured against the event.
+3. The dashboard shows status per placement and per event, with negatives visible.
+4. A recruiter follows up manually and records the follow-up.
+
+### Scenarios to test
+
+- An answer records against the correct event and placement.
+- A missed check-in shows as missed rather than as pending forever.
+- A negative answer is visible on the dashboard without a report being run.
+- Answers are readable from the placement record.
+
+<Callout title="Phase 1 shows negatives; it does not escalate them">
+Automatic escalation on a negative response, and the trial dashboard at width across categories and
+care settings, are Phase 3 —
+[Phase 3 · Placement and trial](/docs/release-plan/part-3/placement-and-trial).
+</Callout>
+
+---
+
+## 5. The immutable day-90 retention record
+
+**ClickUp item** — *link to be added* · **Delivers** `A7` (the record half)
+
+**Screens** — `/placements/:id` · `/billing/evidence`
+
+### Scenarios to cover
+
+At day 90 the client either confirms the person is still there or the window expires. Either way a
+**retention record** is written: immutable, snapshotting the contract terms in force, and recording
+which of the two happened. This record is the input to the permanent placement invoice and the answer
+to a billing query a year later.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Retention record | Append-only record | Yes | **No update, no delete** |
+| 2 | Outcome | Enum | Yes | Client acknowledged / window expired |
+| 3 | Responder | Reference | Yes when acknowledged | Which client contact answered, and when |
+| 4 | Link reference | Reference | Yes | The link that produced the outcome |
+| 5 | Contract version snapshot | Values | Yes | Terms in force at the trigger moment, with the version id |
+| 6 | Placement snapshot | Values | Yes | Candidate, client, site, role, joining date |
+| 7 | Billing trigger | Event | Yes | Handed to billing exactly once |
+
+### Flow
+
+1. The day-90 link answers, or its window expires.
+2. Terms in force are resolved at that moment; **if nothing is in force the trigger does not fire**,
+   and the placement is flagged for finance rather than silently invoiced.
+3. The retention record is written with its snapshot and its outcome.
+4. The billing trigger is raised once, idempotently, to
+   [billing and receivables](/docs/release-plan/part-1/billing-and-receivables).
+
+### Scenarios to test
+
+- The record cannot be updated or deleted through any path, including the database role.
+- Both outcomes produce a record, and each is distinguishable a year later.
+- With no contract terms in force, no record is written, no invoice is raised, and finance sees why.
+- A retried trigger produces one billing trigger, not two.
+- The snapshot resolves without reading current contract data.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Privileging for doctors; question sets for other categories and for home healthcare | [Phase 2 · Placement and trial](/docs/release-plan/part-2/placement-and-trial) |
+| The day 30 and day 60 client check-in links | [Phase 2 · Client link surfaces](/docs/release-plan/part-2/client-link-surfaces) |
+| The trial dashboard at width, and escalation on negative responses | [Phase 3 · Placement and trial](/docs/release-plan/part-3/placement-and-trial) |

@@ -1,0 +1,76 @@
+---
+title: "Selection and offers"
+description: "Phase 3: digital signature on the offer."
+icon: Signature
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D20` (partial) |
+| **Engineering reference** | [Selection and offers](/docs/engineering/build/modules#selection-and-offers) |
+| **Screens** | `/offers` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is item 1 below.
+
+The last piece of the offer path: the candidate signs the offer electronically rather than accepting
+it with a tap, so the accepted offer is an executed document. Everything else about offers was built
+in Phases 1 and 2.
+
+## Release in this phase
+
+1. Digital signature on the offer.
+
+---
+
+## 1. Digital signature on the offer
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/offers` · `/app/applications`
+
+### Scenarios to cover
+
+An issued offer is sent for signature, the candidate signs on their phone, and the signed document
+comes back and attaches to the offer. Acceptance and signature are related but distinct: **the
+platform records which of the two happened and when**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | E-signature integration | Provider | Yes | Client dependency; provider not named in the SOW |
+| 2 | Send for signature | Action | Yes | From the issued offer |
+| 3 | Signature status | Field | Yes | Sent, viewed, signed, declined, expired |
+| 4 | Signed document | File | Yes | Returned and stored, versioned |
+| 5 | Acceptance mapping | Behaviour | Yes | Signature completes acceptance where configured |
+| 6 | Audit evidence | Record | Yes | Signer identity, timestamp, provider reference |
+| 7 | Fallback | Behaviour | Yes | Manual acceptance remains available if the provider fails |
+
+### Flow
+
+1. An issued offer is sent for signature through the provider.
+2. Status updates arrive asynchronously and are reconciled onto the offer.
+3. A signed document is stored and the offer moves to accepted per the configured mapping.
+4. The placement handover proceeds exactly as it did before.
+
+### Scenarios to test
+
+- A signed offer stores the executed document and the provider's evidence.
+- A declined or expired signature leaves the offer in a clear state, not in limbo.
+- A provider outage does not block the chain — manual acceptance still works and is recorded as such.
+- The placement handover fires once, whichever route completed acceptance.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Offer generation, issue, tracking, acceptance and contract mapping | [Phase 1 · Selection and offers](/docs/release-plan/part-1/selection-and-offers) |
+| Offer templates by state, role and skill; reschedule and cancellation | [Phase 2 · Selection and offers](/docs/release-plan/part-2/selection-and-offers) |

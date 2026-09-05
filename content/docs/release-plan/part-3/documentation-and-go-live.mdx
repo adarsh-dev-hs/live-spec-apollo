@@ -1,0 +1,154 @@
+---
+title: "Documentation and go-live"
+description: "Phase 3: technical and user documentation, UAT support, and the cutover and go-live for everything released after the first go-live."
+icon: BookOpenCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D30` in full · `D11` (partial — the Phase 3 slice) |
+| **Engineering reference** | [Delivery and quality](/docs/engineering/delivery-and-quality) |
+| **Screens** | none |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+The Phase 1 go-live covered what Phase 1 shipped. This is the same discipline applied to everything
+released after it: documentation that matches what exists, acceptance testing with Apollo's own
+people, and a cutover that is rehearsed rather than attempted.
+
+## Release in this phase
+
+1. Technical and user documentation.
+2. UAT support.
+3. Cutover and go-live.
+
+---
+
+## 1. Technical and user documentation
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none
+
+### Scenarios to cover
+
+Documentation covering everything released in Phases 2 and 3 — technical for the people who will run
+it, user-facing for the people who will use it — with **no feature documented that does not exist and
+no released feature undocumented**.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Technical documentation | Deliverable | Yes | Architecture, data model, APIs, integrations, as built |
+| 2 | Runbooks | Deliverable | Yes | Deploy, rollback, restore, on-call, pay run, migration |
+| 3 | User documentation | Deliverable | Yes | Per role: recruiter, verification, finance, operations, client user |
+| 4 | Candidate help content | Deliverable | Yes | In-app help for the candidate flows |
+| 5 | Review with Apollo | Process | Yes | Signed off, not merely delivered |
+
+### Flow
+
+1. Documentation is written against what was actually built in Phases 2 and 3.
+2. Runbooks are executed by someone who did not write them.
+3. Apollo reviews and signs off.
+
+### Scenarios to test
+
+- Every released feature is documented, checked against the feature pages in these three specs.
+- No documented feature is absent from the build.
+- A runbook is executable by a person who did not write it.
+- User documentation matches the screens as released.
+
+---
+
+## 2. UAT support
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none
+
+### Scenarios to cover
+
+Apollo's own people test what was built, in an environment that behaves like production, inside the
+**Acceptance Period** — with defects triaged and fixed on an agreed basis.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | UAT environment | Environment | Yes | `uat`, with anonymised production-like data |
+| 2 | Test scenarios | Deliverable | Yes | Drawn from the *Scenarios to test* in these specs |
+| 3 | Defect log | Process | Yes | Raised, triaged, fixed, retested |
+| 4 | Triage rule | Agreement | Yes | Severity definitions agreed in advance |
+| 5 | Apollo resources | Client dependency | Yes | **Protected time, booked in advance** |
+| 6 | Exit criteria | Agreement | Yes | What must pass before go-live |
+
+### Flow
+
+1. The environment is prepared with anonymised data.
+2. Apollo's testers work the scenarios; defects are logged and triaged.
+3. Exit criteria are met and acceptance is recorded.
+
+### Scenarios to test
+
+- UAT scenarios trace to the *Scenarios to test* in the feature pages.
+- Defect severity is applied consistently against the agreed definitions.
+- A fixed defect is retested by the person who raised it.
+- Exit criteria are objective, not a judgement on the day.
+
+<Callout type="warn" title="Client dependency">
+Named recruiters carry 15–16 vacancies each. **UAT needs protected time booked in advance**, not
+goodwill on the day. It is the dependency most often assumed and least often planned.
+</Callout>
+
+---
+
+## 3. Cutover and go-live
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none
+
+### Scenarios to cover
+
+Everything released after the first go-live reaches production in one planned sequence, with the
+migration cutover, a rehearsed rollback position, and a support arrangement for the days after.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Cutover plan | Document | Yes | Sequence, owners, timings, communications |
+| 2 | Rollback position | Plan | Yes | Rehearsed, per release |
+| 3 | Migration coordination | Dependency | Yes | With [legacy migration](/docs/release-plan/part-3/legacy-migration) item 6 |
+| 4 | Restore rehearsal | Evidence | Yes | Re-evidenced before this go-live |
+| 5 | Hypercare | Arrangement | Yes | Support cover for the agreed period after |
+| 6 | Acceptance | Record | Yes | Signed against the exit criteria |
+
+### Flow
+
+1. The plan is agreed and rehearsed, including rollback.
+2. Cutover executes in sequence, with migration switchover coordinated.
+3. Hypercare covers the period after; acceptance is recorded.
+
+### Scenarios to test
+
+- The rollback position is proven by rehearsal, not asserted.
+- The restore rehearsal is re-evidenced for this release, not carried over from Phase 1.
+- Migration cutover and release cutover do not contend for the same window.
+- Acceptance is recorded against the agreed exit criteria.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| The Phase 1 deployment, documentation and first go-live | [Phase 1 · Design, environments and deployment](/docs/release-plan/part-1/design-environments-and-deployment) |
+| The migration reconciliation and CPAL switch-off | [Phase 3 · Legacy migration](/docs/release-plan/part-3/legacy-migration) |

@@ -1,0 +1,112 @@
+---
+title: "Associate onboarding"
+description: "Phase 2: the associate profile and the statutory forms — bringing the paperwork of joining as a shift worker inside the platform."
+icon: FileCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D21` (partial) |
+| **Engineering reference** | [Associate onboarding](/docs/engineering/build/modules#associate-onboarding) |
+| **Screens** | `/workforce/onboarding` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+The paperwork side of someone joining as a shift worker. Today it is collected and stored outside the
+platform, which means payroll inputs are assembled from files nobody can audit. Phase 2 brings the
+profile and the statutory forms inside; that is what makes the Phase 3 payroll integration possible
+at all.
+
+## Release in this phase
+
+1. The associate profile.
+2. Statutory forms.
+
+---
+
+## 1. The associate profile
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/onboarding` · `/candidates/:id`
+
+### Scenarios to cover
+
+Employment details, bank details and statutory identifiers held against the candidate, with a
+completeness state a person can act on.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Employment details | Fields | Yes | Start date, engagement type, location |
+| 2 | Bank details | Fields | Yes | Account, IFSC, holder name, validated in format |
+| 3 | Statutory identifiers | Fields | Yes | PAN, Aadhaar reference, UAN where applicable |
+| 4 | Completeness | Derived | Yes | What is missing, and what it blocks |
+| 5 | Onboarding list | Screen | — | Associates in progress, by state |
+| 6 | Data protection | Behaviour | Yes | Bank and statutory fields redacted in logs and events |
+
+### Flow
+
+1. An operations user opens onboarding for a candidate who is joining as a shift worker.
+2. The profile is completed, in the console or by the candidate in the app.
+3. Completeness is visible, and what it blocks is stated.
+
+### Scenarios to test
+
+- Invalid bank formats are refused at entry.
+- Bank and statutory identifiers never appear in a log line or an event payload.
+- Completeness reflects exactly what is missing.
+- The profile is readable from the candidate record.
+
+---
+
+## 2. Statutory forms
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/onboarding`
+
+### Scenarios to cover
+
+The forms the law requires — **PF/UAN transfer and gratuity nomination among them** — each with its
+own completion state, and each returnable to the associate with a reason when something is wrong.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Form definition | Reference data | Yes | Which forms apply, by engagement type and state |
+| 2 | Form instance | Record | Yes | Per associate, with its own state |
+| 3 | State | Enum | Yes | Not started, submitted, returned, accepted |
+| 4 | Return with reason | Action | Yes | Mandatory reason, visible to the associate |
+| 5 | Evidence | Document | Yes | Through the shared file store |
+
+### Flow
+
+1. Applicable forms are created for the associate from the definitions.
+2. The associate or an operations user completes them.
+3. A reviewer accepts or returns each with a reason.
+
+### Scenarios to test
+
+- Applicable forms follow engagement type and state, from reference data.
+- A returned form states its reason to the associate.
+- Each form's state is independent — one returned form does not reset the others.
+- Evidence documents are retained and versioned.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| The document checklist and the app-guided onboarding flow | [Phase 3 · Associate onboarding](/docs/release-plan/part-3/associate-onboarding) |
+| The gate that blocks a pay run for incomplete paperwork | [Phase 3 · Associate onboarding](/docs/release-plan/part-3/associate-onboarding) |
+| Payroll itself | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |

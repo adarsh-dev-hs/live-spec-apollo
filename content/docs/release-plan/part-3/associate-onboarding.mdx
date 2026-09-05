@@ -1,0 +1,148 @@
+---
+title: "Associate onboarding"
+description: "Phase 3: the document checklist by role and state, the app-guided onboarding flow, and the gate that blocks a pay run for incomplete paperwork."
+icon: FileCheck
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D21` (partial) |
+| **Engineering reference** | [Associate onboarding](/docs/engineering/build/modules#associate-onboarding) |
+| **Screens** | `/workforce/onboarding` · `/app/onboarding` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 3 below.
+
+The profile and the statutory forms already exist. Phase 3 adds what makes them work at volume: a
+checklist that differs by role and by state, an app flow that walks the associate through it, and
+**the gate that blocks a pay run for an associate whose paperwork is incomplete**. That gate is the
+operational reason the feature exists.
+
+## Release in this phase
+
+1. The document checklist by role and state.
+2. The app-guided onboarding flow.
+3. The pay-run gate.
+
+---
+
+## 1. The document checklist
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/onboarding`
+
+### Scenarios to cover
+
+What an associate must provide **differs by role and by state**. The checklist is generated from
+configuration, tracked per document, and shows exactly what is outstanding.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Checklist definition | Configuration | Yes | Documents required, by role and state |
+| 2 | Checklist instance | Record | Yes | Per associate, generated on onboarding |
+| 3 | Item state | Enum | Yes | Outstanding, submitted, accepted, returned |
+| 4 | Review | Action | Yes | Accept or return with a reason |
+| 5 | Completeness | Derived | Yes | Feeds the gate in item 3 |
+
+### Flow
+
+1. Onboarding generates the checklist from the associate's role and state.
+2. Documents are submitted through the app or the console and reviewed.
+3. Completeness updates as items are accepted.
+
+### Scenarios to test
+
+- Two associates in different states get different checklists.
+- A returned item states its reason to the associate.
+- Completeness reflects accepted items only, not submitted ones.
+- Changing a definition does not invalidate an already-complete associate retrospectively.
+
+---
+
+## 2. The app-guided onboarding flow
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/onboarding`
+
+### Scenarios to cover
+
+The associate completes onboarding on their phone: what is needed, what is done, what is left, and
+where to fix something that was returned — without an operations user chasing each step by message.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Guided steps | Screens | Yes | Profile, forms, documents, in order |
+| 2 | Progress indicator | Component | Yes | Steps done and remaining |
+| 3 | Capture | Component | Yes | Camera and file, through the shared upload control |
+| 4 | Returned-item handling | Behaviour | Yes | Reason shown, resubmission in place |
+| 5 | Reminders | Triggers | Yes | Through the reminder layer, stopping on completion |
+
+### Flow
+
+1. The associate is invited into the flow and works through the steps.
+2. Submissions are reviewed; returns come back with a reason.
+3. Reminders continue until the checklist completes, then stop.
+
+### Scenarios to test
+
+- The flow reflects the associate's own checklist, not a generic one.
+- A returned item is resubmitted in place, with its history retained.
+- Reminders stop the moment onboarding completes.
+- The flow works on a poor connection, queueing uploads.
+
+---
+
+## 3. The pay-run gate
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/workforce/onboarding` · `/workforce/payroll`
+
+### Scenarios to cover
+
+**An associate with incomplete paperwork cannot be included in a pay run.** The gate is enforced in
+the pay run itself, the exclusion is visible with its reason, and the operations team can see exactly
+what is missing.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Gate rule | Configuration | Yes | Which checklist items and forms are blocking |
+| 2 | Gate evaluation | Behaviour | Yes | At input lock in the pay run |
+| 3 | Exclusion record | Record | Yes | Associate, cycle, reason |
+| 4 | Blocking-items view | Screen | Yes | What is missing, per excluded associate |
+| 5 | Override | Action | Yes | Only through the maker-checker engine, with a reason |
+
+### Flow
+
+1. Locking a pay cycle evaluates the gate for every associate in it.
+2. Blocked associates are excluded with their missing items listed.
+3. An override, if permitted, goes through maker-checker and is recorded.
+
+### Scenarios to test
+
+- An associate missing a blocking item is excluded from the run.
+- The exclusion names exactly what is missing.
+- An override cannot be applied by one person alone.
+- Completing the paperwork includes the associate in the next cycle without manual intervention.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| The associate profile and the statutory forms | [Phase 2 · Associate onboarding](/docs/release-plan/part-2/associate-onboarding) |
+| The pay run itself | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |

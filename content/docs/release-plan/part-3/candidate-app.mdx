@@ -1,0 +1,111 @@
+---
+title: "Candidate app"
+description: "Phase 3: CV parsing at width across the three categories, and payslips in the app."
+icon: Smartphone
+---
+
+| | |
+|---|---|
+| **Phase** | Part 3 — Quarter 3 |
+| **Delivers in this phase** | `D3` (partial) |
+| **Engineering reference** | [Candidate app](/docs/engineering/build/modules#candidate-app) |
+| **Screens** | `/app/profile` · `/app/payslips` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+The last two pieces of the app. Parsing has to cope with the CV formats the whole base actually
+uses rather than the ones Phase 1 was tested against, and the app becomes where a shift worker
+collects their payslip.
+
+## Release in this phase
+
+1. CV parsing at width.
+2. Payslips in the app.
+
+---
+
+## 1. CV parsing at width
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/profile`
+
+### Scenarios to cover
+
+Parsing covers the formats the three candidate categories actually submit, populates category
+attributes as well as the common fields, and still shows every parsed value for review before it is
+saved.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Format coverage | Capability | Yes | The document types the base actually uses |
+| 2 | Category attribute extraction | Capability | Yes | Specialty, acuity, discipline per category |
+| 3 | Review and correct | Interaction | Yes | Unchanged from Phase 1 — nothing saves unconfirmed |
+| 4 | Accuracy measurement | Report | Yes | From retained corrections |
+| 5 | Failure path | Behaviour | Yes | Manual entry, always available |
+
+### Flow
+
+1. A CV is uploaded and parsed for common and category-specific fields.
+2. The candidate reviews and corrects; corrections are retained.
+3. Accuracy is measurable per format and per category.
+
+### Scenarios to test
+
+- A doctor CV populates doctor attributes, not nurse ones.
+- Nothing parsed is saved without confirmation.
+- An unparseable CV still allows a complete manual profile.
+- Accuracy reporting reconciles with retained corrections.
+
+---
+
+## 2. Payslips in the app
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/app/payslips`
+
+### Scenarios to cover
+
+After a pay run, the associate opens the app and sees their payslip for the period, and can download
+it. The same document is also delivered over WhatsApp by
+[payroll](/docs/release-plan/part-3/payroll).
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Payslip list | Screen | — | By period, most recent first |
+| 2 | Payslip document | File | Yes | From the shared file store |
+| 3 | Download | Action | — | Expiring link |
+| 4 | Access control | Behaviour | Yes | Own payslips only, enforced server-side |
+| 5 | Notification | Trigger | Yes | On issue |
+
+### Flow
+
+1. A closed pay run issues payslips against associates.
+2. The app lists them and serves downloads through expiring links.
+3. The candidate is notified on issue.
+
+### Scenarios to test
+
+- A candidate can never reach another candidate's payslip by identifier.
+- A download link expires and a stale link is refused.
+- A payslip for a period appears once, and a reissue supersedes rather than duplicates.
+- The in-app and WhatsApp copies are the same document.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 3 | Where it was specified |
+|---|---|
+| Sign-up, profile, screening questions, jobs and documents | [Phase 1 · Candidate app](/docs/release-plan/part-1/candidate-app) |
+| Shifts, check-in and availability | [Phase 2 · Candidate app](/docs/release-plan/part-2/candidate-app) |

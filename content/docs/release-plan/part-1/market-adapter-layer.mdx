@@ -1,0 +1,237 @@
+---
+title: "Market adapter layer"
+description: "Phase 1: three interfaces every registry fits behind, one traffic-light response, the India adapters for the nurse category, the verification aggregator, and the manual fallback."
+icon: Globe
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `A12` (partial) |
+| **Engineering reference** | [Market adapter layer](/docs/engineering/build/platform-services#market-adapter-layer) |
+| **Screens** | `/admin/registries` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 5 below.
+
+Three interfaces — **identity, certification, qualification** — that any country's registries fit
+behind, returning green, amber or red on the same shape whichever registry answered. A new market or
+a new candidate category is added by writing an adapter, **not by changing core logic**. Several
+Indian registries have no API at all and resolve to a document plus a person; that is not a special
+case, it is another implementation of the same interface. The layer must accept the US, Germany and
+Ireland later without a change to core domain logic.
+
+## Release in this phase
+
+1. The three interface contracts and the traffic-light response schema.
+2. Registry configuration, including manual mode.
+3. The India adapter set for the nurse category — the nursing councils.
+4. The verification aggregator fronting Aadhaar and PAN.
+5. Consent verification and per-call cost logging.
+
+---
+
+## 1. The three interface contracts and the traffic-light response
+
+**ClickUp item** — *link to be added*
+
+**Screens** — none
+
+### Scenarios to cover
+
+Whatever answers — a council API, an aggregator, or a person reading a document — the caller sees one
+shape. That is what makes a later market a configuration exercise instead of a rewrite.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Identity interface | Contract | Yes | Aadhaar, PAN and equivalents |
+| 2 | Certification interface | Contract | Yes | Council registration |
+| 3 | Qualification interface | Contract | Yes | Degrees and institutional qualifications |
+| 4 | Request shape | Schema | Yes | Candidate reference, category, market, identifiers, consent reference |
+| 5 | Response shape | Schema | Yes | **Green / amber / red**, plus reason, source, checked-at, raw payload reference |
+| 6 | Adapter selection | Mechanism | Yes | By market **and** by candidate category |
+| 7 | Contract tests | Test suite | Yes | Fail if a core change breaks an existing adapter |
+
+### Flow
+
+1. A verification case asks the layer for a check, naming market, category and check kind.
+2. The layer selects the adapter registered for that pair.
+3. The adapter answers on the common response shape; the raw payload is retained for evidence.
+4. The caller stores the response against the credential without knowing which adapter answered.
+
+### Scenarios to test
+
+- Two adapters answering the same interface produce responses the caller handles identically.
+- A core change that breaks an adapter fails the contract test suite.
+- An unknown market-and-category pair returns a typed *no adapter configured*, not an exception.
+- The raw payload is retained and reachable from the credential.
+
+---
+
+## 2. Registry configuration and manual mode
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/registries`
+
+### Scenarios to cover
+
+Which registries are active, how each is reached, what credentials it needs, and whether it is in
+**manual mode** — the same interface, answered by a document and a person. An administrator switches
+a registry to manual when its API is down or does not exist, and the queue keeps moving.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Registry | Record | Yes | Name, market, category, interface it implements |
+| 2 | Endpoint configuration | Fields | Yes for API mode | Base URL, timeouts, rate limits |
+| 3 | Credentials | Secret reference | Yes for API mode | Held in the secret store, never in the record |
+| 4 | Mode | API / Manual | Yes | **Manual is a first-class mode, not a failure state** |
+| 5 | Active flag | Toggle | Yes | |
+| 6 | Health indicator | Derived | — | Recent success rate and last error |
+
+### Flow
+
+1. An administrator registers a registry and sets its mode.
+2. In API mode, calls dispatch to the endpoint with its rate limit and timeout.
+3. In manual mode, the call raises a manual verification task on the verification queue and returns
+   pending; when the reviewer answers, the response is completed on the same shape.
+4. Switching modes takes effect on the next dispatch and is audited.
+
+### Scenarios to test
+
+- A registry switched to manual routes new checks to the verification queue.
+- A manual answer produces the identical response shape an API answer would.
+- Credentials are never readable from the screen or the API.
+- A registry timing out reports as unhealthy rather than hanging the case.
+
+---
+
+## 3. The India adapter set for the nurse category
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/registries`
+
+### Scenarios to cover
+
+The adapters Phase 1 actually needs: the **nursing councils** for the nurse category, across the
+states in scope for the first client, each behind the certification interface, each in API mode or
+manual mode according to what that council actually offers.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Nursing council adapters | Implementations | Yes | One per council in scope, behind the certification interface |
+| 2 | Council reference data | Reference list | Yes | Which council governs which state |
+| 3 | Registration number format | Validation | Yes | Per council |
+| 4 | Manual-mode councils | Configuration | Yes | Councils with no API resolve to document plus reviewer |
+| 5 | Result mapping | Per adapter | Yes | The council's answer mapped to green / amber / red with a reason |
+
+### Flow
+
+1. A nurse credential names its council; the layer selects that council's adapter.
+2. The adapter checks the registration number and maps the result to the common response.
+3. Where the council has no API, the check becomes a manual task and returns on the same shape.
+
+### Scenarios to test
+
+- A valid registration returns green with the council named as the source.
+- An expired or lapsed registration returns red with a reason, not a silent pass.
+- A malformed registration number is rejected before dispatch.
+- A council in manual mode produces a comparable response through the queue.
+
+---
+
+## 4. The verification aggregator — Aadhaar and PAN
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/registries`
+
+### Scenarios to cover
+
+Identity checks reach several sources — Aadhaar via DigiLocker, PAN and the rest — through **one
+aggregator integration instead of five separate ones**. Phase 1 uses the identity checks the nurse
+chain needs.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Aggregator adapter | Implementation | Yes | Behind the identity interface |
+| 2 | Aadhaar check | Capability | Yes | Via DigiLocker |
+| 3 | PAN check | Capability | Yes | |
+| 4 | Response mapping | Per check | Yes | To green / amber / red with a reason |
+| 5 | Failure handling | Behaviour | Yes | A provider failure is amber with a reason, never a false green |
+
+### Flow
+
+1. The identity check dispatches to the aggregator with the consent reference.
+2. The aggregator's answer is mapped to the common response and recorded on the credential.
+3. A provider error returns amber with the error recorded, and the case stays open.
+
+### Scenarios to test
+
+- A successful Aadhaar check returns green and records the source and time.
+- A mismatch returns red with the mismatching field named.
+- A provider outage returns amber and leaves the case open, and never green.
+- One aggregator credential set serves every identity check.
+
+<Callout type="warn" title="Client dependency">
+Aggregator selection, contracting and credentials are an Apollo dependency with an external lead
+time. Until they exist every identity check runs in manual mode — which works, and does not scale.
+</Callout>
+
+---
+
+## 5. Consent verification and per-call cost logging
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/admin/registries`
+
+### Scenarios to cover
+
+**No check is dispatched without a recorded verification consent**, and every call records what it
+cost, because this layer is metered spend that grows with volume.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Consent check | Gate | Yes | Verified **before** dispatch, against data protection |
+| 2 | Adapter call record | Store | Yes | Adapter, candidate, check kind, outcome, latency, cost |
+| 3 | Cost per adapter | Configuration | Yes | Unit cost, so a call can be costed |
+| 4 | Usage view | Read-only | — | Calls and cost by adapter for a period |
+
+### Flow
+
+1. Every dispatch reads the consent record first and refuses without it.
+2. The call is recorded with its outcome, latency and cost.
+3. Usage is readable per adapter for a period.
+
+### Scenarios to test
+
+- A check with no consent is refused and recorded as refused, with no provider call made.
+- Every dispatched call produces exactly one call record with a cost.
+- Usage totals reconcile with the call records.
+- A withdrawn consent stops further dispatches for that candidate.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| The NMC and state medical councils, the allied health councils and the Pharmacy Council | [Phase 2 · Candidate record and credentials](/docs/release-plan/part-2/candidate-record-and-credentials) |
+| EPFO and court-record checks through the aggregator | [Phase 2 · Candidate record and credentials](/docs/release-plan/part-2/candidate-record-and-credentials) |
+| Credential expiry tracking across the whole base | [Phase 3 · Candidate record and credentials](/docs/release-plan/part-3/candidate-record-and-credentials) |

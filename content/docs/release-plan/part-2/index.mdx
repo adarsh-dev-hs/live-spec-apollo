@@ -1,0 +1,137 @@
+---
+title: "Phase 2 engineering spec"
+description: "Everything to be built for Phase 2 — shift staffing end to end, multi-channel intake, the client portal, notifications, engagement and verified checking — and nothing else."
+icon: Network
+---
+
+This document is meant for the engineering team, with complete clarity on what needs to be built for
+**Phase 2**. Every page in this section is focused **only** on Phase 2, and no additional information
+is provided. What was built in Phase 1 is specified in the
+[Phase 1 spec](/docs/release-plan/part-1) and is not repeated here.
+
+**Due: end of Quarter 2.** All remaining capability opened. Phase 1 finished one line of business.
+Phase 2 opens every other thread — a second line of business, every intake channel, every category,
+the client's own login, and the machinery that contacts candidates without a recruiter doing it by
+hand.
+
+## 1. What becomes available in Phase 2
+
+As the SOW states it.
+
+| Capability | What Phase 2 carries |
+|---|---|
+| **Contractual placement** | Shift attendance and shift billing, including geo-location tracking. |
+| **Client portal** | Client portal live. |
+| **Multi-channel intake** | Email, WhatsApp and the client portal. |
+| **Notifications** | Candidate, client and internal user. |
+| **Verification** | True verified, third party. |
+| **3rd party sourcing channel** | WhatsApp and phone calls, carrying the basic screening questions from Quarter 1. |
+
+## 2. The features in this phase
+
+Fifteen feature pages, each describing **Phase 2 only**.
+
+| # | Feature | Delivers in Phase 2 | Items |
+|---|---|---|---|
+| 1 | [Demand intake](/docs/release-plan/part-2/demand-intake) | `A1` | 7 |
+| 2 | [Requisitions and allocation](/docs/release-plan/part-2/requisitions-and-allocation) | `D2` `D14` thin | 3 |
+| 3 | [Clients and contracts](/docs/release-plan/part-2/clients-and-contracts) | `D1` `D13` | 3 |
+| 4 | [Candidate record and credentials](/docs/release-plan/part-2/candidate-record-and-credentials) | `D16` `A2` `A9` `A12` | 5 |
+| 5 | [Candidate app](/docs/release-plan/part-2/candidate-app) | `D3` | 4 |
+| 6 | [Notifications and alerts](/docs/release-plan/part-2/notifications-and-alerts) | `D10` `D29` | 6 |
+| 7 | [Engagement and availability](/docs/release-plan/part-2/engagement-and-availability) | `A3` `A4` `A5` `A14` | 6 |
+| 8 | [Matching and ranking](/docs/release-plan/part-2/matching-and-ranking) | `D5` `D18` | 3 |
+| 9 | [Selection and offers](/docs/release-plan/part-2/selection-and-offers) | `D6` `D20` | 2 |
+| 10 | [Client link surfaces](/docs/release-plan/part-2/client-link-surfaces) | `A13` | 2 |
+| 11 | [Placement and trial](/docs/release-plan/part-2/placement-and-trial) | `D7` `A6` | 2 |
+| 12 | [Attendance and timesheets](/docs/release-plan/part-2/attendance-and-timesheets) | `D22` thin | 7 |
+| 13 | [Billing and receivables](/docs/release-plan/part-2/billing-and-receivables) | `D8` `A7` `D25` thin | 3 |
+| 14 | [Client portal](/docs/release-plan/part-2/client-portal) | `D12` | 6 |
+| 15 | [Associate onboarding](/docs/release-plan/part-2/associate-onboarding) | `D21` | 2 |
+
+**Sixty-one numbered items in total.** Each item is one ClickUp card, one estimate and one set of
+test scenarios.
+
+## 3. The second chain Phase 2 has to complete
+
+The contractual line of business runs alongside the permanent one and behaves differently at every
+step.
+
+```
+contract carries shift rates and a deemed-approval window
+  → shift requisition and shift template  →  one demand line per shift
+  → candidates ranked against the shift line, Base B weights
+  → candidate accepts the shift in the app
+  → candidate checks in and out in the app, with a location stamp and geo-fencing
+  → attendance exceptions resolved  →  timesheet compiled and priced against the contract version
+  → timesheet sent to the client on a tokenised link  →  approved, or deemed approved on expiry
+  → shift invoice raised  →  receivable opened
+```
+
+**The app is the only route by which attendance reaches the platform.** No app, no attendance, no
+timesheet, no shift invoice. That single dependency sets the sequence for the whole of Phase 2 — the
+store submission started in Phase 1 is what protects it.
+
+## 4. Deliverables in Phase 2
+
+`D1` (partial) · `D2` (partial) · `D3` (partial) · `D5` (partial) · `D6` (partial) · `D7` (partial) ·
+`D8` (partial) · `D10` · `D12` · `D13` (partial) · `D14` (partial) · `D16` (partial) ·
+`D18` (partial) · `D20` (partial) · `D21` (partial) · `D22` (partial) · `D25` (partial) · `D29` ·
+`A1` (partial) · `A2` (partial) · `A3` · `A4` · `A5` · `A6` (partial) · `A7` (partial) ·
+`A9` (partial) · `A12` (partial) · `A13` (partial) · `A14` (partial)
+
+**Twenty-nine deliverable references.** `D10`, `D12`, `D29`, `A3`, `A4` and `A5` are delivered in
+full here and appear in no other part.
+
+## 5. Screens Phase 2 adds
+
+| Area | Screens |
+|---|---|
+| Intake | `/inbound` · `/inbound/unmatched` · `/inbound/manual-entry` · `/duplicates` · `/admin/channels` |
+| Engagement | `/engagement/review` · `/engagement/calls` · `/engagement/runs` · `/segments` · `/admin/cadence` |
+| Messaging | `/admin/templates` · `/messaging/delivery-log` |
+| Shift work | `/attendance` · `/timesheets` · `/timesheets/:id` |
+| Client portal | `/portal` · `/portal/requisitions` · `/portal/requisitions/new` · `/portal/shortlists` · `/portal/timesheets` · `/portal/invoices` |
+| Candidate app | `/app/shifts` · `/app/check-in` · `/app/availability` · `/app/onboarding` |
+| Onboarding | `/workforce/onboarding` |
+| Links | `/admin/link-types` |
+
+## 6. Deliberately absent from Phase 2
+
+Pointers only. **No Phase 3 detail appears anywhere in this section** — follow the link.
+
+| Absent from Phase 2 | Specified in |
+|---|---|
+| Intake by spreadsheet, client HRMS and WhatsApp voice note | [Phase 3 · Demand intake](/docs/release-plan/part-3/demand-intake) |
+| Reporting, MIS and rate variance | [Phase 3 · Analytics and reporting](/docs/release-plan/part-3/analytics-and-reporting) |
+| Payroll and payslips | [Phase 3 · Payroll](/docs/release-plan/part-3/payroll) |
+| Salary revisions, advances, holds, attendance upload | [Phase 3 · Workforce operations](/docs/release-plan/part-3/workforce-operations) |
+| Leave, overtime and internal timesheet approval routing | [Phase 3 · Timesheet extensions](/docs/release-plan/part-3/timesheet-extensions) |
+| Payments, TDS, ageing, dunning, credit and debit notes | [Phase 3 · Collections](/docs/release-plan/part-3/collections) |
+| The prioritisation engine, recruiter suggestion and requisition approval | [Phase 3 · Demand prioritisation and approval](/docs/release-plan/part-3/demand-prioritisation-and-approval) |
+| Outcome write-back into ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |
+| Migration off CPAL — the platform is not yet system of record | [Phase 3 · Legacy migration](/docs/release-plan/part-3/legacy-migration) |
+
+## 7. Phase 2 is done when
+
+1. A requisition arrives by email, by WhatsApp and through the portal, and the three produce records
+   differing only in source channel and raw payload.
+2. A candidate accepts a shift in the app, checks in inside the geo-fence, and the shift reaches a
+   timesheet.
+3. A client approves that timesheet on a link — or the window expires and it is deemed approved —
+   and a shift invoice is raised against the contract version in force.
+4. A client user signs in to the portal and sees only their own sites and requisitions.
+5. The cadence engine contacts Base B on its own schedule, over WhatsApp and voice, and an answer
+   arriving on either channel reconciles to one record.
+6. A credential is verified by a third party rather than by a person reading a document.
+7. Doctors, allied health and home healthcare are configuration, not code.
+
+## 8. Phase 2 dependencies that must be in place
+
+| Dependency | Gates |
+|---|---|
+| WhatsApp Business Platform — **for receiving**, with approved templates | [Demand intake](/docs/release-plan/part-2/demand-intake) items 1 and 3, [engagement](/docs/release-plan/part-2/engagement-and-availability) |
+| Outbound voice and transcription provider | [Engagement and availability](/docs/release-plan/part-2/engagement-and-availability) item 4 |
+| Background verification aggregator | [Candidate record](/docs/release-plan/part-2/candidate-record-and-credentials) item 1 |
+| Apple and Google store publication of the Phase 1 app | [Candidate app](/docs/release-plan/part-2/candidate-app) — and therefore all shift attendance and shift billing |
+| Notification template content from Apollo | [Notifications and alerts](/docs/release-plan/part-2/notifications-and-alerts) item 1 |

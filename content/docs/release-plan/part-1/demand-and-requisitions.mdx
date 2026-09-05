@@ -1,0 +1,267 @@
+---
+title: "Demand and requisitions"
+description: "Phase 1: a vacancy keyed into the console by a recruiter — the requisition record, its versions, its lifecycle, and the fulfilment board with aging."
+icon: ClipboardList
+---
+
+| | |
+|---|---|
+| **Phase** | Part 1 — Quarter 1 |
+| **Delivers in this phase** | `D2` (partial) |
+| **Engineering reference** | [Requisitions and allocation](/docs/engineering/build/modules#requisitions-and-allocation) |
+| **Screens** | `/requisitions` · `/requisitions/new` · `/requisitions/:id` · `/board` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 to 4 below.
+
+The requisition is the single structured record every module downstream quotes: matching ranks
+against it, selection decides against it, placement opens from it and billing traces back to it. It
+tracks a vacancy through its life — open, in fulfilment, paused, revised, partly filled, filled,
+closed — counts how long it has been open **excluding held days**, and names the recruiter who owns
+it. In Phase 1 there is exactly one way a requisition comes into being: **a person keys it into the
+console.**
+
+## Release in this phase
+
+1. Manual creation of demand from the console.
+2. The requisition record and its version history.
+3. The requisition lifecycle: hold, release, revise and close.
+4. The fulfilment board with aging.
+
+---
+
+## 1. Manual creation of demand from the console
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions` (Link 1 — the list and the entry point) · `/requisitions/new`
+(Link 2 — the creation form)
+
+### Scenarios to cover
+
+**Reaching the screen.** The user lands on the left menu item *Demands*. At the top right of
+`/requisitions` there is a **[NEW DEMAND]** button. On click, the user is taken to the new demand
+page.
+
+**Creating the demand.** The user fills the form for one client, one site, one candidate category
+and one service line, sets the owner from the Apollo internal user list, and saves. On save the
+requisition takes a reference, enters `open`, starts its aging clock and becomes visible on the
+fulfilment board.
+
+**Verbal capture.** A recruiter sitting in the hospital is told about a vacancy in person. That is
+the same form, marked as verbally captured, with the person who told them recorded — so a disputed
+requirement traces back to a source.
+
+**Incomplete demand.** A user who does not yet have every mandatory answer saves the requisition as
+`incomplete`. It is visible, it is theirs, and it cannot progress to matching until the mandatory set
+is answered.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Client | Reference | Yes | From the active client list |
+| 2 | Site (location) | Reference | Yes | Sites of the selected client |
+| 3 | Department | Reference | No | Departments of the selected site |
+| 4 | Service line | Single select | Yes | Phase 1: **permanent** |
+| 5 | Candidate category | Single select | Yes | Reference data. Phase 1: **nurse** |
+| 6 | Care setting | Single select | Yes | Defaulted from the site. Phase 1: **hospital** |
+| 7 | Role / designation | Reference | Yes | |
+| 8 | Specialty and acuity | Category attribute set | Yes where the set says so | Served by [candidate record](/docs/release-plan/part-1/candidate-record-and-credentials) item 3 |
+| 9 | Number of positions | Number | Yes | Minimum 1 |
+| 10 | Experience required | Range | Yes | Years, minimum and maximum |
+| 11 | Qualification required | Multi select | Yes | |
+| 12 | Shift / working pattern | Text | No | Descriptive in Phase 1 |
+| 13 | Salary or rate offered | Money range | Yes | Validated against the rate card baseline for information |
+| 14 | Target joining date | Date | Yes | |
+| 15 | Priority | Single select | Yes | A field the user sets; **no scoring engine in Phase 1** |
+| 16 | Requisition owner | Reference | Yes | From the Apollo internal user list |
+| 17 | Source | Single select | Yes | Console entry, or verbal capture |
+| 18 | Source detail | Text | Yes when verbal | Who at the client said it, and when |
+| 19 | Notes and attachments | Text and files | No | Through the shared file store |
+| 20 | Save as incomplete / Create | Buttons | — | Two exits from the form |
+
+### Flow
+
+1. The user opens `/requisitions` and clicks **[NEW DEMAND]** → `/requisitions/new`.
+2. Selecting the client filters the site list; selecting the site defaults the care setting and
+   filters departments.
+3. Selecting the candidate category renders that category's attribute set — the same definition the
+   candidate record and matching use, so the two sides cannot drift apart.
+4. The rate card baseline for the chosen role, skill and location is shown next to the salary field
+   for reference. It does not block a value outside it.
+5. **Create** validates the mandatory set. Complete → `open`. Incomplete → `incomplete`, owned and
+   visible, not matchable.
+6. On save: a reference is issued, version 1 is written, the aging clock starts, the creation event
+   is recorded and the audit entry is written.
+
+### Scenarios to test
+
+- **[NEW DEMAND]** is visible only to a user whose role carries the create permission.
+- A site from a different client cannot be selected.
+- Changing the candidate category re-renders the attribute set and clears attributes that do not
+  apply.
+- A missing mandatory field blocks `open` and permits `incomplete`, naming every field that is
+  missing.
+- Verbal capture without a source detail is refused.
+- A created requisition appears on `/requisitions` and on `/board` immediately, with an aging value
+  of zero days.
+- Creation writes one audit entry and one event.
+
+<Callout type="warn" title="Not in the signed scope for any part">
+Uploading a JD and having the form prefilled from it is **not** in the SOW for Phase 1, 2 or 3.
+Parsing arrives in Phase 2 for *inbound channels* only —
+[Phase 2 · Demand intake](/docs/release-plan/part-2/demand-intake). A console-side JD upload with AI
+prefill is a Change; raise it as one rather than building it inside this item.
+</Callout>
+
+---
+
+## 2. The requisition record and its version history
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id` · `/requisitions`
+
+### Scenarios to cover
+
+The record view every other module links to: the current requirement, who owns it, where it is in its
+life, its source evidence, and its full version history. **A revision is a versioning event, not an
+edit** — the requirement as it stood when a candidate was ranked against it must still be readable.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Header | Reference, client, site, status, aging | — | Aging excludes held days |
+| 2 | Current version | Read-only rendering | — | Every field from item 1 |
+| 3 | Version history | List | — | Version number, what changed, who, when |
+| 4 | Source evidence | Panel | — | Console entry or verbal capture with its detail |
+| 5 | Owner | Reference with change control | Yes | Change writes an append-only allocation record |
+| 6 | Status transitions | Append-only list | — | Every transition with actor, reason and timestamp |
+| 7 | Activity timeline | Shared component | — | From the audit trail |
+| 8 | Linked records | Panel | — | Ranked set, shortlist, interviews, offers, placement |
+| 9 | Requisition list | List screen | — | Shared list engine: filter, sort, page, saved views, export |
+
+### Flow
+
+1. Opening a requisition renders its current version plus its linked records.
+2. Changing the owner appends an allocation record; **it does not overwrite the previous owner**.
+3. The version history lets a reader open any earlier version as it stood.
+4. The linked-records panel is how a reader gets from the vacancy to the shortlist, the interview,
+   the offer and the placement.
+
+### Scenarios to test
+
+- An earlier version renders exactly as it was, including attributes later removed.
+- An owner change appends and never overwrites; the previous owner is still readable.
+- Status transitions cannot be edited or deleted.
+- The list screen's export matches the on-screen filter.
+- A user without permission on requisitions cannot reach the record by direct URL.
+
+---
+
+## 3. Lifecycle: hold, release, revise and close
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/requisitions/:id`
+
+### Scenarios to cover
+
+The four things that happen to a live vacancy, each with its own rule about the aging clock and its
+own mandatory reason. In Phase 1 the state machine runs:
+
+```
+incomplete → open → in_fulfilment → partially_filled → filled
+                        ▲    │
+                        │    └─▶ on_hold   (the aging clock stops)
+                        └────── release    (aging resumes from held)
+
+   revise at any point creates a new version
+   any state → closed, with a mandatory reason from the configured list
+```
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Hold | Action | — | Reason from the configured list; **stops the aging clock** |
+| 2 | Release | Action | — | Aging resumes from where it was held, not from zero |
+| 3 | Revise | Action | — | Opens the form, saves a **new version**, re-renders downstream |
+| 4 | Close | Action | — | Mandatory reason from the configured list; terminal |
+| 5 | Position counter | Derived | — | Positions filled against positions requested |
+| 6 | Reason lists | Reference data | Yes | Hold, close and drop-out reasons from `/admin/settings` |
+
+### Flow
+
+1. Hold records the reason and stops the aging clock.
+2. Release resumes aging from the held value; **held days never count**.
+3. Revise creates a new version; existing shortlists and rankings stay attached to the version they
+   were produced against, and the requisition is flagged as having moved on.
+4. A placement filling one position moves the requisition to `partially_filled`, and the last one
+   moves it to `filled`.
+5. Close is terminal and requires a reason; a closed requisition cannot be worked but is fully
+   readable.
+
+### Scenarios to test
+
+- Aging over a hold of five days is five days lower than the elapsed calendar time.
+- A revision produces a new version and leaves the earlier ranked set pointing at the old one.
+- Close without a reason is refused.
+- A closed requisition cannot accept a new shortlist, interview or offer.
+- Filling the last position moves the status to `filled` without a manual step.
+- Every transition writes an append-only status transition and an event.
+
+---
+
+## 4. The fulfilment board with aging
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/board`
+
+### Scenarios to cover
+
+One view of live demand: what is open, how long it has been open, how much of it is filled, and who
+owns it. This is the screen the daily morning call runs against.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Column layout | By status | — | Open, in fulfilment, partially filled, on hold |
+| 2 | Card | Component | — | Client, site, role, positions, aging, owner |
+| 3 | Aging indicator | Derived | — | Days open **excluding held days**, banded |
+| 4 | Fill progress | Derived | — | Filled against requested |
+| 5 | Filters | Shared list engine | — | Client, site, category, owner, priority |
+| 6 | Drill-through | Link | — | To `/requisitions/:id` |
+
+### Flow
+
+1. The board reads live requisitions and groups them by status.
+2. Aging is computed from the status transitions, subtracting held periods.
+3. A filter narrows the board; the filter survives a move to another module and back.
+4. A card opens the requisition record.
+
+### Scenarios to test
+
+- A requisition on hold shows in the hold column with its clock stopped.
+- Aging on the board equals aging on the record, for the same requisition, always.
+- The board reflects a status change without a manual refresh cycle longer than the agreed interval.
+- Filters persist across a module switch.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 1 | Specified in |
+|---|---|
+| Demand arriving by email, WhatsApp, portal, spreadsheet or client HRMS | [Phase 2 · Demand intake](/docs/release-plan/part-2/demand-intake) |
+| Shift templates and the shift demand lines they generate | [Phase 2 · Requisitions and allocation](/docs/release-plan/part-2/requisitions-and-allocation) |
+| Recording the recruiter allocation made on the daily morning call (`D14` thin) | [Phase 2 · Requisitions and allocation](/docs/release-plan/part-2/requisitions-and-allocation) |
+| Priority scoring, suggested recruiter and the approval state before a vacancy goes live | [Phase 3 · Demand prioritisation and approval](/docs/release-plan/part-3/demand-prioritisation-and-approval) |

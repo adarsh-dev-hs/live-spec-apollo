@@ -1,0 +1,111 @@
+---
+title: "Selection and offers"
+description: "Phase 2: offer templates by state, role and skill, and interview reschedule and cancellation handling at width."
+icon: Handshake
+---
+
+| | |
+|---|---|
+| **Phase** | Part 2 — Quarter 2 |
+| **Delivers in this phase** | `D6` (partial) · `D20` (partial) |
+| **Engineering reference** | [Selection and offers](/docs/engineering/build/modules#selection-and-offers) |
+| **Screens** | `/interviews` · `/offers` |
+| **ClickUp epic** | *link to be added* |
+
+## Purpose
+
+> Introduction to the feature. **This is not the scope** — the scope is items 1 and 2 below.
+
+Phase 1 proved the path with one offer template and a straight interview flow. Phase 2 widens both to
+the shape the business actually has: offers that differ by **state, role and skill** because
+employment terms differ by state, and an interview process that survives the ordinary reality of
+people moving and cancelling.
+
+## Release in this phase
+
+1. Offer templates by state, role and skill.
+2. Reschedule and cancellation handling.
+
+---
+
+## 1. Offer templates by state, role and skill
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/offers` · `/admin/templates`
+
+### Scenarios to cover
+
+The right template is selected automatically from the placement's state, the role and the skill, so a
+recruiter does not choose from a list of near-identical documents and pick the wrong one.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Template | Record | Yes | State, role, skill, category, version |
+| 2 | Selection rule | Behaviour | Yes | Most specific match wins; no silent fallback |
+| 3 | Clause variation | Content | Yes | State-specific statutory clauses |
+| 4 | Variable resolution | Behaviour | Yes | From candidate, requisition, client, contract |
+| 5 | Preview | Action | Yes | Before issue, as in Phase 1 |
+| 6 | No-match handling | Behaviour | Yes | Refuses to issue rather than using a default |
+
+### Flow
+
+1. Templates are configured against state, role and skill combinations.
+2. Offer creation resolves the template from the placement's attributes.
+3. Where nothing matches, issue is blocked with a clear message.
+
+### Scenarios to test
+
+- The most specific template wins over a general one.
+- No match blocks issue rather than silently using a generic document.
+- A state-specific clause appears only in that state's offers.
+- An issued offer retains its template version.
+
+---
+
+## 2. Reschedule and cancellation handling
+
+**ClickUp item** — *link to be added*
+
+**Screens** — `/interviews`
+
+### Scenarios to cover
+
+Interviews move. A reschedule keeps the interview and its history rather than creating a new one; a
+cancellation records a reason and returns the candidate to where they were, and both sides are told.
+
+### Elements
+
+| # | Element | Type | Mandatory | Notes |
+|---|---|---|---|---|
+| 1 | Reschedule | Action | — | New slots proposed, history retained |
+| 2 | Reschedule reason | Reference | Yes | Who caused it: candidate, client, Apollo |
+| 3 | Cancellation | Action | — | With a reason, at either party's request |
+| 4 | Notifications | Triggers | Yes | Both parties told, through Phase 2 notifications |
+| 5 | Reschedule count | Derived | — | Visible, for the pipeline to be worked |
+
+### Flow
+
+1. A reschedule proposes new slots on the same interview record.
+2. Both sides are notified; the confirmed slot updates.
+3. A cancellation records its reason and returns the candidate to the shortlist.
+
+### Scenarios to test
+
+- A reschedule keeps one interview record with its full history.
+- Both parties are notified once per change, not once per slot.
+- A cancelled interview returns the candidate to the shortlist without losing feedback already given.
+- Reschedule reasons are reportable later, because they are structured.
+
+---
+
+## Not in this phase
+
+Pointers only.
+
+| Not in Phase 2 | Specified in |
+|---|---|
+| Digital signature on the offer | [Phase 3 · Selection and offers](/docs/release-plan/part-3/selection-and-offers) |
+| Rejection outcomes feeding ranking | [Phase 3 · Matching and ranking](/docs/release-plan/part-3/matching-and-ranking) |
